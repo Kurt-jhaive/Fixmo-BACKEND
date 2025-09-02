@@ -95,15 +95,33 @@ app.get('/docs', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'api-landing.html'));
 });
 
+// Authentication Helper Page
+app.get('/auth-helper', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'auth-helper.html'));
+});
+
 // Swagger API Documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
   explorer: true,
-  customCss: '.swagger-ui .topbar { display: none }',
+  customCss: `
+    .swagger-ui .topbar { display: none }
+    .swagger-ui .info { margin-bottom: 20px; }
+    .swagger-ui .scheme-container { 
+      background: #f7f7f7; 
+      padding: 15px; 
+      margin: 20px 0; 
+      border-radius: 5px; 
+      border-left: 4px solid #007bff;
+    }
+  `,
   customSiteTitle: 'Fixmo Backend API Documentation',
   swaggerOptions: {
     docExpansion: 'list',
     filter: true,
-    showRequestDuration: true
+    showRequestDuration: true,
+    persistAuthorization: true,
+    displayOperationId: false,
+    displayRequestDuration: true
   }
 }));
 

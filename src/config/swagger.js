@@ -7,7 +7,37 @@ const options = {
     info: {
       title: 'Fixmo Backend API',
       version: '1.0.0',
-      description: 'A comprehensive service management platform that connects customers with service providers',
+      description: `
+        A comprehensive service management platform that connects customers with service providers
+        
+        ## Authentication Guide
+        
+        **🔐 How to use JWT Authentication:**
+        
+        1. **Get a JWT Token:**
+           - For customers: Use \`POST /auth/login\` with email and password
+           - For providers: Use \`POST /auth/provider-login\` with provider_email and provider_password
+           
+        2. **Authorize in Swagger:**
+           - Click the **"Authorize"** button (🔒) at the top right
+           - Enter your JWT token in the format: \`your-jwt-token-here\`
+           - Do NOT include "Bearer " prefix - Swagger adds it automatically
+           
+        3. **Use Protected Endpoints:**
+           - After authorization, you can access endpoints that require authentication
+           - Look for the 🔒 icon next to endpoints that need authentication
+           
+        ## Endpoint Categories
+        
+        - **🟢 Public Endpoints**: No authentication required (login, registration, public ratings)
+        - **🔒 Protected Endpoints**: Require JWT token (certificates, appointments, service management)
+        
+        ## Testing Flow
+        
+        1. Register or login to get a JWT token
+        2. Click "Authorize" and paste your token
+        3. Test protected endpoints like certificate upload
+      `,
       contact: {
         name: 'Fixmo API Support',
         email: 'support@fixmo.com'
@@ -33,7 +63,7 @@ const options = {
           type: 'http',
           scheme: 'bearer',
           bearerFormat: 'JWT',
-          description: 'JWT token for authentication'
+          description: 'Enter JWT token obtained from login endpoint (e.g., from /auth/login or /auth/provider-login)'
         }
       },
       schemas: {

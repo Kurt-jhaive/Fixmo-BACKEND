@@ -51,6 +51,8 @@
  *     tags: [Certificates]
  *     summary: Upload certificate
  *     description: Upload a new certificate for provider verification
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -60,7 +62,6 @@
  *             required:
  *               - certificate_name
  *               - certificate_number
- *               - provider_id
  *               - certificateFile
  *             properties:
  *               certificate_name:
@@ -71,10 +72,6 @@
  *                 type: string
  *                 example: "PL123456789"
  *                 description: Unique certificate number
- *               provider_id:
- *                 type: integer
- *                 example: 456
- *                 description: Provider ID
  *               expiry_date:
  *                 type: string
  *                 format: date
@@ -131,6 +128,8 @@
  *     tags: [Certificates]
  *     summary: Get certificate by ID
  *     description: Get a specific certificate by its ID
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: certificateId
@@ -161,6 +160,8 @@
  *     tags: [Certificates]
  *     summary: Delete certificate
  *     description: Delete a certificate (removes file and database record)
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: certificateId
