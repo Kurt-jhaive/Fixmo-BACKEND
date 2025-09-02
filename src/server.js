@@ -3,21 +3,21 @@ import express from 'express';
 import session from 'express-session';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import prisma from './prismaclient.js'; // Use .js extension for ESM
-import authCustomerRoutes from './route/authCustomer.js'; // Use .js extension for ESM
-import serviceProviderRoutes from './route/serviceProvider.js'; // Use .js extension for ESM
-import testRoutes from './route/testRoutes.js'; // Test routes
-import serviceRoutes from './route/serviceRoutes.js'; // New service management routes
-import certificateRoutes from './route/certificateRoutes.js'; // New certificate management routes
-import availabilityRoutes from './route/availabilityRoutes.js'; // New availability management routes
-import appointmentRoutes from './route/appointmentRoutes.js'; // New appointment management routes
-import adminRoutes from './route/adminRoutes.js'; // Comprehensive admin routes
-
+import prisma from './prismaclient.js';
+import authCustomerRoutes from './route/authCustomer.js';
+import serviceProviderRoutes from './route/serviceProvider.js';
+import serviceRoutes from './route/serviceRoutes.js';
+import certificateRoutes from './route/certificateRoutes.js';
+import availabilityRoutes from './route/availabilityRoutes.js';
+import appointmentRoutes from './route/appointmentRoutes.js';
+import adminRoutes from './route/adminRoutes.js';
+import ratingRoutes from './route/ratingRoutes.js';
 import cors from 'cors';
+import { specs, swaggerUi } from './config/swagger.js';
+
 
 const port = process.env.PORT || 3000;
 const app = express();
-
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -52,61 +52,32 @@ app.use(session({
 
 
 
-// Example: Serve an index.html file
+
+
+
+
+// Health check endpoint
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'marketplace.html'));
+  res.json({
+    message: 'Fixmo Backend API is running',
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0',
+    documentation: {
+      swagger: `${req.protocol}://${req.get('host')}/api-docs`,
+      description: 'Interactive API documentation with Swagger UI'
+    },
+    endpoints: {
+      health: '/',
+      docs: '/docs',
+      documentation: '/api-docs',
+      admin: '/admin',
+      uploads: '/uploads/*'
+    }
+  });
 });
 
-// Additional routes for different pages
-app.get('/booking', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'booking_system_test.html'));
-});
-
-app.get('/marketplace', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'marketplace.html'));
-});
-
-app.get('/manage-listings', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'service_listings_manager.html'));
-});
-
-app.get('/login', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'serviceproviderlogin.html'));
-});
-
-app.get('/fixmo-login', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'fixmo_login.html'));
-});
-
-app.get('/fixmo-register', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'fixmo_register.html'));
-});
-
-app.get('/fixmo-provider-register', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'fixmo_provider_register.html'));
-});
-
-app.get('/fixmo-forgot-password', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'fixmo_forgot_password.html'));
-});
-
-app.get('/location-test', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'location-test.html'));
-});
-
-app.get('/availability', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'availability_test.html'));
-});
-
-app.get('/customer-dashboard', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'customer-dashboard.html'));
-});
-
-app.get('/provider-dashboard', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'provider-dashboard.html'));
-});
-
-// Admin Routes
+// Admin Web Interface Routes (Keep for admin dashboard)
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin-access.html'));
 });
@@ -119,19 +90,69 @@ app.get('/admin-dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin-dashboard.html'));
 });
 
+// API Landing Page
+app.get('/docs', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'api-landing.html'));
+});
 
+// Swagger API Documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
+  explorer: true,
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'Fixmo Backend API Documentation',
+  swaggerOptions: {
+    docExpansion: 'list',
+    filter: true,
+    showRequestDuration: true
+  }
+}));
 
-app.use('/auth', testRoutes); // Test routes
-app.use('/auth', authCustomerRoutes); // Mount customer routes first
-app.use('/auth', serviceProviderRoutes); // Mount service provider routes 
-app.use('/api/admin', adminRoutes); // Mount comprehensive admin routes
-app.use('/api/serviceProvider', serviceProviderRoutes); // Mount service provider routes for API access
-app.use('/api/services', serviceRoutes); // Mount service management routes
-app.use('/api/certificates', certificateRoutes); // Mount certificate management routes
-app.use('/api/availability', availabilityRoutes); // Mount availability management routes
-app.use('/api/appointments', appointmentRoutes); // Mount appointment management routes
+app.get("/api-docs.json", (req,res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(specs);
+});
 
+// API Routes for React Native
+app.use('/auth', authCustomerRoutes); // Customer authentication routes
+app.use('/auth', serviceProviderRoutes); // Service provider authentication routes 
+app.use('/api/admin', adminRoutes); // Admin management routes
+app.use('/api/serviceProvider', serviceProviderRoutes); // Service provider API routes
+app.use('/api/services', serviceRoutes); // Service management routes
+app.use('/api/certificates', certificateRoutes); // Certificate management routes
+app.use('/api/availability', availabilityRoutes); // Availability management routes
+app.use('/api/appointments', appointmentRoutes); // Appointment management routes
+app.use('/api/ratings', ratingRoutes); // Rating management routes
+
+// 404 handler for undefined routes (without wildcard)
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Route not found',
+    message: 'The requested endpoint does not exist',
+    availableRoutes: [
+      '/auth/*',
+      '/api/admin/*',
+      '/api/serviceProvider/*',
+      '/api/services/*',
+      '/api/certificates/*',
+      '/api/availability/*',
+      '/api/appointments/*',
+      '/api/ratings/*',
+      '/uploads/*'
+    ]
+  });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Global error handler:', err);
+  res.status(500).json({
+    error: 'Internal server error',
+    message: 'Something went wrong on our end'
+  });
+});
 
 app.listen(port, '0.0.0.0', () => {
-  console.log(`Server is running on http://0.0.0.0:${port}`);
+  console.log(`🚀 Fixmo Backend API Server is running on http://0.0.0.0:${port}`);
+  console.log(`📱 Ready for React Native connections`);
+  console.log(`🗄️ Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
 });

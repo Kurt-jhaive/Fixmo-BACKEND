@@ -8,6 +8,30 @@ import { checkOTPRateLimit, recordOTPAttempt } from '../services/rateLimitUtils.
 
 const prisma = new PrismaClient();
 
+/**
+ * @swagger
+ * components:
+ *   examples:
+ *     CustomerLoginRequest:
+ *       summary: Customer login request
+ *       value:
+ *         email: "customer@example.com"
+ *         password: "password123"
+ *     CustomerLoginResponse:
+ *       summary: Successful customer login
+ *       value:
+ *         message: "Login successful"
+ *         token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *         userId: 123
+ *         userName: "johndoe"
+ */
+
+/**
+ * Customer login controller
+ * Authenticates customer credentials and returns JWT token
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
 export const login = async (req, res) => {
     const { email, password } = req.body;
     

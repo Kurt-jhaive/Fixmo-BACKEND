@@ -142,6 +142,42 @@ const testUploadDirectory = () => {
 // Run test on module load
 testUploadDirectory();
 
+// Rating photo storage configuration
+const ratingPhotoStorage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        const uploadPath = path.join(__dirname, '../../uploads/rating-photos/');
+        // Ensure directory exists
+        if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true });
+        }
+        cb(null, uploadPath);
+    },
+    filename: function (req, file, cb) {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const ext = path.extname(file.originalname).toLowerCase();
+        const filename = 'rating_' + uniqueSuffix + (ext || '.jpg');
+        cb(null, filename);
+    }
+});
+
+// Rating photo file filter
+const ratingPhotoFilter = (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+        cb(null, true);
+    } else {
+        cb(new Error('Only image files are allowed for rating photos!'), false);
+    }
+};
+
+// Multer upload configuration for rating photos
+const uploadRatingPhoto = multer({
+    storage: ratingPhotoStorage,
+    fileFilter: ratingPhotoFilter,
+    limits: {
+        fileSize: 3 * 1024 * 1024 // 3MB limit for rating photos
+    }
+});
+
 const upload = multer({ dest: 'uploads/' }); // existing upload configuration
 
-export { upload, uploadServiceImage, uploadServiceImageSimple, processServiceImage };
+export { upload, uploadServiceImage, uploadServiceImageSimple, processServiceImage, uploadRatingPhoto };

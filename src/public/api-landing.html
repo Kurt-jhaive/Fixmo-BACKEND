@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fixmo Backend API</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            text-align: center;
+            max-width: 600px;
+            width: 90%;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 1rem;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+        }
+        .api-links {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+        .api-link {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 1.5rem;
+            text-decoration: none;
+            color: #333;
+            transition: all 0.3s ease;
+            display: block;
+        }
+        .api-link:hover {
+            border-color: #667eea;
+            background: #667eea;
+            color: white;
+            transform: translateY(-2px);
+        }
+        .api-link h3 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.2rem;
+        }
+        .api-link p {
+            margin: 0;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+        .status {
+            background: #d4edda;
+            color: #155724;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 2rem;
+            border-left: 4px solid #28a745;
+        }
+        .feature-list {
+            text-align: left;
+            margin: 2rem 0;
+        }
+        .feature-list ul {
+            list-style: none;
+            padding: 0;
+        }
+        .feature-list li {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #eee;
+        }
+        .feature-list li:before {
+            content: "✓";
+            color: #28a745;
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Fixmo Backend API</h1>
+        <p class="subtitle">Service Management Platform API</p>
+        
+        <div class="status">
+            <strong>✅ Server Status:</strong> Running on http://localhost:3000
+        </div>
+
+        <div class="api-links">
+            <a href="/api-docs" class="api-link">
+                <h3>📚 API Documentation</h3>
+                <p>Interactive Swagger UI with all endpoints, schemas, and testing capabilities</p>
+            </a>
+            
+            <a href="/" class="api-link">
+                <h3>💓 Health Check</h3>
+                <p>Server status and available endpoints information</p>
+            </a>
+            
+            <a href="/admin" class="api-link">
+                <h3>👨‍💼 Admin Panel</h3>
+                <p>Administrative interface for managing users and providers</p>
+            </a>
+        </div>
+
+        <div class="feature-list">
+            <h3>🚀 API Features</h3>
+            <ul>
+                <li>Customer & Provider Authentication with JWT</li>
+                <li>Service Management & Booking System</li>
+                <li>Advanced Appointment Management</li>
+                <li>Rating & Review System with Photo Upload</li>
+                <li>Certificate Management & Verification</li>
+                <li>Provider Availability Management</li>
+                <li>File Upload Support (Images, Documents)</li>
+                <li>Rate Limiting & Security Features</li>
+                <li>Comprehensive Error Handling</li>
+                <li>Interactive API Documentation</li>
+            </ul>
+        </div>
+
+        <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #eee;">
+            <h3>🧪 Quick Test Endpoints</h3>
+            <div style="text-align: left; background: #f8f9fa; padding: 1rem; border-radius: 5px; font-family: monospace; font-size: 0.9rem;">
+                <div><strong>GET</strong> <a href="/" target="_blank">/ (Health Check)</a></div>
+                <div><strong>GET</strong> <a href="/api-docs" target="_blank">/api-docs (Documentation)</a></div>
+                <div><strong>GET</strong> /auth/service-categories</div>
+                <div><strong>POST</strong> /auth/login</div>
+                <div><strong>GET</strong> /api/appointments</div>
+                <div><strong>GET</strong> /api/ratings/provider/{id}</div>
+            </div>
+        </div>
+
+        <div style="margin-top: 2rem; font-size: 0.8rem; color: #666;">
+            <p>Built with Node.js, Express, Prisma, and PostgreSQL</p>
+            <p>Documentation powered by Swagger UI</p>
+        </div>
+    </div>
+
+    <script>
+        // Auto-refresh status every 30 seconds
+        setInterval(() => {
+            fetch('/')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Server status:', data.status);
+                })
+                .catch(error => {
+                    console.log('Server may be down:', error);
+                });
+        }, 30000);
+    </script>
+</body>
+</html>

@@ -137,6 +137,7 @@ model Rating {
   id              Int                    @id @default(autoincrement())
   rating_value    Int
   rating_comment  String?
+  rating_photo    String?                // New field for review photo
   appointment_id  Int
   user_id         Int
   provider_id     Int
