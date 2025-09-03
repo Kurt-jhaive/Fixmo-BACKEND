@@ -228,6 +228,10 @@ const options = {
         description: 'Rating and review system'
       },
       {
+        name: 'Provider Ratings',
+        description: 'Provider rating customers and related endpoints'
+      },
+      {
         name: 'Certificates',
         description: 'Certificate management for providers'
       },

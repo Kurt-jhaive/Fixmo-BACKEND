@@ -1,8 +1,12 @@
 import express from 'express';
 import { 
     createRating, 
+    createProviderRatingForCustomer,
     getProviderRatings, 
     getCustomerRatings, 
+    getProviderRateableAppointments,
+    getProviderGivenRatings,
+    getCustomerReceivedRatings,
     updateRating, 
     deleteRating, 
     getRateableAppointments 
@@ -42,6 +46,25 @@ router.get('/customer/:customerId', requireAuth('customer'), getCustomerRatings)
 
 // GET /api/ratings/provider/:providerId - Get all ratings for a provider
 router.get('/provider/:providerId', getProviderRatings);
+
+// Provider Rating Customer Routes (For providers to rate customers)
+
+// GET /api/ratings/provider/rateable-appointments - Get appointments that provider can rate (customers)
+router.get('/provider/rateable-appointments', requireAuth('provider'), getProviderRateableAppointments);
+
+// POST /api/ratings/provider/rate-customer - Create a new rating (Provider rates customer)
+// Supports optional photo upload for review proof
+router.post('/provider/rate-customer', 
+    requireAuth('provider'), 
+    uploadRatingPhoto.single('rating_photo'), 
+    createProviderRatingForCustomer
+);
+
+// GET /api/ratings/provider/given-ratings - Get all ratings given by provider (to customers)
+router.get('/provider/given-ratings', requireAuth('provider'), getProviderGivenRatings);
+
+// GET /api/ratings/customer/:customerId/received-ratings - Get all ratings received by customer (from providers)
+router.get('/customer/:customerId/received-ratings', getCustomerReceivedRatings);
 
 // Test Routes (For development and React Native testing)
 

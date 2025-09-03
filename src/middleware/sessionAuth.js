@@ -62,8 +62,8 @@ export const requireCustomerSession = async (req, res, next) => {
         }
 
         // Verify the session data is still valid
-        const customer = await prisma.customerDetails.findUnique({
-            where: { customer_id: req.session.customer.id }
+        const customer = await prisma.user.findUnique({
+            where: { user_id: req.session.customer.id }
         });
 
         if (!customer) {
@@ -78,11 +78,11 @@ export const requireCustomerSession = async (req, res, next) => {
 
         // Attach customer data to request
         req.user = {
-            id: customer.customer_id,
-            email: customer.customer_email,
+            id: customer.user_id,
+            email: customer.email,
             userType: 'customer'
         };
-        req.userId = customer.customer_id;
+        req.userId = customer.user_id;
         req.userType = 'customer';
 
         next();
@@ -135,11 +135,11 @@ export const requireAuth = (userType = null) => {
                         authenticated = true;
                     }
                 } else if (userType === 'customer' && req.session.customer) {
-                    const customer = await prisma.customerDetails.findUnique({
-                        where: { customer_id: req.session.customer.id }
+                    const customer = await prisma.user.findUnique({
+                        where: { user_id: req.session.customer.id }
                     });
                     if (customer) {
-                        req.userId = customer.customer_id;
+                        req.userId = customer.user_id;
                         req.userType = 'customer';
                         authenticated = true;
                     }
@@ -155,11 +155,11 @@ export const requireAuth = (userType = null) => {
                             authenticated = true;
                         }
                     } else if (req.session.customer) {
-                        const customer = await prisma.customerDetails.findUnique({
-                            where: { customer_id: req.session.customer.id }
+                        const customer = await prisma.user.findUnique({
+                            where: { user_id: req.session.customer.id }
                         });
                         if (customer) {
-                            req.userId = customer.customer_id;
+                            req.userId = customer.user_id;
                             req.userType = 'customer';
                             authenticated = true;
                         }

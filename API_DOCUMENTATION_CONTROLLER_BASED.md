@@ -668,9 +668,203 @@ The Fixmo Backend API is a comprehensive service management platform that connec
 
 ---
 
+## Provider Rating Customer Endpoints (NEW)
+
+#### 29. Get Provider Rateable Appointments
+- **Endpoint:** `GET /api/ratings/provider/rateable-appointments`
+- **Headers:** `Authorization: Bearer <token>` (Provider auth required)
+- **Description:** Get appointments that provider can rate (finished appointments not yet rated)
+- **Success Response (200):**
+```javascript
+{
+  success: true,
+  message: "Appointments that can be rated by provider",
+  data: [
+    {
+      appointment_id: number,
+      customer_id: number,
+      scheduled_date: string,
+      appointment_status: "finished",
+      customer: {
+        user_id: number,
+        first_name: string,
+        last_name: string,
+        profile_photo: string?
+      },
+      service: {
+        service_id: number,
+        service_title: string,
+        service_description: string
+      }
+    }
+  ]
+}
+```
+
+#### 30. Create Provider Rating for Customer
+- **Endpoint:** `POST /api/ratings/provider/rate-customer`
+- **Headers:** `Authorization: Bearer <token>` (Provider auth required)
+- **Content-Type:** `multipart/form-data`
+- **Body:**
+```javascript
+{
+  appointment_id: number,          // Required
+  customer_id: number,             // Required
+  rating_value: number,            // Required - 1-5 stars (validated)
+  rating_comment?: string,
+  rating_photo?: File              // Image file for review proof
+}
+```
+- **Validation:**
+  - Rating value must be 1-5
+  - Appointment must exist, be finished, and belong to provider
+  - Provider cannot rate same customer for same appointment twice
+  - Only finished appointments can be rated (settled but not completed with warranty)
+- **Success Response (201):**
+```javascript
+{
+  success: true,
+  message: "Customer rating created successfully",
+  data: {
+    id: number,
+    rating_value: number,
+    rating_comment: string?,
+    rating_photo: string?,
+    appointment_id: number,
+    user_id: number,
+    provider_id: number,
+    rated_by: "provider",
+    created_at: string,
+    user: {
+      user_id: number,
+      first_name: string,
+      last_name: string,
+      profile_photo: string?
+    },
+    serviceProvider: {
+      provider_id: number,
+      provider_first_name: string,
+      provider_last_name: string
+    },
+    appointment: {
+      appointment_id: number,
+      scheduled_date: string,
+      service: {
+        service_title: string
+      }
+    }
+  }
+}
+```
+
+#### 31. Get Provider Given Ratings
+- **Endpoint:** `GET /api/ratings/provider/given-ratings`
+- **Headers:** `Authorization: Bearer <token>` (Provider auth required)
+- **Query Parameters:** 
+  - `page` (number, optional) - Default: 1
+  - `limit` (number, optional) - Default: 10
+- **Description:** Get all ratings given by the provider to customers
+- **Success Response (200):**
+```javascript
+{
+  success: true,
+  data: {
+    ratings: [
+      {
+        id: number,
+        rating_value: number,
+        rating_comment: string?,
+        rating_photo: string?,
+        rated_by: "provider",
+        created_at: string,
+        user: {
+          user_id: number,
+          first_name: string,
+          last_name: string,
+          profile_photo: string?
+        },
+        appointment: {
+          appointment_id: number,
+          scheduled_date: string,
+          service: {
+            service_title: string
+          }
+        }
+      }
+    ],
+    pagination: {
+      current_page: number,
+      total_pages: number,
+      total_ratings: number,
+      has_next: boolean,
+      has_prev: boolean
+    }
+  }
+}
+```
+
+#### 32. Get Customer Received Ratings
+- **Endpoint:** `GET /api/ratings/customer/:customerId/received-ratings`
+- **Parameters:** `customerId` (number)
+- **Query Parameters:** 
+  - `page` (number, optional) - Default: 1
+  - `limit` (number, optional) - Default: 10
+- **Description:** Public endpoint to view ratings received by customer from providers
+- **Success Response (200):**
+```javascript
+{
+  success: true,
+  data: {
+    ratings: [
+      {
+        id: number,
+        rating_value: number,
+        rating_comment: string?,
+        rating_photo: string?,
+        rated_by: "provider",
+        created_at: string,
+        serviceProvider: {
+          provider_id: number,
+          provider_first_name: string,
+          provider_last_name: string,
+          provider_profile_photo: string?
+        },
+        appointment: {
+          appointment_id: number,
+          scheduled_date: string,
+          service: {
+            service_title: string
+          }
+        }
+      }
+    ],
+    pagination: {
+      current_page: number,
+      total_pages: number,
+      total_ratings: number,
+      has_next: boolean,
+      has_prev: boolean
+    },
+    statistics: {
+      average_rating: number,
+      total_ratings: number,
+      rating_distribution: [
+        { star: 1, count: number },
+        { star: 2, count: number },
+        { star: 3, count: number },
+        { star: 4, count: number },
+        { star: 5, count: number }
+      ]
+    }
+  }
+}
+```
+
+---
+
 ## Appointment Rating Endpoints (Alternative Implementation)
 
-#### 29. Submit Rating for Appointment
+#### 33. Submit Rating for Appointment
 - **Endpoint:** `POST /api/appointments/:appointmentId/ratings`
 - **Headers:** `Authorization: Bearer <token>`
 - **Parameters:** `appointmentId` (number)
@@ -687,7 +881,7 @@ The Fixmo Backend API is a comprehensive service management platform that connec
   - Rating value between 1-5
   - Cannot rate same appointment twice with same rater_type
 
-#### 30. Get Appointment Ratings
+#### 34. Get Appointment Ratings
 - **Endpoint:** `GET /api/appointments/:appointmentId/ratings`
 - **Headers:** `Authorization: Bearer <token>`
 - **Parameters:** `appointmentId` (number)
