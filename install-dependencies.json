@@ -1,0 +1,5 @@
+{
+  "name": "install-messaging-dependencies",
+  "script": "npm install socket.io",
+  "description": "Install Socket.IO for WebSocket messaging functionality"
+}

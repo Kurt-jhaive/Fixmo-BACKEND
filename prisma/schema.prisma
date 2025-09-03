@@ -8,23 +8,24 @@ datasource db {
 }
 
 model User {
-  user_id           Int           @id @default(autoincrement())
+  user_id           Int            @id @default(autoincrement())
   first_name        String
   last_name         String
-  email             String        @unique
-  phone_number      String        @unique
+  email             String         @unique
+  phone_number      String         @unique
   profile_photo     String?
   valid_id          String?
   user_location     String?
-  created_at        DateTime      @default(now())
-  is_verified       Boolean       @default(false)
+  created_at        DateTime       @default(now())
+  is_verified       Boolean        @default(false)
   password          String
-  userName          String        @unique
-  is_activated      Boolean       @default(true)
+  userName          String         @unique
+  is_activated      Boolean        @default(true)
   birthday          DateTime?
   exact_location    String?
   user_appointments Appointment[]
   user_rating       Rating[]
+  conversations     Conversation[]
 }
 
 model ServiceProviderDetails {
@@ -50,6 +51,7 @@ model ServiceProviderDetails {
   provider_certificates   Certificate[]
   provider_ratings        Rating[]
   provider_services       ServiceListing[]
+  conversations           Conversation[]
 }
 
 model Certificate {
@@ -131,6 +133,7 @@ model Appointment {
   serviceProvider     ServiceProviderDetails @relation(fields: [provider_id], references: [provider_id])
   service             ServiceListing         @relation(fields: [service_id], references: [service_id])
   appointment_rating  Rating[]
+  conversation        Conversation?
 }
 
 model Rating {
@@ -166,4 +169,38 @@ model Admin {
   created_at     DateTime @default(now())
   last_login     DateTime?
   is_active      Boolean  @default(true)
+}
+
+model Conversation {
+  conversation_id   Int                    @id @default(autoincrement())
+  appointment_id    Int                    @unique
+  customer_id       Int
+  provider_id       Int
+  status            String                 @default("active") // active, archived, closed
+  last_message_at   DateTime?
+  created_at        DateTime               @default(now())
+  updated_at        DateTime               @updatedAt
+  appointment       Appointment            @relation(fields: [appointment_id], references: [appointment_id])
+  customer          User                   @relation(fields: [customer_id], references: [user_id])
+  provider          ServiceProviderDetails @relation(fields: [provider_id], references: [provider_id])
+  messages          Message[]
+}
+
+model Message {
+  message_id      Int          @id @default(autoincrement())
+  conversation_id Int
+  sender_id       Int
+  sender_type     String       // 'customer' or 'provider'
+  message_type    String       @default("text") // text, image, file, location
+  content         String
+  attachment_url  String?
+  is_read         Boolean      @default(false)
+  is_edited       Boolean      @default(false)
+  edited_at       DateTime?
+  replied_to_id   Int?         // For reply functionality
+  created_at      DateTime     @default(now())
+  updated_at      DateTime     @updatedAt
+  conversation    Conversation @relation(fields: [conversation_id], references: [conversation_id])
+  replied_to      Message?     @relation("MessageReplies", fields: [replied_to_id], references: [message_id])
+  replies         Message[]    @relation("MessageReplies")
 }
