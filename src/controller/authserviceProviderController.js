@@ -95,27 +95,13 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             return res.status(400).json({ message: 'Provider already exists' });
         }
 
-        // Check if email is already registered as a customer
-        const existingCustomer = await prisma.user.findUnique({ where: { email: provider_email } });
-        if (existingCustomer) {
-            return res.status(400).json({ message: 'Email is already registered with a customer account' });
-        }
-
         // Check for duplicate phone number
         const existingPhoneProvider = await prisma.serviceProviderDetails.findFirst({ 
             where: { provider_phone_number: provider_phone_number } 
         });
         if (existingPhoneProvider) {
             return res.status(400).json({ message: 'Phone number is already registered with another provider account' });
-        }
-
-        // Also check if phone number exists in customer table
-        const existingPhoneCustomer = await prisma.user.findFirst({ 
-            where: { phone_number: provider_phone_number } 
-        });
-        if (existingPhoneCustomer) {
-            return res.status(400).json({ message: 'Phone number is already registered with a customer account' });
-        }       
+        }  
         
 
 
