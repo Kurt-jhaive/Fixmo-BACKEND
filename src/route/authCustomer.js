@@ -43,34 +43,12 @@ const ensureDirectoryExists = (dir) => {
   }
 };
 
-// Create necessary directories
+// Create necessary directories (for backward compatibility)
 ensureDirectoryExists('uploads/customer-profiles');
 ensureDirectoryExists('uploads/customer-ids');
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    let uploadPath = 'uploads/';
-    
-    switch (file.fieldname) {
-      case 'profile_photo':
-        uploadPath += 'customer-profiles/';
-        break;
-      case 'valid_id':
-        uploadPath += 'customer-ids/';
-        break;
-      default:
-        uploadPath += 'general/';
-    }
-    
-    ensureDirectoryExists(uploadPath);
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, file.fieldname + '-' + uniqueSuffix + ext);
-  }
-});
+// Use memory storage for Cloudinary uploads
+const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
   console.log('Customer file filter check:', {

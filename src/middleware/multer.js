@@ -7,8 +7,8 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Storage configuration for service images with temp storage
-const serviceImageStorage = multer.memoryStorage(); // Use memory storage for processing
+// Storage configuration for service images with memory storage for Cloudinary
+const serviceImageStorage = multer.memoryStorage(); // Use memory storage for Cloudinary processing
 
 // File filter for service images (only images allowed)
 const serviceImageFilter = (req, file, cb) => {
@@ -142,23 +142,8 @@ const testUploadDirectory = () => {
 // Run test on module load
 testUploadDirectory();
 
-// Rating photo storage configuration
-const ratingPhotoStorage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        const uploadPath = path.join(__dirname, '../../uploads/rating-photos/');
-        // Ensure directory exists
-        if (!fs.existsSync(uploadPath)) {
-            fs.mkdirSync(uploadPath, { recursive: true });
-        }
-        cb(null, uploadPath);
-    },
-    filename: function (req, file, cb) {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const ext = path.extname(file.originalname).toLowerCase();
-        const filename = 'rating_' + uniqueSuffix + (ext || '.jpg');
-        cb(null, filename);
-    }
-});
+// Rating photo storage configuration - Use memory storage for Cloudinary
+const ratingPhotoStorage = multer.memoryStorage();
 
 // Rating photo file filter
 const ratingPhotoFilter = (req, file, cb) => {

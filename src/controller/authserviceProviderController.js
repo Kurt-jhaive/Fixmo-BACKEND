@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { sendOTPEmail, sendRegistrationSuccessEmail } from '../services/mailer.js';
 import { forgotrequestOTP, verifyOTPAndResetPassword, verifyOTP, cleanupOTP } from '../services/otpUtils.js';
+import { uploadToCloudinary } from '../services/cloudinaryService.js';
 
 const prisma = new PrismaClient();
 
@@ -127,14 +128,36 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             }
         }
 
-        // Handle file uploads
+        // Handle file uploads to Cloudinary
         const profilePhotoFile = req.files && req.files['provider_profile_photo'] ? req.files['provider_profile_photo'][0] : null;
         const validIdFile = req.files && req.files['provider_valid_id'] ? req.files['provider_valid_id'][0] : null;
-        const provider_profile_photo = profilePhotoFile ? profilePhotoFile.path : null;
-        const provider_valid_id = validIdFile ? validIdFile.path : null;
-
-        // Handle certificate files
         const certificateFiles = req.files && req.files['certificateFile'] ? req.files['certificateFile'] : [];
+
+        let provider_profile_photo = null;
+        let provider_valid_id = null;
+
+        try {
+            // Upload profile photo
+            if (profilePhotoFile) {
+                provider_profile_photo = await uploadToCloudinary(
+                    profilePhotoFile.buffer, 
+                    'fixmo/provider-profiles',
+                    `provider_profile_${provider_email.replace('@', '_').replace('.', '_')}_${Date.now()}`
+                );
+            }
+
+            // Upload valid ID
+            if (validIdFile) {
+                provider_valid_id = await uploadToCloudinary(
+                    validIdFile.buffer, 
+                    'fixmo/provider-ids',
+                    `provider_id_${provider_email.replace('@', '_').replace('.', '_')}_${Date.now()}`
+                );
+            }
+        } catch (uploadError) {
+            console.error('Error uploading images to Cloudinary:', uploadError);
+            return res.status(500).json({ message: 'Error uploading images. Please try again.' });
+        }
 
         // Hash password
         const hashedPassword = await bcrypt.hash(provider_password, 10);
@@ -149,13 +172,15 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
                 provider_email,
                 provider_birthday: provider_birthday ? new Date(provider_birthday) : null,
                 provider_phone_number,
-                provider_profile_photo: provider_profile_photo || null,
-                provider_valid_id: provider_valid_id || null,
+                provider_profile_photo: provider_profile_photo,
+                provider_valid_id: provider_valid_id,
                 provider_location: provider_location || null,
                 provider_exact_location: provider_exact_location || null,
                 provider_uli
             }
-        });        // Create certificates if provided
+        });
+
+        // Create certificates if provided
         const createdCertificates = [];
         if (certificateFiles && certificateFiles.length > 0) {
             for (let i = 0; i < certificateFiles.length; i++) {
@@ -165,16 +190,28 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
                 const expiryDate = Array.isArray(parsedExpiryDates) ? parsedExpiryDates[i] : parsedExpiryDates;
 
                 if (certificateName && certificateNumber && certificateFile) {
-                    const certificate = await prisma.certificate.create({
-                        data: {
-                            certificate_name: certificateName,
-                            certificate_number: certificateNumber,
-                            certificate_file_path: certificateFile.path,
-                            expiry_date: expiryDate ? new Date(expiryDate) : null,
-                            provider_id: newProvider.provider_id
-                        }
-                    });
-                    createdCertificates.push(certificate);
+                    try {
+                        // Upload certificate to Cloudinary
+                        const certificateUrl = await uploadToCloudinary(
+                            certificateFile.buffer, 
+                            'fixmo/certificates',
+                            `certificate_${provider_email.replace('@', '_').replace('.', '_')}_${certificateName.replace(/\s+/g, '_')}_${Date.now()}`
+                        );
+
+                        const certificate = await prisma.certificate.create({
+                            data: {
+                                certificate_name: certificateName,
+                                certificate_number: certificateNumber,
+                                certificate_file_path: certificateUrl,
+                                expiry_date: expiryDate ? new Date(expiryDate) : null,
+                                provider_id: newProvider.provider_id
+                            }
+                        });
+                        createdCertificates.push(certificate);
+                    } catch (certUploadError) {
+                        console.error('Error uploading certificate to Cloudinary:', certUploadError);
+                        // Continue with other certificates but log the error
+                    }
                 }
             }
         }// Delete the used OTP

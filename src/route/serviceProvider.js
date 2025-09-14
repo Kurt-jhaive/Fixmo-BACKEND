@@ -45,41 +45,14 @@ const ensureDirectoryExists = (dir) => {
   }
 };
 
-// Create necessary directories
+// Create necessary directories (for backward compatibility)
 ensureDirectoryExists('uploads/profiles');
 ensureDirectoryExists('uploads/ids');
 ensureDirectoryExists('uploads/certificates');
 ensureDirectoryExists('uploads/service-images');
 
-// Configure multer storage for registration files
-const registrationStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    let uploadPath = 'uploads/';
-    
-    switch (file.fieldname) {
-      case 'provider_profile_photo':
-        uploadPath += 'profiles/';
-        break;
-      case 'provider_valid_id':
-        uploadPath += 'ids/';
-        break;
-      case 'certificateFile':
-        uploadPath += 'certificates/';
-        break;
-      default:
-        uploadPath += 'general/';
-    }
-    
-    ensureDirectoryExists(uploadPath);
-    cb(null, uploadPath);
-  },
-  filename: function (req, file, cb) {
-    // Generate unique filename with timestamp and original extension
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, file.fieldname + '-' + uniqueSuffix + ext);
-  }
-});
+// Configure multer memory storage for Cloudinary uploads
+const registrationStorage = multer.memoryStorage();
 
 // File filter to accept only images for profile photos and IDs, and documents for certificates
 const fileFilter = (req, file, cb) => {

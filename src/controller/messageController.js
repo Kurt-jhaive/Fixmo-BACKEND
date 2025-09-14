@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
+import { uploadToCloudinary } from '../services/cloudinaryService.js';
 
 const prisma = new PrismaClient();
 
@@ -12,25 +13,8 @@ export const setWebSocketServer = (wsServer) => {
     webSocketServer = wsServer;
 };
 
-// Configure multer for message attachments
-const storage = multer.diskStorage({
-    destination: async (req, file, cb) => {
-        const uploadDir = path.join(process.cwd(), 'uploads', 'message-attachments');
-        try {
-            await fs.mkdir(uploadDir, { recursive: true });
-            cb(null, uploadDir);
-        } catch (error) {
-            cb(error);
-        }
-    },
-    filename: (req, file, cb) => {
-        const userId = req.userId;
-        const timestamp = Date.now();
-        const ext = path.extname(file.originalname);
-        const filename = `msg_${userId}_${timestamp}${ext}`;
-        cb(null, filename);
-    }
-});
+// Configure multer for message attachments - Use memory storage for Cloudinary
+const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
     // Allow images and documents for message attachments
@@ -270,9 +254,22 @@ class MessageController {
                 });
             }
 
+            // Upload attachment to Cloudinary if provided
             let attachmentUrl = null;
             if (req.file) {
-                attachmentUrl = `/uploads/message-attachments/${req.file.filename}`;
+                try {
+                    attachmentUrl = await uploadToCloudinary(
+                        req.file.buffer,
+                        'fixmo/message-attachments',
+                        `msg_${userId}_${Date.now()}`
+                    );
+                } catch (uploadError) {
+                    console.error('Error uploading message attachment to Cloudinary:', uploadError);
+                    return res.status(500).json({
+                        success: false,
+                        message: 'Error uploading attachment. Please try again.'
+                    });
+                }
             }
 
             // Create message
@@ -712,7 +709,21 @@ class MessageController {
                 });
             }
 
-            const attachmentUrl = `/uploads/message-attachments/${req.file.filename}`;
+            // Upload file to Cloudinary
+            let attachmentUrl;
+            try {
+                attachmentUrl = await uploadToCloudinary(
+                    req.file.buffer,
+                    'fixmo/message-attachments',
+                    `msg_file_${userId}_${Date.now()}`
+                );
+            } catch (uploadError) {
+                console.error('Error uploading message file to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Error uploading file. Please try again.'
+                });
+            }
 
             // Create message with attachment
             const message = await prisma.message.create({

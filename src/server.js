@@ -14,6 +14,7 @@ import appointmentRoutes from './route/appointmentRoutes.js';
 import adminRoutes from './route/adminRoutes.js';
 import ratingRoutes from './route/ratingRoutes.js';
 import messageRoutes from './route/messageRoutes.js';
+import testRoutes from './route/testRoutes.js';
 import { setWebSocketServer } from './controller/messageController.js';
 import cors from 'cors';
 import { specs, swaggerUi } from './config/swagger.js';
@@ -151,6 +152,7 @@ app.use('/api/availability', availabilityRoutes); // Availability management rou
 app.use('/api/appointments', appointmentRoutes); // Appointment management routes
 app.use('/api/ratings', ratingRoutes); // Rating management routes
 app.use('/api/messages', messageRoutes); // Message management routes
+app.use('/api/test', testRoutes); // Test routes for Cloudinary and other features
 
 // 404 handler for undefined routes (without wildcard)
 app.use((req, res) => {

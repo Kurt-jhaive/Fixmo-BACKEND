@@ -5,6 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import { sendOTPEmail, sendRegistrationSuccessEmail, sendBookingCancellationEmail, sendBookingConfirmationToCustomer, sendBookingConfirmationToProvider, sendBookingCancellationToCustomer, sendBookingCompletionToCustomer, sendBookingCompletionToProvider } from '../services/mailer.js';
 import { forgotrequestOTP, verifyOTPAndResetPassword, verifyOTP, cleanupOTP } from '../services/otpUtils.js';
 import { checkOTPRateLimit, recordOTPAttempt } from '../services/rateLimitUtils.js';
+import { uploadToCloudinary } from '../services/cloudinaryService.js';
 
 const prisma = new PrismaClient();
 
@@ -135,15 +136,12 @@ export const verifyOTPAndRegister = async (req, res) => {
     
     const profilePhotoFile = req.files && req.files['profile_photo'] ? req.files['profile_photo'][0] : null;
     const validIdFile = req.files && req.files['valid_id'] ? req.files['valid_id'][0] : null;
-    const profilePhotoPath = profilePhotoFile ? profilePhotoFile.path : null;
-    const validIdPath = validIdFile ? validIdFile.path : null;
 
     // Check if user already exists (prevent duplicate registration)
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
       return res.status(400).json({ message: 'User already exists' });
     }
-
 
     // Check for duplicate phone number
     const existingPhoneUser = await prisma.user.findFirst({ 
@@ -167,6 +165,31 @@ export const verifyOTPAndRegister = async (req, res) => {
       return res.status(400).json({ message: verificationResult.message });
     }
 
+    // Upload images to Cloudinary
+    let profilePhotoUrl = null;
+    let validIdUrl = null;
+
+    try {
+      if (profilePhotoFile) {
+        profilePhotoUrl = await uploadToCloudinary(
+          profilePhotoFile.buffer, 
+          'fixmo/customer-profiles',
+          `customer_profile_${email.replace('@', '_').replace('.', '_')}_${Date.now()}`
+        );
+      }
+
+      if (validIdFile) {
+        validIdUrl = await uploadToCloudinary(
+          validIdFile.buffer, 
+          'fixmo/customer-ids',
+          `customer_id_${email.replace('@', '_').replace('.', '_')}_${Date.now()}`
+        );
+      }
+    } catch (uploadError) {
+      console.error('Error uploading images to Cloudinary:', uploadError);
+      return res.status(500).json({ message: 'Error uploading images. Please try again.' });
+    }
+
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -180,12 +203,14 @@ export const verifyOTPAndRegister = async (req, res) => {
         birthday: birthday ? new Date(birthday) : null,
         password: hashedPassword,
         phone_number,
-        profile_photo: profilePhotoPath || null,
-        valid_id: validIdPath || null,
+        profile_photo: profilePhotoUrl,
+        valid_id: validIdUrl,
         user_location: user_location || null,
         exact_location: exact_location || null
       }
-    });    // Send registration success email
+    });
+
+    // Send registration success email
     await sendRegistrationSuccessEmail(email, first_name, userName); 
 
     // Delete the used OTP
@@ -194,8 +219,8 @@ export const verifyOTPAndRegister = async (req, res) => {
     res.status(201).json({
       message: 'User registered successfully',
       userId: newUser.user_id,
-      profile_photo: profilePhotoPath,
-      valid_id: validIdPath
+      profile_photo: profilePhotoUrl,
+      valid_id: validIdUrl
     });
 
   } catch (err) {

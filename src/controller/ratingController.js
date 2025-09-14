@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import path from 'path';
+import { uploadToCloudinary } from '../services/cloudinaryService.js';
 import fs from 'fs';
 
 const prisma = new PrismaClient();
@@ -75,11 +76,23 @@ export const createRating = async (req, res) => {
             });
         }
 
-        // Handle photo upload if provided
+        // Handle photo upload to Cloudinary if provided
         let rating_photo = null;
         if (req.file) {
-            rating_photo = req.file.path;
-            console.log('Rating photo uploaded:', rating_photo);
+            try {
+                rating_photo = await uploadToCloudinary(
+                    req.file.buffer, 
+                    'fixmo/rating-photos',
+                    `rating_${appointment_id}_${Date.now()}`
+                );
+                console.log('Rating photo uploaded to Cloudinary:', rating_photo);
+            } catch (uploadError) {
+                console.error('Error uploading rating photo to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Error uploading rating photo. Please try again.'
+                });
+            }
         }
 
         // Create the rating
@@ -350,14 +363,24 @@ export const updateRating = async (req, res) => {
             }
         }
 
-        // Handle photo upload if provided
+        // Handle photo upload to Cloudinary if provided
         let rating_photo = existingRating.rating_photo;
         if (req.file) {
-            // Delete old photo if it exists
-            if (existingRating.rating_photo && fs.existsSync(existingRating.rating_photo)) {
-                fs.unlinkSync(existingRating.rating_photo);
+            try {
+                // Upload new photo to Cloudinary
+                rating_photo = await uploadToCloudinary(
+                    req.file.buffer, 
+                    'fixmo/rating-photos',
+                    `rating_update_${rating_id}_${Date.now()}`
+                );
+                console.log('Updated rating photo uploaded to Cloudinary:', rating_photo);
+            } catch (uploadError) {
+                console.error('Error uploading updated rating photo to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Error uploading rating photo. Please try again.'
+                });
             }
-            rating_photo = req.file.path;
         }
 
         // Update the rating
@@ -595,11 +618,23 @@ export const createProviderRatingForCustomer = async (req, res) => {
             });
         }
 
-        // Handle photo upload if provided
+        // Handle photo upload to Cloudinary if provided
         let rating_photo = null;
         if (req.file) {
-            rating_photo = req.file.path;
-            console.log('Rating photo uploaded:', rating_photo);
+            try {
+                rating_photo = await uploadToCloudinary(
+                    req.file.buffer, 
+                    'fixmo/rating-photos',
+                    `provider_rating_${appointment_id}_${Date.now()}`
+                );
+                console.log('Provider rating photo uploaded to Cloudinary:', rating_photo);
+            } catch (uploadError) {
+                console.error('Error uploading provider rating photo to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Error uploading rating photo. Please try again.'
+                });
+            }
         }
 
         // Create the rating
