@@ -31,7 +31,8 @@ import {
   updateAppointmentStatus,
   getAppointmentDetails,
   getCustomerBookingsDetailed,
-  cancelAppointmentEnhanced
+  cancelAppointmentEnhanced,
+  getCustomerProfile
 } from '../controller/authCustomerController.js';
 
 const router = express.Router();
@@ -96,6 +97,8 @@ router.post('/reset-password-only', resetPasswordOnly);
 
 // Get user profile and verification status
 router.get('/user-profile/:userId', getUserProfile);
+// Get authenticated customer profile (new endpoint)
+router.get('/customer-profile', authMiddleware, getCustomerProfile);
 // Update verification documents
 router.post('/update-verification-documents', upload.fields([
   { name: 'profilePicture', maxCount: 1 },

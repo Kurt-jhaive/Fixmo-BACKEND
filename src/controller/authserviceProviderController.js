@@ -1997,3 +1997,186 @@ export const finishAppointment = async (req, res) => {
     }
 };
 
+// Get all service listings (public endpoint for browsing services)
+export const getAllServiceListings = async (req, res) => {
+    try {
+        const { 
+            page = 1, 
+            limit = 20, 
+            search = '', 
+            location = '', 
+            min_price = '', 
+            max_price = '',
+            active_only = 'true',
+            verified_only = 'true'
+        } = req.query;
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        
+        // Build where clause for filtering
+        const whereClause = {};
+        
+        // Filter by active services only (default true)
+        if (active_only === 'true') {
+            whereClause.servicelisting_isActive = true;
+        }
+
+        // Search filter - search in service title and description
+        if (search) {
+            whereClause.OR = [
+                { service_title: { contains: search, mode: 'insensitive' } },
+                { service_description: { contains: search, mode: 'insensitive' } }
+            ];
+        }
+
+        // Price range filter
+        if (min_price || max_price) {
+            whereClause.service_startingprice = {};
+            if (min_price) whereClause.service_startingprice.gte = parseFloat(min_price);
+            if (max_price) whereClause.service_startingprice.lte = parseFloat(max_price);
+        }
+
+        // Provider location filter
+        if (location) {
+            whereClause.serviceProvider = {
+                provider_location: { contains: location, mode: 'insensitive' }
+            };
+        }
+
+        // Only show services from verified providers (default true)
+        if (verified_only === 'true') {
+            whereClause.serviceProvider = {
+                ...whereClause.serviceProvider,
+                provider_isVerified: true,
+                provider_isActivated: true
+            };
+        }
+
+        // Get service listings with provider details
+        const serviceListings = await prisma.serviceListing.findMany({
+            where: whereClause,
+            include: {
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true,
+                        provider_location: true,
+                        provider_exact_location: true,
+                        provider_rating: true,
+                        provider_isVerified: true,
+                        provider_profile_photo: true,
+                        created_at: true
+                    }
+                },
+                specific_services: {
+                    include: {
+                        category: {
+                            select: {
+                                category_id: true,
+                                category_name: true
+                            }
+                        },
+                        covered_by_certificates: {
+                            include: {
+                                certificate: {
+                                    select: {
+                                        certificate_id: true,
+                                        certificate_name: true,
+                                        certificate_status: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            orderBy: [
+                { servicelisting_isActive: 'desc' },  // Active services first
+                { serviceProvider: { provider_rating: 'desc' } },  // Then by provider rating
+                { service_startingprice: 'asc' }  // Then by price
+            ],
+            skip,
+            take: parseInt(limit)
+        });
+
+        // Get total count for pagination
+        const totalCount = await prisma.serviceListing.count({
+            where: whereClause
+        });
+
+        // Format the response to match your specified fields
+        const formattedListings = serviceListings.map(listing => ({
+            service_id: listing.service_id,
+            service_title: listing.service_title,
+            service_description: listing.service_description,
+            service_startingprice: listing.service_startingprice,
+            provider_id: listing.provider_id,
+            servicelisting_isActive: listing.servicelisting_isActive,
+            service_picture: listing.service_picture,
+            provider: {
+                provider_id: listing.serviceProvider.provider_id,
+                provider_name: `${listing.serviceProvider.provider_first_name} ${listing.serviceProvider.provider_last_name}`,
+                provider_first_name: listing.serviceProvider.provider_first_name,
+                provider_last_name: listing.serviceProvider.provider_last_name,
+                provider_email: listing.serviceProvider.provider_email,
+                provider_phone_number: listing.serviceProvider.provider_phone_number,
+                provider_location: listing.serviceProvider.provider_location,
+                provider_exact_location: listing.serviceProvider.provider_exact_location,
+                provider_rating: listing.serviceProvider.provider_rating,
+                provider_isVerified: listing.serviceProvider.provider_isVerified,
+                provider_profile_photo: listing.serviceProvider.provider_profile_photo,
+                provider_member_since: listing.serviceProvider.created_at
+            },
+            categories: listing.specific_services.map(service => ({
+                category_id: service.category.category_id,
+                category_name: service.category.category_name
+            })),
+            certificates: listing.specific_services.flatMap(service => 
+                service.covered_by_certificates.map(cert => ({
+                    certificate_id: cert.certificate.certificate_id,
+                    certificate_name: cert.certificate.certificate_name,
+                    certificate_status: cert.certificate.certificate_status
+                }))
+            ),
+            specific_services: listing.specific_services.map(service => ({
+                specific_service_id: service.specific_service_id,
+                specific_service_title: service.specific_service_title,
+                specific_service_description: service.specific_service_description
+            }))
+        }));
+
+        res.status(200).json({
+            success: true,
+            message: 'Service listings retrieved successfully',
+            data: formattedListings,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(totalCount / parseInt(limit)),
+                totalCount,
+                hasNext: skip + parseInt(limit) < totalCount,
+                hasPrev: parseInt(page) > 1,
+                limit: parseInt(limit)
+            },
+            filters: {
+                search,
+                location,
+                min_price,
+                max_price,
+                active_only,
+                verified_only
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching service listings:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while fetching service listings',
+            error: error.message
+        });
+    }
+};
+

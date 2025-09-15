@@ -624,6 +624,10 @@ export const getServiceListingDetails = async (req, res) => {
     }
 };
 
+
+
+
+
 // Get customer's appointments
 export const getCustomerAppointments = async (req, res) => {
     const { customer_id } = req.params;
@@ -2197,6 +2201,141 @@ export const checkPhoneAvailability = async (req, res) => {
     } catch (err) {
         console.error('Error checking phone availability:', err);
         res.status(500).json({ message: 'Server error checking phone availability' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/customer-profile:
+ *   get:
+ *     summary: Get authenticated customer profile data
+ *     tags: [Customer Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Customer profile retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user_id:
+ *                       type: integer
+ *                     first_name:
+ *                       type: string
+ *                     last_name:
+ *                       type: string
+ *                     full_name:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     phone_number:
+ *                       type: string
+ *                     profile_photo:
+ *                       type: string
+ *                       nullable: true
+ *                     user_location:
+ *                       type: string
+ *                       nullable: true
+ *                     exact_location:
+ *                       type: string
+ *                       nullable: true
+ *                     birthday:
+ *                       type: string
+ *                       format: date
+ *                       nullable: true
+ *                     is_activated:
+ *                       type: boolean
+ *                     is_verified:
+ *                       type: boolean
+ *                     created_at:
+ *                       type: string
+ *                       format: date-time
+ *       401:
+ *         description: Unauthorized - Invalid or missing token
+ *       404:
+ *         description: Customer not found
+ *       500:
+ *         description: Internal server error
+ */
+export const getCustomerProfile = async (req, res) => {
+    try {
+        // Use the user ID from the authentication middleware
+        const userId = req.userId;
+        
+        if (!userId) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'User ID not found in session' 
+            });
+        }
+
+        const customer = await prisma.user.findUnique({
+            where: { user_id: parseInt(userId) },
+            select: {
+                user_id: true,
+                first_name: true,
+                last_name: true,
+                userName: true,
+                email: true,
+                phone_number: true,
+                profile_photo: true,
+                valid_id: true,
+                user_location: true,
+                exact_location: true,
+                birthday: true,
+                is_activated: true,
+                is_verified: true,
+                created_at: true
+            }
+        });
+
+        if (!customer) {
+            return res.status(404).json({ 
+                success: false,
+                message: 'Customer not found' 
+            });
+        }
+
+        // Format the response data
+        const profileData = {
+            user_id: customer.user_id,
+            first_name: customer.first_name,
+            last_name: customer.last_name,
+            full_name: `${customer.first_name} ${customer.last_name}`,
+            userName: customer.userName,
+            email: customer.email,
+            phone_number: customer.phone_number,
+            profile_photo: customer.profile_photo,
+            user_location: customer.user_location,
+            exact_location: customer.exact_location,
+            birthday: customer.birthday,
+            is_activated: customer.is_activated,
+            is_verified: customer.is_verified,
+            created_at: customer.created_at
+        };
+
+        res.status(200).json({
+            success: true,
+            message: 'Customer profile retrieved successfully',
+            data: profileData
+        });
+
+    } catch (error) {
+        console.error('Error fetching customer profile:', error);
+        res.status(500).json({ 
+            success: false,
+            message: 'Internal server error',
+            error: error.message 
+        });
     }
 };
 

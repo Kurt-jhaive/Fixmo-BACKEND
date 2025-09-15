@@ -30,7 +30,8 @@ import {
   cancelProviderAppointment,
   rateCustomerAppointment,
   getProviderAvailabilityWithBookings,
-  finishAppointment
+  finishAppointment,
+  getAllServiceListings
 } from '../controller/authserviceProviderController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { uploadServiceImage } from '../middleware/multer.js';
@@ -347,6 +348,9 @@ router.get('/providers', async (req, res) => {
     res.status(500).json({ message: 'Error fetching providers' });
   }
 });
+
+// Get all service listings (public endpoint)
+router.get('/service-listings', getAllServiceListings);
 
 router.get('/certificates', async (req, res) => {
   try {
