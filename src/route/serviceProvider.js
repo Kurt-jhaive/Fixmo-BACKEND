@@ -31,7 +31,8 @@ import {
   rateCustomerAppointment,
   getProviderAvailabilityWithBookings,
   finishAppointment,
-  getAllServiceListings
+  getAllServiceListings,
+  getServiceListingsByTitle
 } from '../controller/authserviceProviderController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { uploadServiceImage } from '../middleware/multer.js';
@@ -351,6 +352,9 @@ router.get('/providers', async (req, res) => {
 
 // Get all service listings (public endpoint)
 router.get('/service-listings', getAllServiceListings);
+
+// Get service listings by exact title match (public endpoint)
+router.get('/services/by-title', getServiceListingsByTitle);
 
 router.get('/certificates', async (req, res) => {
   try {

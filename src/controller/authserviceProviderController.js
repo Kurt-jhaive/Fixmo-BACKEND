@@ -2180,3 +2180,105 @@ export const getAllServiceListings = async (req, res) => {
     }
 };
 
+// Get service listings by exact title match
+export const getServiceListingsByTitle = async (req, res) => {
+    try {
+        const { title } = req.query;
+        
+        if (!title) {
+            return res.status(400).json({
+                success: false,
+                message: 'Service title is required'
+            });
+        }
+
+        const serviceListings = await prisma.serviceListing.findMany({
+            where: {
+                service_title: { equals: title, mode: 'insensitive' },
+                servicelisting_isActive: true
+            },
+            include: {
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true,
+                        provider_location: true,
+                        provider_exact_location: true,
+                        provider_rating: true,
+                        provider_isVerified: true,
+                        provider_profile_photo: true,
+                        created_at: true
+                    }
+                },
+                specific_services: {
+                    include: {
+                        category: {
+                            select: {
+                                category_id: true,
+                                category_name: true
+                            }
+                        }
+                    }
+                }
+            },
+            orderBy: [
+                { serviceProvider: { provider_rating: 'desc' } },  // Order by provider rating
+                { service_startingprice: 'asc' }  // Then by price
+            ]
+        });
+
+        // Format the response
+        const formattedListings = serviceListings.map(listing => ({
+            service_id: listing.service_id,
+            service_title: listing.service_title,
+            service_description: listing.service_description,
+            service_startingprice: listing.service_startingprice,
+            provider_id: listing.provider_id,
+            servicelisting_isActive: listing.servicelisting_isActive,
+            service_picture: listing.service_picture,
+            provider: {
+                provider_id: listing.serviceProvider.provider_id,
+                provider_name: `${listing.serviceProvider.provider_first_name} ${listing.serviceProvider.provider_last_name}`,
+                provider_first_name: listing.serviceProvider.provider_first_name,
+                provider_last_name: listing.serviceProvider.provider_last_name,
+                provider_email: listing.serviceProvider.provider_email,
+                provider_phone_number: listing.serviceProvider.provider_phone_number,
+                provider_location: listing.serviceProvider.provider_location,
+                provider_exact_location: listing.serviceProvider.provider_exact_location,
+                provider_rating: listing.serviceProvider.provider_rating,
+                provider_isVerified: listing.serviceProvider.provider_isVerified,
+                provider_profile_photo: listing.serviceProvider.provider_profile_photo,
+                provider_member_since: listing.serviceProvider.created_at
+            },
+            categories: listing.specific_services.map(service => ({
+                category_id: service.category.category_id,
+                category_name: service.category.category_name
+            })),
+            specific_services: listing.specific_services.map(service => ({
+                specific_service_id: service.specific_service_id,
+                specific_service_title: service.specific_service_title,
+                specific_service_description: service.specific_service_description
+            }))
+        }));
+
+        res.status(200).json({
+            success: true,
+            message: `Found ${formattedListings.length} service listing(s) for "${title}"`,
+            data: formattedListings,
+            count: formattedListings.length,
+            search_title: title
+        });
+
+    } catch (error) {
+        console.error('Error fetching services by title:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while fetching services by title',
+            error: error.message
+        });
+    }
+};
+

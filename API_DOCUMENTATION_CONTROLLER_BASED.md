@@ -507,7 +507,78 @@ The Fixmo Backend API is a comprehensive service management platform that connec
 - **Error Responses:**
   - `500`: Internal server error while fetching service listings
 
-#### 12. Create New Service
+#### 12. Get Service Listings by Title
+- **Endpoint:** `GET /api/serviceProvider/services/by-title`
+- **Description:** Find service listings by exact title match (case-insensitive). Perfect for button-triggered searches where you know the specific service title.
+- **Query Parameters:**
+```javascript
+{
+  title: string                    // Required - exact service title to search for
+}
+```
+- **Example URL:** `/api/serviceProvider/services/by-title?title=Network%20Setup`
+- **Success Response (200):**
+```javascript
+{
+  success: true,
+  message: "Found 1 service listing(s) for \"Network Setup\"",
+  data: [
+    {
+      service_id: number,
+      service_title: string,
+      service_description: string,
+      service_startingprice: number,
+      provider_id: number,
+      servicelisting_isActive: boolean,
+      service_picture: string?,     // Cloudinary URL
+      provider: {
+        provider_id: number,
+        provider_name: string,      // Full name (first + last)
+        provider_first_name: string,
+        provider_last_name: string,
+        provider_email: string,
+        provider_phone_number: string,
+        provider_location: string,
+        provider_exact_location: string,
+        provider_rating: number,
+        provider_isVerified: boolean,
+        provider_profile_photo: string?, // Cloudinary URL
+        provider_member_since: string    // ISO datetime
+      },
+      categories: [
+        {
+          category_id: number,
+          category_name: string
+        }
+      ],
+      specific_services: [
+        {
+          specific_service_id: number,
+          specific_service_title: string,
+          specific_service_description: string
+        }
+      ]
+    }
+  ],
+  count: number,                   // Number of services found
+  search_title: string             // The title that was searched for
+}
+```
+- **Use Cases:**
+  - Button-triggered service lookups in mobile apps
+  - Exact service title searches
+  - Quick service provider finding for specific services
+- **Features:**
+  - Case-insensitive exact title matching
+  - Only returns active services
+  - Includes full provider details
+  - Results sorted by provider rating then price
+  - No pagination (returns all matches)
+- **Error Responses:**
+  - `400`: Service title is required
+  - `500`: Internal server error
+
+#### 13. Create New Service
 - **Endpoint:** `POST /api/services/services`
 - **Headers:** `Authorization: Bearer <token>` (Provider auth required)
 - **Content-Type:** `multipart/form-data`
@@ -522,17 +593,17 @@ The Fixmo Backend API is a comprehensive service management platform that connec
 }
 ```
 
-#### 13. Update Service
+#### 14. Update Service
 - **Endpoint:** `PUT /api/services/services/:serviceId`
 - **Headers:** `Authorization: Bearer <token>`
 - **Parameters:** `serviceId` (number)
 
-#### 14. Delete Service
+#### 15. Delete Service
 - **Endpoint:** `DELETE /api/services/services/:serviceId`
 - **Headers:** `Authorization: Bearer <token>`
 - **Parameters:** `serviceId` (number)
 
-#### 15. Toggle Service Availability
+#### 16. Toggle Service Availability
 - **Endpoint:** `PATCH /api/services/services/:serviceId/toggle`
 - **Headers:** `Authorization: Bearer <token>`
 - **Parameters:** `serviceId` (number)
@@ -542,7 +613,7 @@ The Fixmo Backend API is a comprehensive service management platform that connec
 
 ## Appointment Management (`/api/appointments`)
 
-#### 16. Get All Appointments (with Advanced Filtering)
+#### 17. Get All Appointments (with Advanced Filtering)
 - **Endpoint:** `GET /api/appointments/`
 - **Query Parameters:**
 ```javascript
