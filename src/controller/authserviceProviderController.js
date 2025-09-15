@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { sendOTPEmail, sendRegistrationSuccessEmail } from '../services/mailer.js';
 import { forgotrequestOTP, verifyOTPAndResetPassword, verifyOTP, cleanupOTP } from '../services/otpUtils.js';
+import { uploadToCloudinary } from '../services/cloudinaryService.js';
 
 const prisma = new PrismaClient();
 
@@ -95,27 +96,13 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             return res.status(400).json({ message: 'Provider already exists' });
         }
 
-        // Check if email is already registered as a customer
-        const existingCustomer = await prisma.user.findUnique({ where: { email: provider_email } });
-        if (existingCustomer) {
-            return res.status(400).json({ message: 'Email is already registered with a customer account' });
-        }
-
         // Check for duplicate phone number
         const existingPhoneProvider = await prisma.serviceProviderDetails.findFirst({ 
             where: { provider_phone_number: provider_phone_number } 
         });
         if (existingPhoneProvider) {
             return res.status(400).json({ message: 'Phone number is already registered with another provider account' });
-        }
-
-        // Also check if phone number exists in customer table
-        const existingPhoneCustomer = await prisma.user.findFirst({ 
-            where: { phone_number: provider_phone_number } 
-        });
-        if (existingPhoneCustomer) {
-            return res.status(400).json({ message: 'Phone number is already registered with a customer account' });
-        }       
+        }  
         
 
 
@@ -141,14 +128,36 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             }
         }
 
-        // Handle file uploads
+        // Handle file uploads to Cloudinary
         const profilePhotoFile = req.files && req.files['provider_profile_photo'] ? req.files['provider_profile_photo'][0] : null;
         const validIdFile = req.files && req.files['provider_valid_id'] ? req.files['provider_valid_id'][0] : null;
-        const provider_profile_photo = profilePhotoFile ? profilePhotoFile.path : null;
-        const provider_valid_id = validIdFile ? validIdFile.path : null;
-
-        // Handle certificate files
         const certificateFiles = req.files && req.files['certificateFile'] ? req.files['certificateFile'] : [];
+
+        let provider_profile_photo = null;
+        let provider_valid_id = null;
+
+        try {
+            // Upload profile photo
+            if (profilePhotoFile) {
+                provider_profile_photo = await uploadToCloudinary(
+                    profilePhotoFile.buffer, 
+                    'fixmo/provider-profiles',
+                    `provider_profile_${provider_email.replace('@', '_').replace('.', '_')}_${Date.now()}`
+                );
+            }
+
+            // Upload valid ID
+            if (validIdFile) {
+                provider_valid_id = await uploadToCloudinary(
+                    validIdFile.buffer, 
+                    'fixmo/provider-ids',
+                    `provider_id_${provider_email.replace('@', '_').replace('.', '_')}_${Date.now()}`
+                );
+            }
+        } catch (uploadError) {
+            console.error('Error uploading images to Cloudinary:', uploadError);
+            return res.status(500).json({ message: 'Error uploading images. Please try again.' });
+        }
 
         // Hash password
         const hashedPassword = await bcrypt.hash(provider_password, 10);
@@ -163,13 +172,15 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
                 provider_email,
                 provider_birthday: provider_birthday ? new Date(provider_birthday) : null,
                 provider_phone_number,
-                provider_profile_photo: provider_profile_photo || null,
-                provider_valid_id: provider_valid_id || null,
+                provider_profile_photo: provider_profile_photo,
+                provider_valid_id: provider_valid_id,
                 provider_location: provider_location || null,
                 provider_exact_location: provider_exact_location || null,
                 provider_uli
             }
-        });        // Create certificates if provided
+        });
+
+        // Create certificates if provided
         const createdCertificates = [];
         if (certificateFiles && certificateFiles.length > 0) {
             for (let i = 0; i < certificateFiles.length; i++) {
@@ -179,16 +190,28 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
                 const expiryDate = Array.isArray(parsedExpiryDates) ? parsedExpiryDates[i] : parsedExpiryDates;
 
                 if (certificateName && certificateNumber && certificateFile) {
-                    const certificate = await prisma.certificate.create({
-                        data: {
-                            certificate_name: certificateName,
-                            certificate_number: certificateNumber,
-                            certificate_file_path: certificateFile.path,
-                            expiry_date: expiryDate ? new Date(expiryDate) : null,
-                            provider_id: newProvider.provider_id
-                        }
-                    });
-                    createdCertificates.push(certificate);
+                    try {
+                        // Upload certificate to Cloudinary
+                        const certificateUrl = await uploadToCloudinary(
+                            certificateFile.buffer, 
+                            'fixmo/certificates',
+                            `certificate_${provider_email.replace('@', '_').replace('.', '_')}_${certificateName.replace(/\s+/g, '_')}_${Date.now()}`
+                        );
+
+                        const certificate = await prisma.certificate.create({
+                            data: {
+                                certificate_name: certificateName,
+                                certificate_number: certificateNumber,
+                                certificate_file_path: certificateUrl,
+                                expiry_date: expiryDate ? new Date(expiryDate) : null,
+                                provider_id: newProvider.provider_id
+                            }
+                        });
+                        createdCertificates.push(certificate);
+                    } catch (certUploadError) {
+                        console.error('Error uploading certificate to Cloudinary:', certUploadError);
+                        // Continue with other certificates but log the error
+                    }
                 }
             }
         }// Delete the used OTP
@@ -1969,6 +1992,189 @@ export const finishAppointment = async (req, res) => {
         res.status(500).json({ 
             success: false, 
             message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Get all service listings (public endpoint for browsing services)
+export const getAllServiceListings = async (req, res) => {
+    try {
+        const { 
+            page = 1, 
+            limit = 20, 
+            search = '', 
+            location = '', 
+            min_price = '', 
+            max_price = '',
+            active_only = 'true',
+            verified_only = 'true'
+        } = req.query;
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        
+        // Build where clause for filtering
+        const whereClause = {};
+        
+        // Filter by active services only (default true)
+        if (active_only === 'true') {
+            whereClause.servicelisting_isActive = true;
+        }
+
+        // Search filter - search in service title and description
+        if (search) {
+            whereClause.OR = [
+                { service_title: { contains: search, mode: 'insensitive' } },
+                { service_description: { contains: search, mode: 'insensitive' } }
+            ];
+        }
+
+        // Price range filter
+        if (min_price || max_price) {
+            whereClause.service_startingprice = {};
+            if (min_price) whereClause.service_startingprice.gte = parseFloat(min_price);
+            if (max_price) whereClause.service_startingprice.lte = parseFloat(max_price);
+        }
+
+        // Provider location filter
+        if (location) {
+            whereClause.serviceProvider = {
+                provider_location: { contains: location, mode: 'insensitive' }
+            };
+        }
+
+        // Only show services from verified providers (default true)
+        if (verified_only === 'true') {
+            whereClause.serviceProvider = {
+                ...whereClause.serviceProvider,
+                provider_isVerified: true,
+                provider_isActivated: true
+            };
+        }
+
+        // Get service listings with provider details
+        const serviceListings = await prisma.serviceListing.findMany({
+            where: whereClause,
+            include: {
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true,
+                        provider_location: true,
+                        provider_exact_location: true,
+                        provider_rating: true,
+                        provider_isVerified: true,
+                        provider_profile_photo: true,
+                        created_at: true
+                    }
+                },
+                specific_services: {
+                    include: {
+                        category: {
+                            select: {
+                                category_id: true,
+                                category_name: true
+                            }
+                        },
+                        covered_by_certificates: {
+                            include: {
+                                certificate: {
+                                    select: {
+                                        certificate_id: true,
+                                        certificate_name: true,
+                                        certificate_status: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            orderBy: [
+                { servicelisting_isActive: 'desc' },  // Active services first
+                { serviceProvider: { provider_rating: 'desc' } },  // Then by provider rating
+                { service_startingprice: 'asc' }  // Then by price
+            ],
+            skip,
+            take: parseInt(limit)
+        });
+
+        // Get total count for pagination
+        const totalCount = await prisma.serviceListing.count({
+            where: whereClause
+        });
+
+        // Format the response to match your specified fields
+        const formattedListings = serviceListings.map(listing => ({
+            service_id: listing.service_id,
+            service_title: listing.service_title,
+            service_description: listing.service_description,
+            service_startingprice: listing.service_startingprice,
+            provider_id: listing.provider_id,
+            servicelisting_isActive: listing.servicelisting_isActive,
+            service_picture: listing.service_picture,
+            provider: {
+                provider_id: listing.serviceProvider.provider_id,
+                provider_name: `${listing.serviceProvider.provider_first_name} ${listing.serviceProvider.provider_last_name}`,
+                provider_first_name: listing.serviceProvider.provider_first_name,
+                provider_last_name: listing.serviceProvider.provider_last_name,
+                provider_email: listing.serviceProvider.provider_email,
+                provider_phone_number: listing.serviceProvider.provider_phone_number,
+                provider_location: listing.serviceProvider.provider_location,
+                provider_exact_location: listing.serviceProvider.provider_exact_location,
+                provider_rating: listing.serviceProvider.provider_rating,
+                provider_isVerified: listing.serviceProvider.provider_isVerified,
+                provider_profile_photo: listing.serviceProvider.provider_profile_photo,
+                provider_member_since: listing.serviceProvider.created_at
+            },
+            categories: listing.specific_services.map(service => ({
+                category_id: service.category.category_id,
+                category_name: service.category.category_name
+            })),
+            certificates: listing.specific_services.flatMap(service => 
+                service.covered_by_certificates.map(cert => ({
+                    certificate_id: cert.certificate.certificate_id,
+                    certificate_name: cert.certificate.certificate_name,
+                    certificate_status: cert.certificate.certificate_status
+                }))
+            ),
+            specific_services: listing.specific_services.map(service => ({
+                specific_service_id: service.specific_service_id,
+                specific_service_title: service.specific_service_title,
+                specific_service_description: service.specific_service_description
+            }))
+        }));
+
+        res.status(200).json({
+            success: true,
+            message: 'Service listings retrieved successfully',
+            data: formattedListings,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(totalCount / parseInt(limit)),
+                totalCount,
+                hasNext: skip + parseInt(limit) < totalCount,
+                hasPrev: parseInt(page) > 1,
+                limit: parseInt(limit)
+            },
+            filters: {
+                search,
+                location,
+                min_price,
+                max_price,
+                active_only,
+                verified_only
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching service listings:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while fetching service listings',
             error: error.message
         });
     }

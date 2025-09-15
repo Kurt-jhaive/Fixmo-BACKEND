@@ -88,9 +88,9 @@ export const uploadCertificate = async (req, res) => {
     try {
         const providerId = req.userId;
         const {
-            certificateSelect: certificateName,
-            certificateNumber,
-            expiryDate
+            certificate_name: certificateName,
+            certificate_number: certificateNumber,
+            expiry_date: expiryDate
         } = req.body;
 
         // Validate required fields

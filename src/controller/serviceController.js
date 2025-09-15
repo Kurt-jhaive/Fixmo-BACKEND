@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import fs from 'fs';
 import path from 'path';
+import { uploadToCloudinary } from '../services/cloudinaryService.js';
 
 const prisma = new PrismaClient();
 
@@ -156,10 +157,24 @@ export const createService = async (req, res) => {
             service_startingprice
         } = req.body;
 
-        // Get the uploaded file path if image was uploaded
-        const servicePicture = req.file ? 
-            '/uploads/service-images/' + req.file.filename : 
-            null;
+        // Get the uploaded file and upload to Cloudinary
+        let servicePicture = null;
+        
+        if (req.file) {
+            try {
+                servicePicture = await uploadToCloudinary(
+                    req.file.buffer, 
+                    'fixmo/service-images',
+                    `service_${providerId}_${Date.now()}`
+                );
+            } catch (uploadError) {
+                console.error('Error uploading service image to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Error uploading service image. Please try again.'
+                });
+            }
+        }
 
         console.log('Create service request:', {
             providerId,

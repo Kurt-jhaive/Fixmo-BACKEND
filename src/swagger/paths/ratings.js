@@ -452,4 +452,506 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
+ * 
+ * /api/ratings/provider/rateable-appointments:
+ *   get:
+ *     tags: [Provider Ratings]
+ *     summary: Get provider rateable appointments
+ *     description: Get finished appointments that the authenticated provider can rate (customers)
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Provider rateable appointments retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Appointments that can be rated by provider"
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       appointment_id:
+ *                         type: integer
+ *                         example: 123
+ *                       customer_id:
+ *                         type: integer
+ *                         example: 456
+ *                       scheduled_date:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2024-01-15T10:00:00Z"
+ *                       appointment_status:
+ *                         type: string
+ *                         example: "finished"
+ *                       customer:
+ *                         type: object
+ *                         properties:
+ *                           user_id:
+ *                             type: integer
+ *                             example: 456
+ *                           first_name:
+ *                             type: string
+ *                             example: "John"
+ *                           last_name:
+ *                             type: string
+ *                             example: "Doe"
+ *                           profile_photo:
+ *                             type: string
+ *                             nullable: true
+ *                             example: "uploads/profiles/user456.jpg"
+ *                       service:
+ *                         type: object
+ *                         properties:
+ *                           service_id:
+ *                             type: integer
+ *                             example: 789
+ *                           service_title:
+ *                             type: string
+ *                             example: "AC Repair"
+ *                           service_description:
+ *                             type: string
+ *                             example: "Professional AC repair service"
+ *       401:
+ *         description: Unauthorized - Provider authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ * 
+ * /api/ratings/provider/rate-customer:
+ *   post:
+ *     tags: [Provider Ratings]
+ *     summary: Create provider rating for customer
+ *     description: Create a new rating for a customer by provider (Provider rates customer after finished appointment)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - appointment_id
+ *               - customer_id
+ *               - rating_value
+ *             properties:
+ *               appointment_id:
+ *                 type: integer
+ *                 description: ID of the finished appointment
+ *                 example: 123
+ *               customer_id:
+ *                 type: integer
+ *                 description: ID of the customer to rate
+ *                 example: 456
+ *               rating_value:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 5
+ *                 description: Rating value (1-5 stars)
+ *                 example: 5
+ *               rating_comment:
+ *                 type: string
+ *                 description: Optional comment about the customer
+ *                 example: "Great customer, very cooperative and understanding"
+ *               rating_photo:
+ *                 type: string
+ *                 format: binary
+ *                 description: Optional photo for review proof
+ *     responses:
+ *       201:
+ *         description: Customer rating created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Customer rating created successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 789
+ *                     rating_value:
+ *                       type: integer
+ *                       example: 5
+ *                     rating_comment:
+ *                       type: string
+ *                       example: "Great customer, very cooperative and understanding"
+ *                     rating_photo:
+ *                       type: string
+ *                       nullable: true
+ *                       example: "uploads/rating-photos/rating789.jpg"
+ *                     appointment_id:
+ *                       type: integer
+ *                       example: 123
+ *                     user_id:
+ *                       type: integer
+ *                       example: 456
+ *                     provider_id:
+ *                       type: integer
+ *                       example: 101
+ *                     rated_by:
+ *                       type: string
+ *                       example: "provider"
+ *                     created_at:
+ *                       type: string
+ *                       format: date-time
+ *                       example: "2024-01-15T14:30:00Z"
+ *                     user:
+ *                       type: object
+ *                       properties:
+ *                         user_id:
+ *                           type: integer
+ *                           example: 456
+ *                         first_name:
+ *                           type: string
+ *                           example: "John"
+ *                         last_name:
+ *                           type: string
+ *                           example: "Doe"
+ *                         profile_photo:
+ *                           type: string
+ *                           nullable: true
+ *                           example: "uploads/profiles/user456.jpg"
+ *                     serviceProvider:
+ *                       type: object
+ *                       properties:
+ *                         provider_id:
+ *                           type: integer
+ *                           example: 101
+ *                         provider_first_name:
+ *                           type: string
+ *                           example: "Mike"
+ *                         provider_last_name:
+ *                           type: string
+ *                           example: "Smith"
+ *                     appointment:
+ *                       type: object
+ *                       properties:
+ *                         appointment_id:
+ *                           type: integer
+ *                           example: 123
+ *                         scheduled_date:
+ *                           type: string
+ *                           format: date-time
+ *                           example: "2024-01-15T10:00:00Z"
+ *                         service:
+ *                           type: object
+ *                           properties:
+ *                             service_title:
+ *                               type: string
+ *                               example: "AC Repair"
+ *       400:
+ *         description: Bad request - Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   examples:
+ *                     missing_fields: "Appointment ID, Customer ID, and rating value are required"
+ *                     invalid_rating: "Rating value must be between 1 and 5"
+ *                     already_rated: "You have already rated this customer for this appointment"
+ *       401:
+ *         description: Unauthorized - Provider authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: Appointment not found or not authorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Appointment not found or not finished, or you are not authorized to rate this appointment"
+ * 
+ * /api/ratings/provider/given-ratings:
+ *   get:
+ *     tags: [Provider Ratings]
+ *     summary: Get provider given ratings
+ *     description: Get all ratings given by the authenticated provider to customers
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           default: 1
+ *         description: Page number for pagination
+ *         example: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 10
+ *         description: Number of ratings per page
+ *         example: 10
+ *     responses:
+ *       200:
+ *         description: Provider given ratings retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     ratings:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 789
+ *                           rating_value:
+ *                             type: integer
+ *                             example: 5
+ *                           rating_comment:
+ *                             type: string
+ *                             example: "Great customer, very cooperative"
+ *                           rating_photo:
+ *                             type: string
+ *                             nullable: true
+ *                             example: "uploads/rating-photos/rating789.jpg"
+ *                           rated_by:
+ *                             type: string
+ *                             example: "provider"
+ *                           created_at:
+ *                             type: string
+ *                             format: date-time
+ *                             example: "2024-01-15T14:30:00Z"
+ *                           user:
+ *                             type: object
+ *                             properties:
+ *                               user_id:
+ *                                 type: integer
+ *                                 example: 456
+ *                               first_name:
+ *                                 type: string
+ *                                 example: "John"
+ *                               last_name:
+ *                                 type: string
+ *                                 example: "Doe"
+ *                               profile_photo:
+ *                                 type: string
+ *                                 nullable: true
+ *                                 example: "uploads/profiles/user456.jpg"
+ *                           appointment:
+ *                             type: object
+ *                             properties:
+ *                               appointment_id:
+ *                                 type: integer
+ *                                 example: 123
+ *                               scheduled_date:
+ *                                 type: string
+ *                                 format: date-time
+ *                                 example: "2024-01-15T10:00:00Z"
+ *                               service:
+ *                                 type: object
+ *                                 properties:
+ *                                   service_title:
+ *                                     type: string
+ *                                     example: "AC Repair"
+ *                     pagination:
+ *                       type: object
+ *                       properties:
+ *                         current_page:
+ *                           type: integer
+ *                           example: 1
+ *                         total_pages:
+ *                           type: integer
+ *                           example: 5
+ *                         total_ratings:
+ *                           type: integer
+ *                           example: 47
+ *                         has_next:
+ *                           type: boolean
+ *                           example: true
+ *                         has_prev:
+ *                           type: boolean
+ *                           example: false
+ *       401:
+ *         description: Unauthorized - Provider authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ * 
+ * /api/ratings/customer/{customerId}/received-ratings:
+ *   get:
+ *     tags: [Provider Ratings]
+ *     summary: Get customer received ratings
+ *     description: Get all ratings received by a customer from providers (public endpoint)
+ *     parameters:
+ *       - in: path
+ *         name: customerId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Customer ID
+ *         example: 456
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           default: 1
+ *         description: Page number for pagination
+ *         example: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 10
+ *         description: Number of ratings per page
+ *         example: 10
+ *     responses:
+ *       200:
+ *         description: Customer received ratings retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     ratings:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 789
+ *                           rating_value:
+ *                             type: integer
+ *                             example: 5
+ *                           rating_comment:
+ *                             type: string
+ *                             example: "Great customer, very cooperative"
+ *                           rating_photo:
+ *                             type: string
+ *                             nullable: true
+ *                             example: "uploads/rating-photos/rating789.jpg"
+ *                           rated_by:
+ *                             type: string
+ *                             example: "provider"
+ *                           created_at:
+ *                             type: string
+ *                             format: date-time
+ *                             example: "2024-01-15T14:30:00Z"
+ *                           serviceProvider:
+ *                             type: object
+ *                             properties:
+ *                               provider_id:
+ *                                 type: integer
+ *                                 example: 101
+ *                               provider_first_name:
+ *                                 type: string
+ *                                 example: "Mike"
+ *                               provider_last_name:
+ *                                 type: string
+ *                                 example: "Smith"
+ *                               provider_profile_photo:
+ *                                 type: string
+ *                                 nullable: true
+ *                                 example: "uploads/profiles/provider101.jpg"
+ *                           appointment:
+ *                             type: object
+ *                             properties:
+ *                               appointment_id:
+ *                                 type: integer
+ *                                 example: 123
+ *                               scheduled_date:
+ *                                 type: string
+ *                                 format: date-time
+ *                                 example: "2024-01-15T10:00:00Z"
+ *                               service:
+ *                                 type: object
+ *                                 properties:
+ *                                   service_title:
+ *                                     type: string
+ *                                     example: "AC Repair"
+ *                     pagination:
+ *                       type: object
+ *                       properties:
+ *                         current_page:
+ *                           type: integer
+ *                           example: 1
+ *                         total_pages:
+ *                           type: integer
+ *                           example: 3
+ *                         total_ratings:
+ *                           type: integer
+ *                           example: 27
+ *                         has_next:
+ *                           type: boolean
+ *                           example: true
+ *                         has_prev:
+ *                           type: boolean
+ *                           example: false
+ *                     statistics:
+ *                       type: object
+ *                       properties:
+ *                         average_rating:
+ *                           type: number
+ *                           format: float
+ *                           example: 4.56
+ *                         total_ratings:
+ *                           type: integer
+ *                           example: 27
+ *                         rating_distribution:
+ *                           type: array
+ *                           items:
+ *                             type: object
+ *                             properties:
+ *                               star:
+ *                                 type: integer
+ *                                 example: 5
+ *                               count:
+ *                                 type: integer
+ *                                 example: 15
  */

@@ -5,6 +5,8 @@
  *     tags: [Appointments]
  *     summary: Get all appointments with filtering and pagination
  *     description: Retrieve appointments with advanced filtering options
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: page
@@ -108,6 +110,8 @@
  *     tags: [Appointments]
  *     summary: Create new appointment
  *     description: Create a new appointment with validation
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -122,24 +126,38 @@
  *               customer_id:
  *                 type: integer
  *                 example: 123
+ *                 description: ID of the customer booking the appointment
  *               provider_id:
  *                 type: integer
  *                 example: 456
+ *                 description: ID of the service provider
  *               scheduled_date:
  *                 type: string
  *                 format: date-time
  *                 example: "2024-01-15T10:00:00.000Z"
+ *                 description: Scheduled date and time for the appointment
+ *               availability_id:
+ *                 type: integer
+ *                 example: 789
+ *                 description: ID of the provider's availability slot (optional - will use/create default if not provided)
+ *               service_id:
+ *                 type: integer
+ *                 example: 101
+ *                 description: ID of the service being booked (optional - will use/create default if not provided)
  *               appointment_status:
  *                 type: string
  *                 enum: [pending, approved, confirmed, in-progress, finished, completed, cancelled, no-show]
  *                 default: pending
+ *                 description: Current status of the appointment
  *               final_price:
  *                 type: number
  *                 format: float
  *                 example: 150.00
+ *                 description: Final agreed price for the service
  *               repairDescription:
  *                 type: string
  *                 example: Kitchen sink faucet needs repair
+ *                 description: Detailed description of the repair needed
  *     responses:
  *       201:
  *         description: Appointment created successfully
@@ -168,6 +186,8 @@
  *     tags: [Appointments]
  *     summary: Get appointment by ID
  *     description: Retrieve a specific appointment with full details
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: appointmentId
@@ -198,6 +218,8 @@
  *     tags: [Appointments]
  *     summary: Update appointment
  *     description: Update appointment details with conflict checking
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: appointmentId
@@ -241,6 +263,8 @@
  *     tags: [Appointments]
  *     summary: Delete appointment
  *     description: Permanently delete appointment and related ratings
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: appointmentId
@@ -268,6 +292,8 @@
  *     tags: [Appointments]
  *     summary: Cancel appointment
  *     description: Cancel appointment with required cancellation reason
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: appointmentId
@@ -300,6 +326,8 @@
  *     tags: [Appointments]
  *     summary: Get appointment statistics
  *     description: Get comprehensive appointment statistics with optional filtering
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: provider_id
@@ -364,6 +392,8 @@
  *     tags: [Appointments]
  *     summary: Get provider appointments
  *     description: Get all appointments for a specific provider with filtering
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: providerId
@@ -427,6 +457,8 @@
  *     tags: [Appointments]
  *     summary: Get customer appointments
  *     description: Get all appointments for a specific customer with filtering
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: customerId

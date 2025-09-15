@@ -3,6 +3,7 @@ import express from 'express';
 import session from 'express-session';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { createServer } from 'http';
 import prisma from './prismaclient.js';
 import authCustomerRoutes from './route/authCustomer.js';
 import serviceProviderRoutes from './route/serviceProvider.js';
@@ -12,12 +13,17 @@ import availabilityRoutes from './route/availabilityRoutes.js';
 import appointmentRoutes from './route/appointmentRoutes.js';
 import adminRoutes from './route/adminRoutes.js';
 import ratingRoutes from './route/ratingRoutes.js';
+import messageRoutes from './route/messageRoutes.js';
+import testRoutes from './route/testRoutes.js';
+import { setWebSocketServer } from './controller/messageController.js';
 import cors from 'cors';
 import { specs, swaggerUi } from './config/swagger.js';
+import MessageWebSocketServer from './services/MessageWebSocketServer.js';
 
 
 const port = process.env.PORT || 3000;
 const app = express();
+const httpServer = createServer(app);
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -90,20 +96,43 @@ app.get('/admin-dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin-dashboard.html'));
 });
 
+// Chat Test Interface
+app.get('/chat-test', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'chat-test.html'));
+});
+
 // API Landing Page
 app.get('/docs', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'api-landing.html'));
 });
 
+// Authentication Helper Page
+app.get('/auth-helper', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'auth-helper.html'));
+});
+
 // Swagger API Documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
   explorer: true,
-  customCss: '.swagger-ui .topbar { display: none }',
+  customCss: `
+    .swagger-ui .topbar { display: none }
+    .swagger-ui .info { margin-bottom: 20px; }
+    .swagger-ui .scheme-container { 
+      background: #f7f7f7; 
+      padding: 15px; 
+      margin: 20px 0; 
+      border-radius: 5px; 
+      border-left: 4px solid #007bff;
+    }
+  `,
   customSiteTitle: 'Fixmo Backend API Documentation',
   swaggerOptions: {
     docExpansion: 'list',
     filter: true,
-    showRequestDuration: true
+    showRequestDuration: true,
+    persistAuthorization: true,
+    displayOperationId: false,
+    displayRequestDuration: true
   }
 }));
 
@@ -122,6 +151,8 @@ app.use('/api/certificates', certificateRoutes); // Certificate management route
 app.use('/api/availability', availabilityRoutes); // Availability management routes
 app.use('/api/appointments', appointmentRoutes); // Appointment management routes
 app.use('/api/ratings', ratingRoutes); // Rating management routes
+app.use('/api/messages', messageRoutes); // Message management routes
+app.use('/api/test', testRoutes); // Test routes for Cloudinary and other features
 
 // 404 handler for undefined routes (without wildcard)
 app.use((req, res) => {
@@ -137,6 +168,7 @@ app.use((req, res) => {
       '/api/availability/*',
       '/api/appointments/*',
       '/api/ratings/*',
+      '/api/messages/*',
       '/uploads/*'
     ]
   });
@@ -151,8 +183,15 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(port, '0.0.0.0', () => {
+// Initialize WebSocket server
+const messageWebSocket = new MessageWebSocketServer(httpServer);
+
+// Pass WebSocket server to message controller
+setWebSocketServer(messageWebSocket);
+
+httpServer.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Fixmo Backend API Server is running on http://0.0.0.0:${port}`);
   console.log(`📱 Ready for React Native connections`);
+  console.log(`💬 WebSocket server initialized for real-time messaging`);
   console.log(`🗄️ Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
 });

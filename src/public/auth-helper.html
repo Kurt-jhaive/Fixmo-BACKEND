@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fixmo API Authentication Helper</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .auth-section {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #2196f3;
+        }
+        .token-display {
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            word-break: break-all;
+            font-family: monospace;
+            border: 2px dashed #ccc;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        input {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 200px;
+        }
+        .success {
+            color: #28a745;
+            font-weight: bold;
+        }
+        .error {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        .step {
+            background: #fff3cd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 4px solid #ffc107;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Fixmo API Authentication Helper</h1>
+        <p>Use this helper to get JWT tokens for testing the API in Swagger UI.</p>
+
+        <div class="auth-section">
+            <h2>👤 Customer Login</h2>
+            <div>
+                <input type="email" id="customerEmail" placeholder="customer@example.com" value="test@customer.com">
+                <input type="password" id="customerPassword" placeholder="password" value="password123">
+                <button onclick="loginCustomer()">Get Customer Token</button>
+            </div>
+            <div id="customerResult"></div>
+        </div>
+
+        <div class="auth-section">
+            <h2>🔧 Provider Login</h2>
+            <div>
+                <input type="email" id="providerEmail" placeholder="provider@example.com" value="test@provider.com">
+                <input type="password" id="providerPassword" placeholder="password" value="password123">
+                <button onclick="loginProvider()">Get Provider Token</button>
+            </div>
+            <div id="providerResult"></div>
+        </div>
+
+        <div class="step">
+            <h3>📋 How to Use the Token in Swagger:</h3>
+            <ol>
+                <li>Copy the JWT token from above</li>
+                <li>Go to <a href="/api-docs" target="_blank">Swagger UI</a></li>
+                <li>Click the <strong>"Authorize"</strong> button (🔒) at the top right</li>
+                <li>Paste your token in the "Value" field</li>
+                <li>Click "Authorize" and then "Close"</li>
+                <li>Now you can use protected endpoints like certificate upload!</li>
+            </ol>
+        </div>
+
+        <div class="step">
+            <h3>🧪 Test Certificate Upload:</h3>
+            <p>After authorizing with a <strong>provider token</strong>, you can test:</p>
+            <ul>
+                <li><code>GET /api/certificates</code> - View your certificates</li>
+                <li><code>POST /api/certificates/upload</code> - Upload a new certificate</li>
+                <li><code>GET /api/certificates/valid-types</code> - Get certificate types</li>
+            </ul>
+        </div>
+
+        <div class="auth-section">
+            <h3>🚀 Quick Links:</h3>
+            <a href="/api-docs" target="_blank"><button>Open Swagger UI</button></a>
+            <a href="/docs" target="_blank"><button>API Documentation</button></a>
+            <a href="/" target="_blank"><button>API Health Check</button></a>
+        </div>
+    </div>
+
+    <script>
+        async function loginCustomer() {
+            const email = document.getElementById('customerEmail').value;
+            const password = document.getElementById('customerPassword').value;
+            const resultDiv = document.getElementById('customerResult');
+
+            try {
+                const response = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resultDiv.innerHTML = `
+                        <div class="success">✅ Login Successful!</div>
+                        <div><strong>User ID:</strong> ${data.userId}</div>
+                        <div><strong>Username:</strong> ${data.userName}</div>
+                        <div><strong>JWT Token:</strong></div>
+                        <div class="token-display">${data.token}</div>
+                        <button onclick="copyToClipboard('${data.token}')">📋 Copy Token</button>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<div class="error">❌ Error: ${data.message}</div>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">❌ Network Error: ${error.message}</div>`;
+            }
+        }
+
+        async function loginProvider() {
+            const email = document.getElementById('providerEmail').value;
+            const password = document.getElementById('providerPassword').value;
+            const resultDiv = document.getElementById('providerResult');
+
+            try {
+                const response = await fetch('/auth/provider-login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        provider_email: email, 
+                        provider_password: password 
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resultDiv.innerHTML = `
+                        <div class="success">✅ Provider Login Successful!</div>
+                        <div><strong>Provider ID:</strong> ${data.providerId}</div>
+                        <div><strong>Username:</strong> ${data.providerUserName}</div>
+                        <div><strong>JWT Token:</strong></div>
+                        <div class="token-display">${data.token}</div>
+                        <button onclick="copyToClipboard('${data.token}')">📋 Copy Token</button>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<div class="error">❌ Error: ${data.message}</div>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">❌ Network Error: ${error.message}</div>`;
+            }
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('🎉 Token copied to clipboard! Now go to Swagger UI and click "Authorize"');
+            }).catch(() => {
+                alert('❌ Failed to copy token. Please copy manually.');
+            });
+        }
+    </script>
+</body>
+</html>
