@@ -1,6 +1,16 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { 
+    sendUserApprovalEmail, 
+    sendProviderApprovalEmail, 
+    sendCertificateApprovalEmail,
+    sendUserDeactivationEmail,
+    sendProviderDeactivationEmail,
+    sendUserRejectionEmail,
+    sendProviderRejectionEmail,
+    sendCertificateRejectionEmail
+} from '../services/mailer.js';
 
 const prisma = new PrismaClient();
 
@@ -302,6 +312,18 @@ class AdminController {
                 data: { is_verified: true }
             });
 
+            // Send approval email
+            try {
+                await sendUserApprovalEmail(user.email, {
+                    firstName: user.first_name,
+                    lastName: user.last_name,
+                    userName: user.userName
+                });
+            } catch (emailError) {
+                console.error('Error sending user approval email:', emailError);
+                // Don't fail the verification if email fails
+            }
+
             res.json({ message: 'User verified successfully', user });
         } catch (error) {
             console.error('Error verifying user:', error);
@@ -328,15 +350,71 @@ class AdminController {
     async deactivateUser(req, res) {
         try {
             const { userId } = req.params;
+            const { reason } = req.body;
+
+            if (!reason) {
+                return res.status(400).json({ message: 'Deactivation reason is required' });
+            }
 
             const user = await prisma.user.update({
                 where: { user_id: parseInt(userId) },
-                data: { is_activated: false }
+                data: { 
+                    is_activated: false,
+                    user_reason: reason
+                }
             });
+
+            // Send deactivation email
+            try {
+                await sendUserDeactivationEmail(user.email, {
+                    firstName: user.first_name,
+                    lastName: user.last_name,
+                    userName: user.userName
+                }, reason);
+            } catch (emailError) {
+                console.error('Error sending user deactivation email:', emailError);
+                // Don't fail the deactivation if email fails
+            }
 
             res.json({ message: 'User deactivated successfully', user });
         } catch (error) {
             console.error('Error deactivating user:', error);
+            res.status(500).json({ message: 'Internal server error' });
+        }
+    }
+
+    async rejectUser(req, res) {
+        try {
+            const { userId } = req.params;
+            const { reason } = req.body;
+
+            if (!reason) {
+                return res.status(400).json({ message: 'Rejection reason is required' });
+            }
+
+            const user = await prisma.user.update({
+                where: { user_id: parseInt(userId) },
+                data: { 
+                    is_verified: false,
+                    user_reason: reason
+                }
+            });
+
+            // Send rejection email
+            try {
+                await sendUserRejectionEmail(user.email, {
+                    firstName: user.first_name,
+                    lastName: user.last_name,
+                    userName: user.userName
+                }, reason);
+            } catch (emailError) {
+                console.error('Error sending user rejection email:', emailError);
+                // Don't fail the rejection if email fails
+            }
+
+            res.json({ message: 'User verification rejected', user });
+        } catch (error) {
+            console.error('Error rejecting user:', error);
             res.status(500).json({ message: 'Internal server error' });
         }
     }
@@ -421,6 +499,18 @@ class AdminController {
                 data: { provider_isVerified: true }
             });
 
+            // Send approval email
+            try {
+                await sendProviderApprovalEmail(provider.provider_email, {
+                    firstName: provider.provider_firstname,
+                    lastName: provider.provider_lastname,
+                    businessName: provider.business_name
+                });
+            } catch (emailError) {
+                console.error('Error sending provider approval email:', emailError);
+                // Don't fail the verification if email fails
+            }
+
             res.json({ message: 'Provider verified successfully', provider });
         } catch (error) {
             console.error('Error verifying provider:', error);
@@ -447,15 +537,71 @@ class AdminController {
     async deactivateProvider(req, res) {
         try {
             const { providerId } = req.params;
+            const { reason } = req.body;
+
+            if (!reason) {
+                return res.status(400).json({ message: 'Deactivation reason is required' });
+            }
 
             const provider = await prisma.serviceProviderDetails.update({
                 where: { provider_id: parseInt(providerId) },
-                data: { provider_isActivated: false }
+                data: { 
+                    provider_isActivated: false,
+                    provider_reason: reason
+                }
             });
+
+            // Send deactivation email
+            try {
+                await sendProviderDeactivationEmail(provider.provider_email, {
+                    firstName: provider.provider_firstname,
+                    lastName: provider.provider_lastname,
+                    businessName: provider.business_name
+                }, reason);
+            } catch (emailError) {
+                console.error('Error sending provider deactivation email:', emailError);
+                // Don't fail the deactivation if email fails
+            }
 
             res.json({ message: 'Provider deactivated successfully', provider });
         } catch (error) {
             console.error('Error deactivating provider:', error);
+            res.status(500).json({ message: 'Internal server error' });
+        }
+    }
+
+    async rejectProvider(req, res) {
+        try {
+            const { providerId } = req.params;
+            const { reason } = req.body;
+
+            if (!reason) {
+                return res.status(400).json({ message: 'Rejection reason is required' });
+            }
+
+            const provider = await prisma.serviceProviderDetails.update({
+                where: { provider_id: parseInt(providerId) },
+                data: { 
+                    provider_isVerified: false,
+                    provider_reason: reason
+                }
+            });
+
+            // Send rejection email
+            try {
+                await sendProviderRejectionEmail(provider.provider_email, {
+                    firstName: provider.provider_firstname,
+                    lastName: provider.provider_lastname,
+                    businessName: provider.business_name
+                }, reason);
+            } catch (emailError) {
+                console.error('Error sending provider rejection email:', emailError);
+                // Don't fail the rejection if email fails
+            }
+
+            res.json({ message: 'Provider verification rejected', provider });
+        } catch (error) {
+            console.error('Error rejecting provider:', error);
             res.status(500).json({ message: 'Internal server error' });
         }
     }
@@ -555,8 +701,24 @@ class AdminController {
 
             const certificate = await prisma.certificate.update({
                 where: { certificate_id: parseInt(certificateId) },
-                data: { certificate_status: 'Approved' }
+                data: { certificate_status: 'Approved' },
+                include: {
+                    provider: true
+                }
             });
+
+            // Send approval email
+            try {
+                await sendCertificateApprovalEmail(certificate.provider.provider_email, {
+                    firstName: certificate.provider.provider_firstname,
+                    lastName: certificate.provider.provider_lastname,
+                    businessName: certificate.provider.business_name,
+                    certificateName: certificate.certificate_name || 'Certificate'
+                });
+            } catch (emailError) {
+                console.error('Error sending certificate approval email:', emailError);
+                // Don't fail the approval if email fails
+            }
 
             res.json({ message: 'Certificate approved successfully', certificate });
         } catch (error) {
@@ -568,11 +730,35 @@ class AdminController {
     async rejectCertificate(req, res) {
         try {
             const { certificateId } = req.params;
+            const { reason } = req.body;
+
+            if (!reason) {
+                return res.status(400).json({ message: 'Rejection reason is required' });
+            }
 
             const certificate = await prisma.certificate.update({
                 where: { certificate_id: parseInt(certificateId) },
-                data: { certificate_status: 'Rejected' }
+                data: { 
+                    certificate_status: 'Rejected',
+                    certificate_reason: reason
+                },
+                include: {
+                    provider: true
+                }
             });
+
+            // Send rejection email
+            try {
+                await sendCertificateRejectionEmail(certificate.provider.provider_email, {
+                    firstName: certificate.provider.provider_firstname,
+                    lastName: certificate.provider.provider_lastname,
+                    businessName: certificate.provider.business_name,
+                    certificateName: certificate.certificate_name || 'Certificate'
+                }, reason);
+            } catch (emailError) {
+                console.error('Error sending certificate rejection email:', emailError);
+                // Don't fail the rejection if email fails
+            }
 
             res.json({ message: 'Certificate rejected successfully', certificate });
         } catch (error) {

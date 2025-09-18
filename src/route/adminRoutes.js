@@ -15,6 +15,7 @@ router.get('/recent-activity', adminController.getRecentActivity);
 router.get('/users', adminController.getUsers);
 router.get('/users/:userId', adminController.getUserById);
 router.put('/users/:userId/verify', adminController.verifyUser);
+router.put('/users/:userId/reject', adminController.rejectUser);
 router.put('/users/:userId/activate', adminController.activateUser);
 router.put('/users/:userId/deactivate', adminController.deactivateUser);
 
@@ -22,6 +23,7 @@ router.put('/users/:userId/deactivate', adminController.deactivateUser);
 router.get('/providers', adminController.getProviders);
 router.get('/providers/:providerId', adminController.getProviderById);
 router.put('/providers/:providerId/verify', adminController.verifyProvider);
+router.put('/providers/:providerId/reject', adminController.rejectProvider);
 router.put('/providers/:providerId/activate', adminController.activateProvider);
 router.put('/providers/:providerId/deactivate', adminController.deactivateProvider);
 

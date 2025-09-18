@@ -24,6 +24,7 @@ model User {
   is_activated      Boolean        @default(true)
   birthday          DateTime?
   exact_location    String?
+  user_reason       String?  
   user_appointments Appointment[]
   user_rating       Rating[]
   conversations     Conversation[]
@@ -47,6 +48,7 @@ model ServiceProviderDetails {
   provider_isActivated    Boolean          @default(true)
   provider_birthday       DateTime?
   provider_exact_location String?
+  provider_reason         String?
   provider_appointments   Appointment[]
   provider_availability   Availability[]
   provider_certificates   Certificate[]
@@ -65,6 +67,7 @@ model Certificate {
   certificate_status    String                 @default("Pending")
   created_at            DateTime               @default(now())
   provider              ServiceProviderDetails @relation(fields: [provider_id], references: [provider_id])
+  certificate_reason    String?
   CoveredService        CoveredService[]
 }
 
