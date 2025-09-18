@@ -38,6 +38,13 @@ class AdminController {
         try {
             const { username, password } = req.body;
 
+            // Validate input
+            if (!username || !password) {
+                return res.status(400).json({ 
+                    message: 'Username and password are required' 
+                });
+            }
+
             // Find admin by username or email
             const admin = await prisma.admin.findFirst({
                 where: {
@@ -50,6 +57,13 @@ class AdminController {
 
             if (!admin) {
                 return res.status(401).json({ message: 'Invalid credentials' });
+            }
+
+            // Check if admin is active
+            if (!admin.is_active) {
+                return res.status(401).json({ 
+                    message: 'Account is deactivated. Please contact super admin.' 
+                });
             }
 
             // Verify password
@@ -75,7 +89,8 @@ class AdminController {
                 { expiresIn: '24h' }
             );
 
-            res.json({
+            // Prepare response
+            const response = {
                 message: 'Login successful',
                 token,
                 admin: {
@@ -83,9 +98,18 @@ class AdminController {
                     username: admin.admin_username,
                     email: admin.admin_email,
                     name: admin.admin_name,
-                    role: admin.admin_role
+                    role: admin.admin_role,
+                    is_active: admin.is_active
                 }
-            });
+            };
+
+            // Add password change flag if required
+            if (admin.must_change_password) {
+                response.must_change_password = true;
+                response.message = 'Login successful. Password change required.';
+            }
+
+            res.json(response);
         } catch (error) {
             console.error('Error in admin login:', error);
             res.status(500).json({ message: 'Internal server error' });
@@ -856,6 +880,267 @@ class AdminController {
             });
         } catch (error) {
             console.error('Error fetching unverified customers:', error);
+            res.status(500).json({ message: 'Internal server error' });
+        }
+    }
+
+    // Admin Password Management
+    async changePassword(req, res) {
+        try {
+            const { current_password, new_password } = req.body;
+            const adminId = req.admin.admin_id;
+
+            // Validate input
+            if (!current_password || !new_password) {
+                return res.status(400).json({ 
+                    message: 'Current password and new password are required' 
+                });
+            }
+
+            // Password strength validation
+            if (new_password.length < 8) {
+                return res.status(400).json({ 
+                    message: 'New password must be at least 8 characters long' 
+                });
+            }
+
+            // Check password complexity (at least one uppercase, lowercase, number, special char)
+            const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
+            if (!passwordRegex.test(new_password)) {
+                return res.status(400).json({ 
+                    message: 'New password must contain at least one uppercase letter, one lowercase letter, one number, and one special character' 
+                });
+            }
+
+            // Get current admin data
+            const admin = await prisma.admin.findUnique({
+                where: { admin_id: adminId }
+            });
+
+            if (!admin) {
+                return res.status(404).json({ message: 'Admin not found' });
+            }
+
+            // Verify current password
+            const isCurrentPasswordValid = await bcrypt.compare(current_password, admin.admin_password);
+            if (!isCurrentPasswordValid) {
+                return res.status(400).json({ message: 'Current password is incorrect' });
+            }
+
+            // Check if new password is different from current
+            const isSamePassword = await bcrypt.compare(new_password, admin.admin_password);
+            if (isSamePassword) {
+                return res.status(400).json({ 
+                    message: 'New password must be different from current password' 
+                });
+            }
+
+            // Hash new password
+            const saltRounds = parseInt(process.env.BCRYPT_SALT_ROUNDS) || 12;
+            const hashedNewPassword = await bcrypt.hash(new_password, saltRounds);
+
+            // Update password and clear must_change_password flag
+            await prisma.admin.update({
+                where: { admin_id: adminId },
+                data: {
+                    admin_password: hashedNewPassword,
+                    must_change_password: false
+                }
+            });
+
+            res.json({ 
+                message: 'Password changed successfully' 
+            });
+
+        } catch (error) {
+            console.error('Error changing admin password:', error);
+            res.status(500).json({ message: 'Internal server error' });
+        }
+    }
+
+    // Admin Management (Super Admin Only)
+    async inviteAdmin(req, res) {
+        try {
+            const { email, name, role = 'admin' } = req.body;
+
+            // Validate input
+            if (!email || !name) {
+                return res.status(400).json({ 
+                    message: 'Email and name are required' 
+                });
+            }
+
+            // Validate email format
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                return res.status(400).json({ 
+                    message: 'Invalid email format' 
+                });
+            }
+
+            // Validate role
+            const validRoles = ['admin', 'super_admin'];
+            if (!validRoles.includes(role)) {
+                return res.status(400).json({ 
+                    message: 'Invalid role. Must be admin or super_admin' 
+                });
+            }
+
+            // Check if admin with email already exists
+            const existingAdmin = await prisma.admin.findUnique({
+                where: { admin_email: email }
+            });
+
+            if (existingAdmin) {
+                return res.status(400).json({ 
+                    message: 'Admin with this email already exists' 
+                });
+            }
+
+            // Generate username from email
+            const username = email.split('@')[0].toLowerCase() + '_' + Date.now();
+
+            // Generate random temporary password
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@$!%*?&';
+            let tempPassword = '';
+            for (let i = 0; i < 12; i++) {
+                tempPassword += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+
+            // Hash the temporary password
+            const saltRounds = parseInt(process.env.BCRYPT_SALT_ROUNDS) || 12;
+            const hashedPassword = await bcrypt.hash(tempPassword, saltRounds);
+
+            // Create new admin
+            const newAdmin = await prisma.admin.create({
+                data: {
+                    admin_username: username,
+                    admin_email: email,
+                    admin_password: hashedPassword,
+                    admin_name: name,
+                    admin_role: role,
+                    is_active: true,
+                    must_change_password: true
+                }
+            });
+
+            res.status(201).json({
+                message: 'Admin invited successfully',
+                admin: {
+                    id: newAdmin.admin_id,
+                    username: newAdmin.admin_username,
+                    email: newAdmin.admin_email,
+                    name: newAdmin.admin_name,
+                    role: newAdmin.admin_role,
+                    is_active: newAdmin.is_active
+                },
+                temporary_password: tempPassword, // Return temp password for manual sharing
+                note: 'Please share this temporary password securely with the new admin'
+            });
+
+        } catch (error) {
+            console.error('Error inviting admin:', error);
+            res.status(500).json({ message: 'Internal server error' });
+        }
+    }
+
+    // Get all admins (Super Admin Only)
+    async getAllAdmins(req, res) {
+        try {
+            const admins = await prisma.admin.findMany({
+                select: {
+                    admin_id: true,
+                    admin_username: true,
+                    admin_email: true,
+                    admin_name: true,
+                    admin_role: true,
+                    is_active: true,
+                    must_change_password: true,
+                    created_at: true,
+                    last_login: true
+                },
+                orderBy: {
+                    created_at: 'desc'
+                }
+            });
+
+            res.json({
+                message: 'Admins fetched successfully',
+                data: admins
+            });
+
+        } catch (error) {
+            console.error('Error fetching admins:', error);
+            res.status(500).json({ message: 'Internal server error' });
+        }
+    }
+
+    // Deactivate/Activate admin (Super Admin Only)
+    async toggleAdminStatus(req, res) {
+        try {
+            const { admin_id } = req.params;
+            const { is_active } = req.body;
+
+            // Validate input
+            if (typeof is_active !== 'boolean') {
+                return res.status(400).json({ 
+                    message: 'is_active must be a boolean value' 
+                });
+            }
+
+            // Check if admin exists
+            const targetAdmin = await prisma.admin.findUnique({
+                where: { admin_id: parseInt(admin_id) }
+            });
+
+            if (!targetAdmin) {
+                return res.status(404).json({ message: 'Admin not found' });
+            }
+
+            // Prevent super admin from deactivating themselves
+            if (targetAdmin.admin_id === req.admin.admin_id && !is_active) {
+                return res.status(400).json({ 
+                    message: 'Cannot deactivate your own account' 
+                });
+            }
+
+            // Prevent deactivating the last super admin
+            if (targetAdmin.admin_role === 'super_admin' && !is_active) {
+                const superAdminCount = await prisma.admin.count({
+                    where: { 
+                        admin_role: 'super_admin',
+                        is_active: true 
+                    }
+                });
+
+                if (superAdminCount <= 1) {
+                    return res.status(400).json({ 
+                        message: 'Cannot deactivate the last super admin' 
+                    });
+                }
+            }
+
+            // Update admin status
+            const updatedAdmin = await prisma.admin.update({
+                where: { admin_id: parseInt(admin_id) },
+                data: { is_active },
+                select: {
+                    admin_id: true,
+                    admin_username: true,
+                    admin_email: true,
+                    admin_name: true,
+                    admin_role: true,
+                    is_active: true
+                }
+            });
+
+            res.json({
+                message: `Admin ${is_active ? 'activated' : 'deactivated'} successfully`,
+                admin: updatedAdmin
+            });
+
+        } catch (error) {
+            console.error('Error toggling admin status:', error);
             res.status(500).json({ message: 'Internal server error' });
         }
     }

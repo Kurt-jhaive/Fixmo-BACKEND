@@ -1,10 +1,26 @@
 import express from 'express';
 import adminController from '../controller/adminControllerNew.js';
+import { 
+    adminAuthMiddleware, 
+    superAdminMiddleware, 
+    checkPasswordChangeRequired 
+} from '../middleware/adminAuthMiddleware.js';
 
 const router = express.Router();
 
-// Admin Authentication Routes
+// Public Admin Authentication Routes (no middleware)
 router.post('/login', adminController.adminLogin);
+
+// Protected Admin Routes (require authentication)
+router.use(adminAuthMiddleware); // Apply to all routes below
+
+// Admin Password Management
+router.put('/change-password', adminController.changePassword);
+
+// Apply password change check to all routes below (except change-password)
+router.use(checkPasswordChangeRequired);
+
+// Admin logout and basic routes
 router.post('/logout', adminController.adminLogout);
 
 // Dashboard Routes
@@ -41,5 +57,13 @@ router.post('/verify-service-provider', adminController.verifyServiceProvider);
 router.post('/verify-customer', adminController.verifyCustomer);
 router.get('/unverified-service-providers', adminController.getUnverifiedServiceProviders);
 router.get('/unverified-customers', adminController.getUnverifiedCustomers);
+
+// Super Admin Only Routes
+router.use(superAdminMiddleware); // Apply to all routes below
+
+// Admin Management Routes (Super Admin Only)
+router.post('/', adminController.inviteAdmin); // POST /admins
+router.get('/', adminController.getAllAdmins); // GET /admins
+router.put('/:admin_id/toggle-status', adminController.toggleAdminStatus); // PUT /admins/:admin_id/toggle-status
 
 export default router;

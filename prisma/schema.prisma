@@ -173,6 +173,7 @@ model Admin {
   created_at     DateTime @default(now())
   last_login     DateTime?
   is_active      Boolean  @default(true)
+  must_change_password Boolean @default(true)
 }
 
 model Conversation {
