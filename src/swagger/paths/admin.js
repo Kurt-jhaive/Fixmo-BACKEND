@@ -2,9 +2,20 @@
  * @swagger
  * /api/admin/login:
  *   post:
- *     tags: [Admin]
+ *     tags: [Admin Authentication]
  *     summary: Admin login
- *     description: Authenticate admin user and get access token
+ *     description: |
+ *       Authenticate admin user and get access token.
+ *       
+ *       **Security Features:**
+ *       - Validates email + password
+ *       - Checks if admin account is active
+ *       - Returns JWT token for authenticated requests
+ *       - Indicates if password change is required
+ *       
+ *       **Default Super Admin:**
+ *       - Email: super@fixmo.local
+ *       - Password: SuperAdmin2024! (must be changed on first login)
  *     requestBody:
  *       required: true
  *       content:
@@ -18,11 +29,11 @@
  *               username:
  *                 type: string
  *                 description: Admin username or email
- *                 example: "admin@fixmo.com"
+ *                 example: "super@fixmo.local"
  *               password:
  *                 type: string
  *                 description: Admin password
- *                 example: "adminpassword123"
+ *                 example: "SuperAdmin2024!"
  *     responses:
  *       200:
  *         description: Login successful
@@ -34,24 +45,71 @@
  *                 message:
  *                   type: string
  *                   example: "Login successful"
- *                 admin:
- *                   $ref: '#/components/schemas/Admin'
  *                 token:
  *                   type: string
  *                   description: JWT access token
  *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
- *       401:
- *         description: Invalid credentials
+ *                 admin:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 1
+ *                     username:
+ *                       type: string
+ *                       example: "superadmin"
+ *                     email:
+ *                       type: string
+ *                       example: "super@fixmo.local"
+ *                     name:
+ *                       type: string
+ *                       example: "Super Administrator"
+ *                     role:
+ *                       type: string
+ *                       example: "super_admin"
+ *                     is_active:
+ *                       type: boolean
+ *                       example: true
+ *                 must_change_password:
+ *                   type: boolean
+ *                   description: Present if password change is required
+ *                   example: true
+ *       400:
+ *         description: Missing required fields
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Username and password are required"
+ *       401:
+ *         description: Invalid credentials or account deactivated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid credentials"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  * 
  * /api/admin/logout:
  *   post:
- *     tags: [Admin]
+ *     tags: [Admin Authentication]
  *     summary: Admin logout
- *     description: Logout admin user and invalidate session
+ *     description: Logout admin user (client-side token removal)
  *     security:
  *       - bearerAuth: []
  *     responses:
@@ -65,6 +123,425 @@
  *                 message:
  *                   type: string
  *                   example: "Logout successful"
+ * 
+ * /api/admin/change-password:
+ *   put:
+ *     tags: [Admin Authentication]
+ *     summary: Change admin password
+ *     description: |
+ *       Change admin password with security validations.
+ *       
+ *       **Password Requirements:**
+ *       - Minimum 8 characters
+ *       - At least one uppercase letter
+ *       - At least one lowercase letter
+ *       - At least one number
+ *       - At least one special character (@$!%*?&)
+ *       - Must be different from current password
+ *       
+ *       **Security Features:**
+ *       - Verifies current password
+ *       - Enforces password complexity
+ *       - Clears must_change_password flag
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - current_password
+ *               - new_password
+ *             properties:
+ *               current_password:
+ *                 type: string
+ *                 description: Current password
+ *                 example: "SuperAdmin2024!"
+ *               new_password:
+ *                 type: string
+ *                 description: New password (min 8 chars, uppercase, lowercase, number, special char)
+ *                 example: "NewSecurePassword2024!"
+ *     responses:
+ *       200:
+ *         description: Password changed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Password changed successfully"
+ *       400:
+ *         description: Invalid input or password requirements not met
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "New password must be at least 8 characters long"
+ *       401:
+ *         description: Invalid current password or unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Current password is incorrect"
+ *       404:
+ *         description: Admin not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Admin not found"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
+ * 
+ * /api/admin/:
+ *   post:
+ *     tags: [Admin Management]
+ *     summary: Invite new admin (Super Admin Only)
+ *     description: |
+ *       Create a new admin account with auto-generated temporary password and send invitation email.
+ *       
+ *       **Super Admin Only** - Requires super_admin role.
+ *       
+ *       **Features:**
+ *       - Auto-generates secure username
+ *       - Creates random temporary password
+ *       - Sets must_change_password to true
+ *       - Sends invitation email with login credentials
+ *       - Validates email uniqueness
+ *       - Includes role-specific responsibilities in email
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - name
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: New admin email address
+ *                 example: "new.admin@fixmo.local"
+ *               name:
+ *                 type: string
+ *                 description: New admin full name
+ *                 example: "New Administrator"
+ *               role:
+ *                 type: string
+ *                 enum: [admin, super_admin]
+ *                 description: Admin role (defaults to 'admin')
+ *                 example: "admin"
+ *     responses:
+ *       201:
+ *         description: Admin invited successfully and invitation email sent
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Admin invited successfully and invitation email sent"
+ *                 admin:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 2
+ *                     username:
+ *                       type: string
+ *                       example: "new.admin_1634567890"
+ *                     email:
+ *                       type: string
+ *                       example: "new.admin@fixmo.local"
+ *                     name:
+ *                       type: string
+ *                       example: "New Administrator"
+ *                     role:
+ *                       type: string
+ *                       example: "admin"
+ *                     is_active:
+ *                       type: boolean
+ *                       example: true
+ *                 note:
+ *                   type: string
+ *                   example: "Invitation email sent with login credentials"
+ *       400:
+ *         description: Invalid input or email already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Admin with this email already exists"
+ *       401:
+ *         description: Unauthorized - Invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Access denied. Invalid token."
+ *       403:
+ *         description: Forbidden - Super admin role required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Access denied. Super admin privileges required."
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
+ *   get:
+ *     tags: [Admin Management]
+ *     summary: Get all admins (Super Admin Only)
+ *     description: |
+ *       Retrieve list of all admin accounts with their details.
+ *       
+ *       **Super Admin Only** - Requires super_admin role.
+ *       
+ *       **Returns:**
+ *       - Admin ID, username, email, name
+ *       - Role and active status
+ *       - Creation and last login timestamps
+ *       - Password change requirements
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Admins retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Admins fetched successfully"
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       admin_id:
+ *                         type: integer
+ *                         example: 1
+ *                       admin_username:
+ *                         type: string
+ *                         example: "superadmin"
+ *                       admin_email:
+ *                         type: string
+ *                         example: "super@fixmo.local"
+ *                       admin_name:
+ *                         type: string
+ *                         example: "Super Administrator"
+ *                       admin_role:
+ *                         type: string
+ *                         example: "super_admin"
+ *                       is_active:
+ *                         type: boolean
+ *                         example: true
+ *                       must_change_password:
+ *                         type: boolean
+ *                         example: false
+ *                       created_at:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2024-01-15T08:30:00Z"
+ *                       last_login:
+ *                         type: string
+ *                         format: date-time
+ *                         nullable: true
+ *                         example: "2024-12-01T14:25:00Z"
+ *       401:
+ *         description: Unauthorized - Invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Access denied. Invalid token."
+ *       403:
+ *         description: Forbidden - Super admin role required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Access denied. Super admin privileges required."
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
+ * 
+ * /api/admin/{admin_id}/toggle-status:
+ *   put:
+ *     tags: [Admin Management]
+ *     summary: Toggle admin active status (Super Admin Only)
+ *     description: |
+ *       Activate or deactivate an admin account.
+ *       
+ *       **Super Admin Only** - Requires super_admin role.
+ *       
+ *       **Security Restrictions:**
+ *       - Cannot deactivate own account
+ *       - Cannot deactivate the last super admin
+ *       - Deactivated admins cannot login
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: admin_id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the admin to toggle status
+ *         example: 2
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - is_active
+ *             properties:
+ *               is_active:
+ *                 type: boolean
+ *                 description: New active status for the admin
+ *                 example: false
+ *     responses:
+ *       200:
+ *         description: Admin status updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Admin activated successfully"
+ *                 admin:
+ *                   type: object
+ *                   properties:
+ *                     admin_id:
+ *                       type: integer
+ *                       example: 2
+ *                     admin_username:
+ *                       type: string
+ *                       example: "test.admin_1634567890"
+ *                     admin_email:
+ *                       type: string
+ *                       example: "test.admin@fixmo.local"
+ *                     admin_name:
+ *                       type: string
+ *                       example: "Test Administrator"
+ *                     admin_role:
+ *                       type: string
+ *                       example: "admin"
+ *                     is_active:
+ *                       type: boolean
+ *                       example: true
+ *       400:
+ *         description: Invalid request or security restriction
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Cannot deactivate your own account"
+ *       401:
+ *         description: Unauthorized - Invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Access denied. Invalid token."
+ *       403:
+ *         description: Forbidden - Super admin role required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Access denied. Super admin privileges required."
+ *       404:
+ *         description: Admin not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Admin not found"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  * 
  * /api/admin/dashboard-stats:
  *   get:

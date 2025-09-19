@@ -9,7 +9,8 @@ import {
     sendProviderDeactivationEmail,
     sendUserRejectionEmail,
     sendProviderRejectionEmail,
-    sendCertificateRejectionEmail
+    sendCertificateRejectionEmail,
+    sendAdminInvitationEmail
 } from '../services/mailer.js';
 
 const prisma = new PrismaClient();
@@ -1024,8 +1025,26 @@ class AdminController {
                 }
             });
 
+            // Send invitation email
+            try {
+                const invitedByAdmin = await prisma.admin.findUnique({
+                    where: { admin_id: req.admin.admin_id }
+                });
+
+                await sendAdminInvitationEmail(email, {
+                    name: name,
+                    username: username,
+                    temporaryPassword: tempPassword,
+                    role: role,
+                    invitedBy: invitedByAdmin?.admin_name || 'Super Admin'
+                });
+            } catch (emailError) {
+                console.error('Error sending invitation email:', emailError);
+                // Don't fail the admin creation if email fails
+            }
+
             res.status(201).json({
-                message: 'Admin invited successfully',
+                message: 'Admin invited successfully and invitation email sent',
                 admin: {
                     id: newAdmin.admin_id,
                     username: newAdmin.admin_username,
@@ -1034,8 +1053,7 @@ class AdminController {
                     role: newAdmin.admin_role,
                     is_active: newAdmin.is_active
                 },
-                temporary_password: tempPassword, // Return temp password for manual sharing
-                note: 'Please share this temporary password securely with the new admin'
+                note: 'Invitation email sent with login credentials'
             });
 
         } catch (error) {

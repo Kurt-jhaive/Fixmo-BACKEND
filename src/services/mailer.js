@@ -1191,3 +1191,116 @@ export const sendCertificateRejectionEmail = async (providerEmail, certificateDe
     
     await transporter.sendMail(mailOptions);
 };
+
+// ADMIN INVITATION EMAIL
+export const sendAdminInvitationEmail = async (adminEmail, adminDetails) => {
+    const { name, username, temporaryPassword, role, invitedBy } = adminDetails;
+    
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: adminEmail,
+        subject: '🛡️ Admin Account Created - Welcome to Fixmo Administration',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #007bff; margin-bottom: 10px;">🛡️ Admin Access Granted</h1>
+                        <p style="color: #666; font-size: 16px;">You have been invited to join the Fixmo administration team</p>
+                    </div>
+                    
+                    <div style="background-color: #e3f2fd; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #007bff;">
+                        <h3 style="margin-top: 0; color: #1976d2; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">👤</span>
+                            Admin Account Details
+                        </h3>
+                        <p style="margin: 10px 0;"><strong>Name:</strong> ${name}</p>
+                        <p style="margin: 10px 0;"><strong>Email:</strong> ${adminEmail}</p>
+                        <p style="margin: 10px 0;"><strong>Username:</strong> ${username}</p>
+                        <p style="margin: 10px 0;"><strong>Role:</strong> <span style="color: #007bff; font-weight: bold; text-transform: uppercase;">${role}</span></p>
+                        <p style="margin: 10px 0;"><strong>Invited by:</strong> ${invitedBy}</p>
+                    </div>
+
+                    <div style="background-color: #fff3e0; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #ff9800;">
+                        <h3 style="margin-top: 0; color: #ef6c00; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">🔑</span>
+                            Login Credentials
+                        </h3>
+                        <div style="background-color: #ffecb3; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace;">
+                            <p style="margin: 5px 0;"><strong>Email/Username:</strong> ${adminEmail}</p>
+                            <p style="margin: 5px 0;"><strong>Temporary Password:</strong> <span style="color: #d84315; font-weight: bold;">${temporaryPassword}</span></p>
+                        </div>
+                        <p style="color: #ef6c00; margin-top: 15px; margin-bottom: 0;">
+                            ⚠️ <strong>Important:</strong> You must change this password on your first login
+                        </p>
+                    </div>
+
+                    <div style="background-color: #e8f5e8; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #2e7d32; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">🚀</span>
+                            Getting Started
+                        </h3>
+                        <ol style="margin: 0; padding-left: 20px; color: #2e7d32;">
+                            <li>Click the login button below</li>
+                            <li>Use your email and temporary password to sign in</li>
+                            <li>Change your password when prompted</li>
+                            <li>Explore the admin dashboard</li>
+                            <li>Contact support if you need assistance</li>
+                        </ol>
+                    </div>
+
+                    <div style="background-color: #f3e5f5; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #7b1fa2;">🔒 Admin Responsibilities</h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #7b1fa2;">
+                            ${role === 'super_admin' ? `
+                            <li>Manage user and service provider accounts</li>
+                            <li>Oversee certificate verifications</li>
+                            <li>Create and manage other admin accounts</li>
+                            <li>Monitor platform activities and statistics</li>
+                            <li>Configure system settings and permissions</li>
+                            ` : `
+                            <li>Verify user and service provider accounts</li>
+                            <li>Review and approve certificates</li>
+                            <li>Monitor booking activities</li>
+                            <li>Respond to support requests</li>
+                            <li>Generate platform reports</li>
+                            `}
+                        </ul>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${process.env.ADMIN_LOGIN_URL || 'http://localhost:3000/admin/login'}" style="background-color: #007bff; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">
+                            Access Admin Panel
+                        </a>
+                    </div>
+
+                    <div style="background-color: #ffebee; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #c62828;">🔐 Security Reminders</h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #c62828;">
+                            <li>Keep your login credentials secure and confidential</li>
+                            <li>Use a strong, unique password</li>
+                            <li>Never share your admin access with others</li>
+                            <li>Log out completely when finished</li>
+                            <li>Report any suspicious activities immediately</li>
+                        </ul>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-top: 30px;">
+                        <p style="color: #666; margin-bottom: 10px;">Need help or have questions?</p>
+                        <p style="color: #007bff; margin: 5px 0;">📧 admin-support@fixmo.com</p>
+                        <p style="color: #007bff; margin: 5px 0;">📞 1-800-FIXMO-ADMIN</p>
+                        <p style="color: #007bff; margin: 5px 0;">📖 Admin Documentation</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            Welcome to the Fixmo administration team!<br>
+                            This is an automated notification from Fixmo Admin System.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};

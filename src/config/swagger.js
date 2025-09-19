@@ -17,6 +17,7 @@ const options = {
         1. **Get a JWT Token:**
            - For customers: Use \`POST /auth/login\` with email and password
            - For providers: Use \`POST /auth/provider-login\` with provider_email and provider_password
+           - For admins: Use \`POST /api/admin/login\` with username and password
            
         2. **Authorize in Swagger:**
            - Click the **"Authorize"** button (🔒) at the top right
@@ -27,16 +28,37 @@ const options = {
            - After authorization, you can access endpoints that require authentication
            - Look for the 🔒 icon next to endpoints that need authentication
            
+        ## Admin System
+        
+        **🛡️ Default Super Admin:**
+        - Email: super@fixmo.local
+        - Password: SuperAdmin2024! (must be changed on first login)
+        - Role: super_admin
+        
+        **👥 Admin Roles:**
+        - **admin**: Standard admin privileges
+        - **super_admin**: Can manage other admins + all admin privileges
+        
+        **🔑 Admin Features:**
+        - Secure login with JWT tokens
+        - Mandatory password change for new accounts
+        - Role-based access control
+        - Account activation/deactivation
+        - Password complexity requirements
+        
         ## Endpoint Categories
         
         - **🟢 Public Endpoints**: No authentication required (login, registration, public ratings)
         - **🔒 Protected Endpoints**: Require JWT token (certificates, appointments, service management)
+        - **🛡️ Admin Endpoints**: Require admin JWT token
+        - **👑 Super Admin**: Require super admin role
         
         ## Testing Flow
         
         1. Register or login to get a JWT token
         2. Click "Authorize" and paste your token
         3. Test protected endpoints like certificate upload
+        4. For admin testing: Login as super admin and test admin endpoints
       `,
       contact: {
         name: 'Fixmo API Support',
