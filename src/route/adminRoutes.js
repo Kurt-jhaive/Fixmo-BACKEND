@@ -65,5 +65,6 @@ router.use(superAdminMiddleware); // Apply to all routes below
 router.post('/', adminController.inviteAdmin); // POST /admins
 router.get('/', adminController.getAllAdmins); // GET /admins
 router.put('/:admin_id/toggle-status', adminController.toggleAdminStatus); // PUT /admins/:admin_id/toggle-status
+router.put('/:admin_id/reset-password', adminController.resetAdminPassword); // PUT /admins/:admin_id/reset-password
 
 export default router;

@@ -1304,3 +1304,108 @@ export const sendAdminInvitationEmail = async (adminEmail, adminDetails) => {
     
     await transporter.sendMail(mailOptions);
 };
+
+// ADMIN PASSWORD RESET EMAIL
+export const sendAdminPasswordResetEmail = async (adminEmail, resetDetails) => {
+    const { name, username, newTemporaryPassword, resetBy, reason } = resetDetails;
+    
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: adminEmail,
+        subject: '🔄 Admin Password Reset - Fixmo Administration',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #ff6b35; margin-bottom: 10px;">🔄 Password Reset</h1>
+                        <p style="color: #666; font-size: 16px;">Your Fixmo admin password has been reset</p>
+                    </div>
+                    
+                    <div style="background-color: #fff3e0; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #ff9800;">
+                        <h3 style="margin-top: 0; color: #ef6c00; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">⚠️</span>
+                            Password Reset Notice
+                        </h3>
+                        <p style="margin: 10px 0; color: #ef6c00;">Your admin account password has been reset by a super administrator.</p>
+                        ${reason ? `<p style="margin: 10px 0; color: #ef6c00;"><strong>Reason:</strong> ${reason}</p>` : ''}
+                        <p style="margin: 10px 0; color: #ef6c00;"><strong>Reset by:</strong> ${resetBy}</p>
+                        <p style="margin: 10px 0; color: #ef6c00;"><strong>Reset time:</strong> ${new Date().toLocaleString()}</p>
+                    </div>
+
+                    <div style="background-color: #e3f2fd; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #007bff;">
+                        <h3 style="margin-top: 0; color: #1976d2; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">👤</span>
+                            Account Information
+                        </h3>
+                        <p style="margin: 10px 0;"><strong>Name:</strong> ${name}</p>
+                        <p style="margin: 10px 0;"><strong>Email:</strong> ${adminEmail}</p>
+                        <p style="margin: 10px 0;"><strong>Username:</strong> ${username}</p>
+                    </div>
+
+                    <div style="background-color: #ffebee; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #f44336;">
+                        <h3 style="margin-top: 0; color: #c62828; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">🔑</span>
+                            New Login Credentials
+                        </h3>
+                        <div style="background-color: #ffcdd2; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace;">
+                            <p style="margin: 5px 0;"><strong>Email/Username:</strong> ${adminEmail}</p>
+                            <p style="margin: 5px 0;"><strong>New Temporary Password:</strong> <span style="color: #d84315; font-weight: bold;">${newTemporaryPassword}</span></p>
+                        </div>
+                        <p style="color: #c62828; margin-top: 15px; margin-bottom: 0;">
+                            ⚠️ <strong>Important:</strong> You must change this password immediately upon login
+                        </p>
+                    </div>
+
+                    <div style="background-color: #e8f5e8; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #2e7d32; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">🚀</span>
+                            Next Steps
+                        </h3>
+                        <ol style="margin: 0; padding-left: 20px; color: #2e7d32;">
+                            <li>Click the login button below</li>
+                            <li>Use your email and new temporary password</li>
+                            <li>Change your password immediately when prompted</li>
+                            <li>Choose a strong, unique password</li>
+                            <li>Contact support if you have any concerns</li>
+                        </ol>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${process.env.ADMIN_LOGIN_URL || 'http://localhost:3000/admin/login'}" style="background-color: #ff6b35; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">
+                            Login to Admin Panel
+                        </a>
+                    </div>
+
+                    <div style="background-color: #f3e5f5; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #7b1fa2;">🔐 Security Recommendations</h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #7b1fa2;">
+                            <li>Change your password immediately</li>
+                            <li>Use a strong, unique password with special characters</li>
+                            <li>Do not share your new credentials with anyone</li>
+                            <li>Log out completely when finished</li>
+                            <li>Report any suspicious activities</li>
+                            <li>Contact support if you didn't request this reset</li>
+                        </ul>
+                    </div>
+
+                    <div style="background-color: #fff8e1; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #f57f17;">📞 Need Help?</h3>
+                        <p style="color: #f57f17; margin: 5px 0;">If you didn't request this password reset or have concerns about account security:</p>
+                        <p style="color: #007bff; margin: 5px 0;">📧 admin-support@fixmo.com</p>
+                        <p style="color: #007bff; margin: 5px 0;">📞 1-800-FIXMO-ADMIN</p>
+                        <p style="color: #007bff; margin: 5px 0;">🔒 Security Team: security@fixmo.com</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            This password reset was performed for security purposes.<br>
+                            This is an automated notification from Fixmo Admin System.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};

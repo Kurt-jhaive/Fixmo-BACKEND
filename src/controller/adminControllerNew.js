@@ -10,7 +10,8 @@ import {
     sendUserRejectionEmail,
     sendProviderRejectionEmail,
     sendCertificateRejectionEmail,
-    sendAdminInvitationEmail
+    sendAdminInvitationEmail,
+    sendAdminPasswordResetEmail
 } from '../services/mailer.js';
 
 const prisma = new PrismaClient();
@@ -1159,6 +1160,105 @@ class AdminController {
 
         } catch (error) {
             console.error('Error toggling admin status:', error);
+            res.status(500).json({ message: 'Internal server error' });
+        }
+    }
+
+    // Reset Admin Password (Super Admin Only)
+    async resetAdminPassword(req, res) {
+        try {
+            const { admin_id } = req.params;
+            const { reason } = req.body;
+
+            // Validate admin ID
+            if (!admin_id || isNaN(parseInt(admin_id))) {
+                return res.status(400).json({ 
+                    message: 'Valid admin ID is required' 
+                });
+            }
+
+            // Find the admin to reset password for
+            const adminToReset = await prisma.admin.findUnique({
+                where: { admin_id: parseInt(admin_id) }
+            });
+
+            if (!adminToReset) {
+                return res.status(404).json({ 
+                    message: 'Admin not found' 
+                });
+            }
+
+            // Prevent super admin from resetting their own password this way
+            if (adminToReset.admin_id === req.admin.admin_id) {
+                return res.status(400).json({ 
+                    message: 'Cannot reset your own password. Use the change password endpoint instead.' 
+                });
+            }
+
+            // Generate new random temporary password
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@$!%*?&';
+            let newTempPassword = '';
+            for (let i = 0; i < 12; i++) {
+                newTempPassword += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+
+            // Hash the new temporary password
+            const saltRounds = parseInt(process.env.BCRYPT_SALT_ROUNDS) || 12;
+            const hashedPassword = await bcrypt.hash(newTempPassword, saltRounds);
+
+            // Update admin password and set must_change_password flag
+            const updatedAdmin = await prisma.admin.update({
+                where: { admin_id: parseInt(admin_id) },
+                data: {
+                    admin_password: hashedPassword,
+                    must_change_password: true
+                },
+                select: {
+                    admin_id: true,
+                    admin_username: true,
+                    admin_email: true,
+                    admin_name: true,
+                    admin_role: true,
+                    is_active: true,
+                    must_change_password: true
+                }
+            });
+
+            // Get the admin who performed the reset
+            const resetByAdmin = await prisma.admin.findUnique({
+                where: { admin_id: req.admin.admin_id }
+            });
+
+            // Send password reset notification email
+            try {
+                await sendAdminPasswordResetEmail(updatedAdmin.admin_email, {
+                    name: updatedAdmin.admin_name,
+                    username: updatedAdmin.admin_username,
+                    newTemporaryPassword: newTempPassword,
+                    resetBy: resetByAdmin?.admin_name || 'Super Admin',
+                    reason: reason || 'Password reset requested by administrator'
+                });
+            } catch (emailError) {
+                console.error('Error sending password reset email:', emailError);
+                // Don't fail the password reset if email fails
+            }
+
+            res.json({
+                message: 'Admin password reset successfully and notification email sent',
+                admin: {
+                    id: updatedAdmin.admin_id,
+                    username: updatedAdmin.admin_username,
+                    email: updatedAdmin.admin_email,
+                    name: updatedAdmin.admin_name,
+                    role: updatedAdmin.admin_role,
+                    is_active: updatedAdmin.is_active,
+                    must_change_password: updatedAdmin.must_change_password
+                },
+                note: 'Password reset notification email sent to admin'
+            });
+
+        } catch (error) {
+            console.error('Error resetting admin password:', error);
             res.status(500).json({ message: 'Internal server error' });
         }
     }

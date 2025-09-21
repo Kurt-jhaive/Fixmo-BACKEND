@@ -543,6 +543,131 @@
  *                   type: string
  *                   example: "Internal server error"
  * 
+ * /api/admin/{admin_id}/reset-password:
+ *   put:
+ *     tags: [Admin Management]
+ *     summary: Reset admin password (Super Admin Only)
+ *     description: |
+ *       Reset another admin's password and send notification email with new temporary password.
+ *       
+ *       **Super Admin Only** - Requires super_admin role.
+ *       
+ *       **Security Features:**
+ *       - Generates secure temporary password (12 characters)
+ *       - Sets must_change_password flag to true
+ *       - Sends professional email notification
+ *       - Cannot reset own password (use change-password instead)
+ *       - Includes audit trail with reason
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: admin_id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the admin whose password to reset
+ *         example: 2
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 description: Optional reason for password reset
+ *                 example: "Admin forgot password and requested reset"
+ *     responses:
+ *       200:
+ *         description: Password reset successfully and notification email sent
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Admin password reset successfully and notification email sent"
+ *                 admin:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 2
+ *                     username:
+ *                       type: string
+ *                       example: "admin.user_1634567890"
+ *                     email:
+ *                       type: string
+ *                       example: "admin.user@fixmo.local"
+ *                     name:
+ *                       type: string
+ *                       example: "Admin User"
+ *                     role:
+ *                       type: string
+ *                       example: "admin"
+ *                     is_active:
+ *                       type: boolean
+ *                       example: true
+ *                     must_change_password:
+ *                       type: boolean
+ *                       example: true
+ *                 note:
+ *                   type: string
+ *                   example: "Password reset notification email sent to admin"
+ *       400:
+ *         description: Invalid input or attempting to reset own password
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Cannot reset your own password. Use the change password endpoint instead."
+ *       401:
+ *         description: Unauthorized - Invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Access denied. Invalid token."
+ *       403:
+ *         description: Forbidden - Super admin role required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Access denied. Super admin privileges required."
+ *       404:
+ *         description: Admin not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Admin not found"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
+ * 
  * /api/admin/dashboard-stats:
  *   get:
  *     tags: [Admin Dashboard]
