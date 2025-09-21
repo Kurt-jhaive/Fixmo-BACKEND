@@ -163,6 +163,35 @@ const uploadRatingPhoto = multer({
     }
 });
 
+// Multiple service photos storage configuration - Use memory storage for Cloudinary
+const multipleServicePhotosStorage = multer.memoryStorage();
+
+// Service photos file filter (max 5 photos)
+const multipleServicePhotosFilter = (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+        cb(null, true);
+    } else {
+        cb(new Error('Only image files are allowed for service photos!'), false);
+    }
+};
+
+// Multer upload configuration for multiple service photos
+const uploadMultipleServicePhotos = multer({
+    storage: multipleServicePhotosStorage,
+    fileFilter: multipleServicePhotosFilter,
+    limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB limit per photo
+        files: 5 // Maximum 5 photos
+    }
+});
+
 const upload = multer({ dest: 'uploads/' }); // existing upload configuration
 
-export { upload, uploadServiceImage, uploadServiceImageSimple, processServiceImage, uploadRatingPhoto };
+export { 
+    upload, 
+    uploadServiceImage, 
+    uploadServiceImageSimple, 
+    processServiceImage, 
+    uploadRatingPhoto,
+    uploadMultipleServicePhotos 
+};

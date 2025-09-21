@@ -27,6 +27,11 @@ export const getProviderServices = async (req, res) => {
                 provider_id: providerId 
             },
             include: {
+                service_photos: {
+                    orderBy: {
+                        uploadedAt: 'asc'
+                    }
+                },
                 specific_services: {
                     include: {
                         category: {
@@ -54,15 +59,6 @@ export const getProviderServices = async (req, res) => {
             }
         });        // Transform the data to match the expected frontend format
         const transformedServices = services.map(service => {
-            // Ensure service picture has a valid path or null for fallback
-            let servicePicture = service.service_picture;
-            if (servicePicture && servicePicture !== 'undefined' && servicePicture !== 'null') {
-                // Ensure proper path format
-                servicePicture = servicePicture.startsWith('/') ? servicePicture : `/${servicePicture}`;
-            } else {
-                servicePicture = null; // Use null for fallback handling
-            }
-            
             return {
                 listing_id: service.service_id,
                 service_id: service.service_id, // Add both for compatibility
@@ -70,12 +66,11 @@ export const getProviderServices = async (req, res) => {
                 service_title: service.service_title, // Add both for compatibility
                 description: service.service_description,
                 service_description: service.service_description, // Add both for compatibility
-                service_picture: servicePicture, // Add cleaned service picture
+                service_photos: service.service_photos || [], // New photos array
                 price: service.service_startingprice,
                 service_startingprice: service.service_startingprice, // Add both for compatibility
                 price_per_hour: service.service_startingprice,
                 provider_id: service.provider_id,
-
                 is_available: service.servicelisting_isActive, // Use actual field from database
                 status: service.servicelisting_isActive ? 'active' : 'inactive', // Based on database field
                 specific_services: service.specific_services,
@@ -157,21 +152,33 @@ export const createService = async (req, res) => {
             service_startingprice
         } = req.body;
 
-        // Get the uploaded file and upload to Cloudinary
-        let servicePicture = null;
+        // Handle multiple photo uploads to Cloudinary
+        let servicePhotos = [];
         
-        if (req.file) {
+        if (req.files && req.files.length > 0) {
+            // Validate maximum 5 photos
+            if (req.files.length > 5) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Maximum 5 photos allowed per service listing.'
+                });
+            }
+
             try {
-                servicePicture = await uploadToCloudinary(
-                    req.file.buffer, 
-                    'fixmo/service-images',
-                    `service_${providerId}_${Date.now()}`
-                );
+                for (let i = 0; i < req.files.length; i++) {
+                    const file = req.files[i];
+                    const photoUrl = await uploadToCloudinary(
+                        file.buffer, 
+                        'fixmo/service-photos',
+                        `service_${providerId}_${Date.now()}_${i}`
+                    );
+                    servicePhotos.push(photoUrl);
+                }
             } catch (uploadError) {
-                console.error('Error uploading service image to Cloudinary:', uploadError);
+                console.error('Error uploading service photos to Cloudinary:', uploadError);
                 return res.status(500).json({
                     success: false,
-                    message: 'Error uploading service image. Please try again.'
+                    message: 'Error uploading service photos. Please try again.'
                 });
             }
         }
@@ -182,7 +189,7 @@ export const createService = async (req, res) => {
             service_title,
             service_description,
             service_startingprice,
-            servicePicture
+            photoCount: servicePhotos.length
         });
 
         // Validation
@@ -244,10 +251,19 @@ export const createService = async (req, res) => {
                     service_title: service_title,
                     service_description: service_description,
                     service_startingprice: parseFloat(service_startingprice),
-                    service_picture: servicePicture,
                     provider_id: providerId
                 }
             });
+
+            // Create service photos if any were uploaded
+            if (servicePhotos.length > 0) {
+                await prisma.servicePhoto.createMany({
+                    data: servicePhotos.map(photoUrl => ({
+                        service_id: serviceListing.service_id,
+                        imageUrl: photoUrl
+                    }))
+                });
+            }
 
             const specificService = await prisma.specificService.create({
                 data: {
@@ -265,7 +281,18 @@ export const createService = async (req, res) => {
                 }
             });
 
-            return serviceListing;
+            // Return the complete service with photos
+            return await prisma.serviceListing.findUnique({
+                where: { service_id: serviceListing.service_id },
+                include: {
+                    service_photos: true,
+                    specific_services: {
+                        include: {
+                            category: true
+                        }
+                    }
+                }
+            });
         });
 
         res.status(201).json({

@@ -516,6 +516,11 @@ export const getServiceListings = async (req, res) => {
         const serviceListings = await prisma.serviceListing.findMany({
             where: whereClause,
             include: {
+                service_photos: {
+                    orderBy: {
+                        uploadedAt: 'asc'
+                    }
+                },
                 serviceProvider: {
                     select: {
                         provider_id: true,
@@ -1182,6 +1187,11 @@ export const getServiceListingsForCustomer = async (req, res) => {
         const serviceListings = await prisma.serviceListing.findMany({
             where: whereClause,
             include: {
+                service_photos: {
+                    orderBy: {
+                        uploadedAt: 'asc'
+                    }
+                },
                 serviceProvider: {
                     select: {
                         provider_id: true,
@@ -1336,7 +1346,7 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 title: listing.service_title,
                 description: listing.service_description,
                 startingPrice: listing.service_startingprice,
-                service_picture: listing.service_picture,
+                service_photos: listing.service_photos || [], // New photos array
                 provider: {
                     id: listing.serviceProvider.provider_id,
                     name: `${listing.serviceProvider.provider_first_name} ${listing.serviceProvider.provider_last_name}`,

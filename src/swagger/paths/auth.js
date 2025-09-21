@@ -353,6 +353,18 @@
  *                   type: string
  *                   format: date
  *                 example: ["2025-12-31", "2024-06-30"]
+ *               professions:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 example: ["Electrician", "Plumber"]
+ *                 description: List of professions the provider specializes in
+ *               experiences:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 example: ["5 years", "3 years"]
+ *                 description: Experience level for each profession (corresponding to professions array)
  *     responses:
  *       201:
  *         description: Provider registered successfully
@@ -459,9 +471,21 @@
  *                       startingPrice:
  *                         type: number
  *                         example: 500
- *                       service_picture:
- *                         type: string
- *                         example: "https://cloudinary.com/image.jpg"
+ *                       service_photos:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             id:
+ *                               type: integer
+ *                               example: 1
+ *                             imageUrl:
+ *                               type: string
+ *                               example: "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/service-photos/service_1_0.jpg"
+ *                             uploadedAt:
+ *                               type: string
+ *                               format: date-time
+ *                               example: "2025-01-15T10:30:00.000Z"
  *                       provider:
  *                         type: object
  *                         properties:

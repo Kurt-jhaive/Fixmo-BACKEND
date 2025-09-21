@@ -72,7 +72,9 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             otp,
             certificateNames,
             certificateNumbers,
-            expiryDates
+            expiryDates,
+            professions, // New field for professions
+            experiences  // New field for experiences
         } = req.body;
 
         console.log('Provider registration data:', {
@@ -87,7 +89,9 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             otp,
             certificateNames,
             certificateNumbers,
-            expiryDates
+            expiryDates,
+            professions,
+            experiences
         });
 
         // Check if provider already exists (prevent duplicate registration)
@@ -107,16 +111,21 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
 
 
         // Parse certificate data if it's JSON
-
         let parsedCertificateNames, parsedCertificateNumbers, parsedExpiryDates;
+        let parsedProfessions, parsedExperiences;
+        
         try {
             parsedCertificateNames = typeof certificateNames === 'string' ? JSON.parse(certificateNames) : certificateNames;
             parsedCertificateNumbers = typeof certificateNumbers === 'string' ? JSON.parse(certificateNumbers) : certificateNumbers;
             parsedExpiryDates = typeof expiryDates === 'string' ? JSON.parse(expiryDates) : expiryDates;
+            parsedProfessions = typeof professions === 'string' ? JSON.parse(professions) : professions;
+            parsedExperiences = typeof experiences === 'string' ? JSON.parse(experiences) : experiences;
         } catch (e) {
             parsedCertificateNames = certificateNames;
             parsedCertificateNumbers = certificateNumbers;
             parsedExpiryDates = expiryDates;
+            parsedProfessions = professions;
+            parsedExperiences = experiences;
         }
 
         // Since email is already verified in step 1, we skip OTP verification here
@@ -214,6 +223,31 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
                     }
                 }
             }
+        }
+
+        // Create provider professions if provided
+        const createdProfessions = [];
+        if (parsedProfessions && Array.isArray(parsedProfessions)) {
+            for (let i = 0; i < parsedProfessions.length; i++) {
+                const profession = parsedProfessions[i];
+                const experience = Array.isArray(parsedExperiences) ? parsedExperiences[i] : parsedExperiences;
+                
+                if (profession && profession.trim()) {
+                    try {
+                        const providerProfession = await prisma.providerProfession.create({
+                            data: {
+                                provider_id: newProvider.provider_id,
+                                profession: profession.trim(),
+                                experience: experience ? experience.trim() : '0 years'
+                            }
+                        });
+                        createdProfessions.push(providerProfession);
+                    } catch (professionError) {
+                        console.error('Error creating profession:', professionError);
+                        // Continue with other professions but log the error
+                    }
+                }
+            }
         }// Delete the used OTP
         await cleanupOTP(provider_email);
 
@@ -225,7 +259,8 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             providerId: newProvider.provider_id,
             provider_profile_photo: provider_profile_photo,
             provider_valid_id: provider_valid_id,
-            certificates: createdCertificates
+            certificates: createdCertificates,
+            professions: createdProfessions
         });
 
     } catch (err) {
