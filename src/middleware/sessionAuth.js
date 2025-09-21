@@ -112,7 +112,7 @@ export const requireAuth = (userType = null) => {
                 try {
                     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
                     console.log('JWT decoded successfully:', decoded);
-                    req.userId = decoded.id || decoded.providerId;
+                    req.userId = decoded.id || decoded.userId || decoded.providerId;
                     req.userType = decoded.userType || 'provider';
                     authenticated = true;
                 } catch (jwtError) {

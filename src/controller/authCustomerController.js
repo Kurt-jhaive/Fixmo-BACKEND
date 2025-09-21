@@ -57,7 +57,7 @@ export const login = async (req, res) => {
         const token = jwt.sign({ 
             userId: user.user_id,
             userType: 'customer',
-            email: user.user_email
+            email: user.email
         }, process.env.JWT_SECRET, { expiresIn: '1h' });
         
         res.status(200).json({
@@ -1077,7 +1077,7 @@ export const updateVerificationDocuments = async (req, res) => {
     }
 };
 
-// Get all service listings with filtering and pagination
+// Get all service listings with filtering and pagination (with date-based availability)
 export const getServiceListingsForCustomer = async (req, res) => {
     const { 
         page = 1, 
@@ -1085,11 +1085,36 @@ export const getServiceListingsForCustomer = async (req, res) => {
         search = '', 
         category = '', 
         location = '', 
-        sortBy = 'rating' 
+        sortBy = 'rating',
+        date = null // New parameter for availability filtering
     } = req.query;
 
     try {
         const skip = (parseInt(page) - 1) * parseInt(limit);
+        
+        // Parse the requested date and get day of week if date is provided
+        let requestedDate = null;
+        let dayOfWeek = null;
+        let startOfDay = null;
+        let endOfDay = null;
+        
+        if (date) {
+            requestedDate = new Date(date + 'T00:00:00.000Z');
+            dayOfWeek = requestedDate.toLocaleDateString('en-US', { weekday: 'long' });
+            startOfDay = new Date(requestedDate);
+            endOfDay = new Date(requestedDate);
+            endOfDay.setUTCDate(endOfDay.getUTCDate() + 1);
+            
+            console.log('📅 Filtering providers by availability for:', {
+                date,
+                requestedDate: requestedDate.toISOString(),
+                dayOfWeek,
+                dateRange: {
+                    start: startOfDay.toISOString(),
+                    end: endOfDay.toISOString()
+                }
+            });
+        }
         
         // Build where clause for filtering
         const whereClause = {};
@@ -1153,7 +1178,7 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 orderBy = { serviceProvider: { provider_rating: 'desc' } };
         }
 
-        // Get service listings
+        // Get service listings with availability data
         const serviceListings = await prisma.serviceListing.findMany({
             where: whereClause,
             include: {
@@ -1185,36 +1210,167 @@ export const getServiceListingsForCustomer = async (req, res) => {
             take: parseInt(limit)
         });
 
-        // Get total count for pagination
-        const totalCount = await prisma.serviceListing.count({
-            where: whereClause
+        // If date filtering is requested, filter providers based on availability
+        let filteredListings = serviceListings;
+        let availabilityInfo = {};
+        
+        if (date && dayOfWeek && startOfDay && endOfDay) {
+            console.log('🔍 Checking availability for', serviceListings.length, 'providers');
+            
+            // Get all provider IDs from the listings
+            const providerIds = serviceListings.map(listing => listing.serviceProvider.provider_id);
+            
+            // Get availability data for all providers for the requested day of week
+            const providerAvailability = await prisma.availability.findMany({
+                where: {
+                    provider_id: { in: providerIds },
+                    dayOfWeek: dayOfWeek,
+                    availability_isActive: true
+                },
+                include: {
+                    appointments: {
+                        where: {
+                            scheduled_date: {
+                                gte: startOfDay,
+                                lt: endOfDay
+                            },
+                            appointment_status: {
+                                in: ['accepted', 'pending', 'approved', 'confirmed', 'on the way']
+                            }
+                        }
+                    }
+                }
+            });
+            
+            console.log('📊 Found availability data for', providerAvailability.length, 'provider slots');
+            
+            // Group availability by provider ID and check if they have any available slots
+            const availableProviderIds = new Set();
+            
+            providerAvailability.forEach(availability => {
+                const hasActiveAppointments = availability.appointments && availability.appointments.length > 0;
+                const isPastDate = requestedDate < new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+                
+                // Check if the time slot is in the past (for today only)
+                let isPast = false;
+                const today = new Date();
+                const isToday = requestedDate.toDateString() === today.toDateString();
+                
+                if (isToday) {
+                    const currentTime = today.getHours() * 60 + today.getMinutes();
+                    const [hours, minutes] = availability.startTime.split(':');
+                    const slotTime = parseInt(hours) * 60 + parseInt(minutes);
+                    isPast = slotTime <= currentTime;
+                }
+                
+                // Provider is available if:
+                // 1. Not a past date
+                // 2. Not a past time (if today)
+                // 3. No active appointments on this specific date
+                const isAvailable = !isPastDate && !(isPast && isToday) && !hasActiveAppointments;
+                
+                if (isAvailable) {
+                    availableProviderIds.add(availability.provider_id);
+                }
+                
+                // Store availability info for response
+                if (!availabilityInfo[availability.provider_id]) {
+                    availabilityInfo[availability.provider_id] = {
+                        totalSlots: 0,
+                        availableSlots: 0,
+                        bookedSlots: 0,
+                        hasAvailability: false
+                    };
+                }
+                
+                availabilityInfo[availability.provider_id].totalSlots++;
+                if (isAvailable) {
+                    availabilityInfo[availability.provider_id].availableSlots++;
+                    availabilityInfo[availability.provider_id].hasAvailability = true;
+                } else if (hasActiveAppointments) {
+                    availabilityInfo[availability.provider_id].bookedSlots++;
+                }
+            });
+            
+            // Filter service listings to only include providers with available slots
+            filteredListings = serviceListings.filter(listing => {
+                const providerId = listing.serviceProvider.provider_id;
+                const hasAvailability = availableProviderIds.has(providerId);
+                
+                // If provider has no availability data for this day, exclude them
+                if (!availabilityInfo[providerId]) {
+                    availabilityInfo[providerId] = {
+                        totalSlots: 0,
+                        availableSlots: 0,
+                        bookedSlots: 0,
+                        hasAvailability: false,
+                        reason: 'No availability set for this day of week'
+                    };
+                }
+                
+                return hasAvailability;
+            });
+            
+            console.log('✅ Filtered to', filteredListings.length, 'available providers for', date);
+        }
+
+        // Get total count for pagination (after availability filtering if applied)
+        let totalCount;
+        if (date && dayOfWeek) {
+            // For date filtering, we need to count only available providers
+            totalCount = filteredListings.length;
+        } else {
+            // For regular filtering without date, use the original count
+            totalCount = await prisma.serviceListing.count({
+                where: whereClause
+            });
+        }
+
+        // Format the response with availability information
+        const formattedListings = filteredListings.map(listing => {
+            const providerId = listing.serviceProvider.provider_id;
+            const availability = availabilityInfo[providerId] || null;
+            
+            return {
+                id: listing.service_id,
+                title: listing.service_title,
+                description: listing.service_description,
+                startingPrice: listing.service_startingprice,
+                service_picture: listing.service_picture,
+                provider: {
+                    id: listing.serviceProvider.provider_id,
+                    name: `${listing.serviceProvider.provider_first_name} ${listing.serviceProvider.provider_last_name}`,
+                    userName: listing.serviceProvider.provider_userName,
+                    rating: listing.serviceProvider.provider_rating || 0,
+                    location: listing.serviceProvider.provider_location,
+                    profilePhoto: listing.serviceProvider.provider_profile_photo
+                },
+                categories: listing.specific_services.map(service => service.category.category_name),
+                specificServices: listing.specific_services.map(service => ({
+                    id: service.specific_service_id,
+                    title: service.specific_service_title,
+                    description: service.specific_service_description
+                })),
+                // Include availability information if date filtering was applied
+                ...(date && availability && {
+                    availability: {
+                        date: date,
+                        dayOfWeek: dayOfWeek,
+                        hasAvailability: availability.hasAvailability,
+                        totalSlots: availability.totalSlots,
+                        availableSlots: availability.availableSlots,
+                        bookedSlots: availability.bookedSlots,
+                        reason: availability.reason || null
+                    }
+                })
+            };
         });
 
-        // Format the response
-        const formattedListings = serviceListings.map(listing => ({
-            id: listing.service_id,
-            title: listing.service_title,
-            description: listing.service_description,
-            startingPrice: listing.service_startingprice,
-            service_picture: listing.service_picture, // Add service picture
-            provider: {
-                id: listing.serviceProvider.provider_id,
-                name: `${listing.serviceProvider.provider_first_name} ${listing.serviceProvider.provider_last_name}`,
-                userName: listing.serviceProvider.provider_userName,
-                rating: listing.serviceProvider.provider_rating || 0,
-                location: listing.serviceProvider.provider_location,
-                profilePhoto: listing.serviceProvider.provider_profile_photo
-            },
-            categories: listing.specific_services.map(service => service.category.category_name),
-            specificServices: listing.specific_services.map(service => ({
-                id: service.specific_service_id,
-                title: service.specific_service_title,
-                description: service.specific_service_description
-            }))
-        }));
-
-        res.status(200).json({
-            message: 'Service listings retrieved successfully',
+        // Prepare response with enhanced information
+        const response = {
+            message: date 
+                ? `Service listings for ${date} (${dayOfWeek}) retrieved successfully`
+                : 'Service listings retrieved successfully',
             listings: formattedListings,
             pagination: {
                 currentPage: parseInt(page),
@@ -1223,7 +1379,20 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 hasNext: skip + parseInt(limit) < totalCount,
                 hasPrev: parseInt(page) > 1
             }
-        });
+        };
+
+        // Add date filtering information if applicable
+        if (date) {
+            response.dateFilter = {
+                requestedDate: date,
+                dayOfWeek: dayOfWeek,
+                totalProvidersBeforeFiltering: serviceListings.length,
+                availableProvidersAfterFiltering: filteredListings.length,
+                filteringApplied: true
+            };
+        }
+
+        res.status(200).json(response);
     } catch (err) {
         console.error('Get service listings error:', err);
         res.status(500).json({ message: 'Server error retrieving service listings' });

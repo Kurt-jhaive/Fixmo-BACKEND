@@ -95,6 +95,23 @@ export const createRating = async (req, res) => {
             }
         }
 
+        // Validate customer_id
+        if (!customer_id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required. Customer ID is missing.'
+            });
+        }
+
+        console.log('Creating rating with validated data:', {
+            appointment_id: parseInt(appointment_id),
+            provider_id: parseInt(provider_id),
+            customer_id,
+            rating_value: ratingNum,
+            rating_comment: rating_comment || null,
+            rating_photo
+        });
+
         // Create the rating
         const newRating = await prisma.rating.create({
             data: {

@@ -10,6 +10,14 @@ const options = {
       description: `
         A comprehensive service management platform that connects customers with service providers
         
+        ## 🆕 New Features
+        
+        **🗓️ Date-Based Provider Filtering:**
+        - Customers can now filter service providers by availability on specific dates
+        - Only providers who are available and not booked on the selected date are shown
+        - Perfect for calendar-based booking workflows
+        - See the \`/auth/service-listings\` endpoint with \`date\` parameter
+        
         ## Authentication Guide
         
         **🔐 How to use JWT Authentication:**
@@ -236,6 +244,10 @@ const options = {
       {
         name: 'Authentication',
         description: 'Customer and Provider authentication endpoints'
+      },
+      {
+        name: 'Customer Services',
+        description: 'Customer service browsing and booking endpoints with advanced filtering'
       },
       {
         name: 'Services',
