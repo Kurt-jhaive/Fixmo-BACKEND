@@ -55,6 +55,7 @@ model ServiceProviderDetails {
   provider_ratings        Rating[]
   provider_services       ServiceListing[]
   conversations           Conversation[]
+  provider_professions    ProviderProfession[]
 }
 
 model Certificate {
@@ -78,10 +79,18 @@ model ServiceListing {
   service_startingprice   Float
   provider_id             Int
   servicelisting_isActive Boolean                @default(true)
-  service_picture         String?
+  service_photos                  ServicePhoto[]
   appointments            Appointment[]
   serviceProvider         ServiceProviderDetails @relation(fields: [provider_id], references: [provider_id])
   specific_services       SpecificService[]
+}
+
+model ServicePhoto{
+  id            Int            @id @default(autoincrement())
+  imageUrl      String         // Cloudinary/S3 URL
+  service       ServiceListing @relation(fields: [service_id], references: [service_id])
+  service_id    Int
+  uploadedAt    DateTime       @default(now())
 }
 
 model ServiceCategory {
@@ -89,6 +98,17 @@ model ServiceCategory {
   category_name     String
   specific_services SpecificService[]
 }
+
+model ProviderProfession {
+  id            Int      @id @default(autoincrement())
+  provider_id   Int
+  profession    String
+  experience    String      // or Int for years
+  provider      ServiceProviderDetails @relation(fields: [provider_id], references: [provider_id])
+
+  @@unique([provider_id, profession]) // prevents duplicates of the same profession
+}
+
 
 model SpecificService {
   specific_service_id          Int              @id @default(autoincrement())
