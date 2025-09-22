@@ -798,6 +798,318 @@ GET /api/ratings/provider/123?page=1&limit=5
 
 ---
 
+## 14. Get Provider Professions and Experience
+
+### Endpoint
+```
+GET /api/service-providers/professions/{providerId}
+```
+
+### Description
+Get profession and experience details for a specific service provider. This is a public endpoint that doesn't require authentication.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `providerId` | integer | Yes | Provider ID in the URL path |
+
+### Example Request
+```
+GET /api/service-providers/professions/123
+```
+
+### Success Response (200)
+```json
+{
+  "success": true,
+  "message": "Provider professions retrieved successfully",
+  "data": {
+    "provider_id": 123,
+    "provider_name": "John Smith",
+    "provider_email": "john@example.com",
+    "provider_phone_number": "+639123456789",
+    "provider_location": "Manila, Philippines",
+    "provider_rating": 4.8,
+    "provider_isVerified": true,
+    "provider_profile_photo": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/provider-profiles/provider_123.jpg",
+    "provider_member_since": "2025-01-10T08:30:00.000Z",
+    "total_professions": 2,
+    "professions": [
+      {
+        "id": 1,
+        "profession": "Electrician",
+        "experience": "5 years electrical work experience",
+        "created_at": "2025-01-10T08:30:00.000Z"
+      },
+      {
+        "id": 2,
+        "profession": "Plumber",
+        "experience": "2 years plumbing experience",
+        "created_at": "2025-01-10T08:30:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+### Error Response (404)
+```json
+{
+  "success": false,
+  "message": "Provider not found"
+}
+```
+
+---
+
+## 15. Get Provider Details (Own Profile)
+
+### Endpoint
+```
+GET /api/service-providers/details
+```
+
+### Description
+Get comprehensive details for the authenticated provider including professions, certificates, and recent services.
+
+### Authentication Required
+```
+Authorization: Bearer <provider_jwt_token>
+```
+
+### Example Request
+```
+GET /api/service-providers/details
+Authorization: Bearer <provider_jwt_token>
+```
+
+### Success Response (200)
+```json
+{
+  "success": true,
+  "message": "Provider details retrieved successfully",
+  "data": {
+    "provider_id": 123,
+    "provider_first_name": "John",
+    "provider_last_name": "Smith",
+    "provider_full_name": "John Smith",
+    "provider_email": "john@example.com",
+    "provider_phone_number": "+639123456789",
+    "provider_userName": "john_electrician",
+    "provider_birthday": "1990-05-15T00:00:00.000Z",
+    "provider_location": "Manila, Philippines",
+    "provider_exact_location": "Makati City, Metro Manila",
+    "provider_uli": "ULI123456789",
+    "provider_rating": 4.8,
+    "provider_isVerified": true,
+    "provider_isActivated": true,
+    "provider_rejection_reason": null,
+    "provider_profile_photo": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/provider-profiles/provider_123.jpg",
+    "provider_valid_id": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/provider-ids/id_123.jpg",
+    "created_at": "2025-01-10T08:30:00.000Z",
+    "provider_member_since": "2025-01-10T08:30:00.000Z",
+    "professions": [
+      {
+        "id": 1,
+        "profession": "Electrician",
+        "experience": "5 years electrical work experience",
+        "created_at": "2025-01-10T08:30:00.000Z"
+      },
+      {
+        "id": 2,
+        "profession": "Plumber", 
+        "experience": "2 years plumbing experience",
+        "created_at": "2025-01-10T08:30:00.000Z"
+      }
+    ],
+    "certificates": [
+      {
+        "certificate_id": 1,
+        "certificate_name": "Electrical Safety Certificate",
+        "certificate_number": "ESC-2024-001",
+        "certificate_file_path": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/certificates/cert_1.pdf",
+        "expiry_date": "2025-12-31T00:00:00.000Z",
+        "status": "approved",
+        "created_at": "2025-01-10T08:30:00.000Z"
+      }
+    ],
+    "recent_services": [
+      {
+        "service_id": 456,
+        "service_title": "Professional Home Electrical Work",
+        "service_description": "Complete electrical installation and repair services",
+        "service_startingprice": 750,
+        "is_active": true,
+        "created_at": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "total_professions": 2,
+    "total_certificates": 1,
+    "total_services": 5
+  }
+}
+```
+
+### Error Response (404)
+```json
+{
+  "success": false,
+  "message": "Provider not found"
+}
+```
+
+---
+
+## 16. Update Provider Details
+
+### Endpoint
+```
+PUT /api/service-providers/details
+```
+
+### Description
+Update provider details including basic information, photos, and professions for the authenticated provider.
+
+### Content-Type
+```
+multipart/form-data
+```
+
+### Authentication Required
+```
+Authorization: Bearer <provider_jwt_token>
+```
+
+### Request Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `provider_first_name` | string | No | Updated first name |
+| `provider_last_name` | string | No | Updated last name |
+| `provider_phone_number` | string | No | Updated phone number |
+| `provider_birthday` | string | No | Updated birthday (YYYY-MM-DD) |
+| `provider_location` | string | No | Updated location |
+| `provider_exact_location` | string | No | Updated exact location |
+| `professions` | array | No | Array of profession objects |
+| `provider_profile_photo` | file | No | New profile photo (max 5MB) |
+| `provider_valid_id` | file | No | New valid ID photo (max 5MB) |
+
+### Professions Array Format
+```json
+[
+  {
+    "profession": "Electrician",
+    "experience": "5 years electrical work experience"
+  },
+  {
+    "profession": "Plumber",
+    "experience": "2 years plumbing experience"
+  }
+]
+```
+
+### Example Request
+```javascript
+const formData = new FormData();
+formData.append('provider_first_name', 'John');
+formData.append('provider_last_name', 'Smith');
+formData.append('provider_phone_number', '+639123456789');
+formData.append('provider_location', 'Manila, Philippines');
+formData.append('professions', JSON.stringify([
+  {
+    "profession": "Master Electrician",
+    "experience": "8 years electrical work experience"
+  },
+  {
+    "profession": "Plumber",
+    "experience": "3 years plumbing experience"
+  }
+]));
+// Optional: Add new photos
+formData.append('provider_profile_photo', profilePhotoFile);
+formData.append('provider_valid_id', validIdFile);
+```
+
+### Success Response (200)
+```json
+{
+  "success": true,
+  "message": "Provider details updated successfully",
+  "data": {
+    "provider_id": 123,
+    "provider_first_name": "John",
+    "provider_last_name": "Smith",
+    "provider_full_name": "John Smith",
+    "provider_email": "john@example.com",
+    "provider_phone_number": "+639123456789",
+    "provider_userName": "john_electrician",
+    "provider_birthday": "1990-05-15T00:00:00.000Z",
+    "provider_location": "Manila, Philippines",
+    "provider_exact_location": "Makati City, Metro Manila",
+    "provider_rating": 4.8,
+    "provider_isVerified": true,
+    "provider_profile_photo": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/provider-profiles/provider_123_updated.jpg",
+    "provider_valid_id": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/provider-ids/id_123_updated.jpg",
+    "professions": [
+      {
+        "id": 5,
+        "profession": "Master Electrician",
+        "experience": "8 years electrical work experience"
+      },
+      {
+        "id": 6,
+        "profession": "Plumber",
+        "experience": "3 years plumbing experience"
+      }
+    ],
+    "updated_at": "2025-01-20T14:30:00.000Z"
+  }
+}
+```
+
+### Error Response (400)
+```json
+{
+  "success": false,
+  "message": "Error uploading profile photo. Please try again."
+}
+```
+
+### Error Response (404)
+```json
+{
+  "success": false,
+  "message": "Provider not found"
+}
+```
+
+---
+
+## Provider Management Endpoints Summary
+
+### New Provider Endpoints
+- `GET /api/service-providers/professions/{providerId}` - Get provider professions (public)
+- `GET /api/service-providers/details` - Get own provider details (authenticated)
+- `PUT /api/service-providers/details` - Update own provider details (authenticated)
+
+### Key Features
+- **Comprehensive Provider Data**: All provider information in one place
+- **Profession Management**: Add, update, and remove professions with experience
+- **Photo Updates**: Update profile photo and valid ID with Cloudinary storage
+- **Transaction Safety**: Database transactions ensure data consistency
+- **Public Access**: Provider professions viewable without authentication
+- **File Upload Support**: Multipart form data with file validation
+
+### Use Cases
+1. **Provider Profile Management**: Complete provider profile editing
+2. **Public Provider Info**: Display provider expertise to customers
+3. **Skill Updates**: Keep provider professions and experience current
+4. **Photo Management**: Update profile and verification photos
+5. **Profile Verification**: Comprehensive provider information for admin review
+
+---
+
 ## Error Codes
 
 | Status | Description | Common Causes |

@@ -32,7 +32,10 @@ import {
   getProviderAvailabilityWithBookings,
   finishAppointment,
   getAllServiceListings,
-  getServiceListingsByTitle
+  getServiceListingsByTitle,
+  getProviderProfessions,
+  getProviderDetails,
+  updateProviderDetails
 } from '../controller/authserviceProviderController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { uploadServiceImage } from '../middleware/multer.js';
@@ -149,23 +152,24 @@ const certificateUpload = multer({
 const profileUpdateUpload = multer({ 
   storage: registrationStorage, // Reuse the same storage configuration
   fileFilter: (req, file, cb) => {
-    // Only accept profile photo for profile updates
-    if (file.fieldname === 'provider_profile_photo') {
+    // Accept both profile photo and valid ID for updates
+    if (file.fieldname === 'provider_profile_photo' || file.fieldname === 'provider_valid_id') {
       if (file.mimetype.startsWith('image/')) {
         cb(null, true);
       } else {
-        cb(new Error('Profile photo must be an image file (JPG, PNG, GIF, etc.)'), false);
+        cb(new Error('Files must be image files (JPG, PNG, GIF, etc.)'), false);
       }
     } else {
-      cb(new Error('Only profile photo uploads are allowed'), false);
+      cb(new Error('Only profile photo and valid ID uploads are allowed'), false);
     }
   },
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB limit per file
-    files: 1 // Only 1 profile photo
+    files: 2 // Only profile photo and valid ID
   }
 }).fields([
-  { name: 'provider_profile_photo', maxCount: 1 }
+  { name: 'provider_profile_photo', maxCount: 1 },
+  { name: 'provider_valid_id', maxCount: 1 }
 ]);
 
 const prisma = new PrismaClient();
@@ -374,5 +378,10 @@ router.put('/appointments/:appointmentId/finish', authMiddleware, finishAppointm
 router.put('/appointments/:appointmentId/cancel', authMiddleware, cancelProviderAppointment);
 router.post('/appointments/:appointmentId/rate', authMiddleware, rateCustomerAppointment);
 router.get('/availability-with-bookings', authMiddleware, getProviderAvailabilityWithBookings);
+
+// Provider details management routes
+router.get('/professions/:providerId', getProviderProfessions); // Public endpoint to get provider professions
+router.get('/details', authMiddleware, getProviderDetails); // Get own provider details (authenticated)
+router.put('/details', authMiddleware, profileUpdateUpload, updateProviderDetails); // Update own provider details (authenticated)
 
 export default router;

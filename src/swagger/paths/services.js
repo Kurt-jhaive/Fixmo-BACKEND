@@ -153,7 +153,6 @@
  *               - service_title
  *               - service_description
  *               - service_startingprice
- *               - category_id
  *               - service_photos
  *               - certificate_id
  *             properties:
