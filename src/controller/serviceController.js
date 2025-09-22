@@ -32,32 +32,19 @@ export const getProviderServices = async (req, res) => {
                         uploadedAt: 'asc'
                     }
                 },
-                specific_services: {
-                    include: {
-                        category: {
-                            select: {
-                                category_id: true,
-                                category_name: true
-                            }
-                        },
-                        covered_by_certificates: {
-                            include: {
-                                certificate: {
-                                    select: {
-                                        certificate_id: true,
-                                        certificate_name: true,
-                                        certificate_file_path: true
-                                    }
-                                }
-                            }
-                        }
+                category: {
+                    select: {
+                        category_id: true,
+                        category_name: true
                     }
                 }
             },
             orderBy: {
                 service_id: 'desc'
             }
-        });        // Transform the data to match the expected frontend format
+        });
+
+        // Transform the data to match the expected frontend format
         const transformedServices = services.map(service => {
             return {
                 listing_id: service.service_id,
@@ -73,13 +60,9 @@ export const getProviderServices = async (req, res) => {
                 provider_id: service.provider_id,
                 is_available: service.servicelisting_isActive, // Use actual field from database
                 status: service.servicelisting_isActive ? 'active' : 'inactive', // Based on database field
-                specific_services: service.specific_services,
-                category_name: service.specific_services.length > 0 ? service.specific_services[0].category.category_name : 'Uncategorized',
-                category: service.specific_services[0]?.category || null,
-                category_id: service.specific_services[0]?.category_id || null,
-                certificates: service.specific_services.flatMap(ss => 
-                    ss.covered_by_certificates.map(cbc => cbc.certificate)
-                ),
+                category_name: service.category.category_name,
+                category: service.category,
+                category_id: service.category_id,
                 booking_count: 0 // Default since not tracked in current schema
             };
         });
@@ -87,7 +70,7 @@ export const getProviderServices = async (req, res) => {
         res.status(200).json({
             success: true,
             data: transformedServices,
-            count: transformedServices.length
+            totalServices: transformedServices.length
         });
     } catch (error) {
         console.error('Error fetching provider services:', error);
@@ -146,10 +129,10 @@ export const createService = async (req, res) => {
     try {
         const providerId = req.userId;
         const {
-            certificate_id,
             service_title,
             service_description,
-            service_startingprice
+            service_startingprice,
+            category_id
         } = req.body;
 
         // Handle multiple photo uploads to Cloudinary
@@ -185,7 +168,7 @@ export const createService = async (req, res) => {
 
         console.log('Create service request:', {
             providerId,
-            certificate_id,
+            category_id,
             service_title,
             service_description,
             service_startingprice,
@@ -193,36 +176,22 @@ export const createService = async (req, res) => {
         });
 
         // Validation
-        if (!certificate_id || !service_title || !service_description || !service_startingprice) {
+        if (!category_id || !service_title || !service_description || !service_startingprice) {
             return res.status(400).json({
                 success: false,
-                message: 'All fields are required'
-            });
-        }// Find certificate to infer category
-        const certificate = await prisma.certificate.findUnique({
-            where: { certificate_id: parseInt(certificate_id) }
-        });        if (!certificate || certificate.provider_id !== providerId) {
-            return res.status(404).json({
-                success: false,
-                message: 'Certificate not found or does not belong to you.'
+                message: 'All fields are required (category_id, service_title, service_description, service_startingprice)'
             });
         }
 
-        // Check if certificate is approved
-        if (certificate.certificate_status !== 'Approved') {
-            return res.status(400).json({
-                success: false,
-                message: 'You can only create services with approved certificates. Please wait for your certificate to be approved.'
-            });
-        }        // Infer category from certificate name first to check for duplicates
-        const categoryName = certificate.certificate_name.split(' ')[0];
-        let category = await prisma.serviceCategory.findFirst({
-            where: { category_name: categoryName }
+        // Verify that the category exists
+        const category = await prisma.serviceCategory.findUnique({
+            where: { category_id: parseInt(category_id) }
         });
 
         if (!category) {
-            category = await prisma.serviceCategory.create({
-                data: { category_name: categoryName }
+            return res.status(404).json({
+                success: false,
+                message: 'Category not found. Please select a valid category.'
             });
         }
 
@@ -231,27 +200,26 @@ export const createService = async (req, res) => {
             where: {
                 provider_id: providerId,
                 service_title: service_title,
-                specific_services: {
-                    some: {
-                        category_id: category.category_id
-                    }
-                }
+                category_id: parseInt(category_id)
             }
-        });        if (existingService) {
+        });
+
+        if (existingService) {
             return res.status(400).json({
                 success: false,
-                message: `You already have a service titled "${service_title}" in the "${categoryName}" category. Please use a different title or edit your existing service.`
+                message: `You already have a service titled "${service_title}" in the "${category.category_name}" category. Please use a different title or edit your existing service.`
             });
         }
 
-        // Create the service listing and the specific service in a transaction
+        // Create the service listing in a transaction
         const newService = await prisma.$transaction(async (prisma) => {
             const serviceListing = await prisma.serviceListing.create({
                 data: {
                     service_title: service_title,
                     service_description: service_description,
                     service_startingprice: parseFloat(service_startingprice),
-                    provider_id: providerId
+                    provider_id: providerId,
+                    category_id: parseInt(category_id)
                 }
             });
 
@@ -265,40 +233,30 @@ export const createService = async (req, res) => {
                 });
             }
 
-            const specificService = await prisma.specificService.create({
-                data: {
-                    specific_service_title: service_title, // Use listing title
-                    specific_service_description: service_description,
-                    service_id: serviceListing.service_id,
-                    category_id: category.category_id
-                }
-            });
-
-            await prisma.coveredService.create({
-                data: {
-                    specific_service_id: specificService.specific_service_id,
-                    certificate_id: parseInt(certificate_id)
-                }
-            });
-
-            // Return the complete service with photos
+            // Return the complete service with photos and category
             return await prisma.serviceListing.findUnique({
                 where: { service_id: serviceListing.service_id },
                 include: {
                     service_photos: true,
-                    specific_services: {
-                        include: {
-                            category: true
-                        }
-                    }
+                    category: true
                 }
             });
         });
 
         res.status(201).json({
             success: true,
-            message: 'Service created successfully',
-            data: newService
+            message: `Service created successfully with ${servicePhotos.length} photos uploaded`,
+            service: {
+                id: newService.service_id,
+                service_title: newService.service_title,
+                service_description: newService.service_description,
+                service_startingprice: newService.service_startingprice,
+                category_id: newService.category_id,
+                category_name: newService.category.category_name,
+                provider_id: newService.provider_id,
+                photos_uploaded: servicePhotos.length,
+                service_photos: newService.service_photos
+            }
         });
 
     } catch (error) {
@@ -320,112 +278,69 @@ export const updateService = async (req, res) => {
             service_title,
             service_description,
             service_startingprice,
-            certificate_id
+            category_id
         } = req.body;
 
         // Validate input
-        if (!service_title || !service_description || !service_startingprice || !certificate_id) {
-            return res.status(400).json({ success: false, message: 'All fields are required.' });
+        if (!service_title || !service_description || !service_startingprice || !category_id) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'All fields are required (service_title, service_description, service_startingprice, category_id).' 
+            });
         }
 
         const serviceListingId = parseInt(serviceId);
 
-        await prisma.$transaction(async (prisma) => {
-            const existingService = await prisma.serviceListing.findFirst({
-                where: {
-                    service_id: serviceListingId,
-                    provider_id: providerId
-                },
-                include: {
-                    specific_services: true
-                }
-            });
-
-            if (!existingService) {
-                throw new Error('Service not found or access denied');
-            }
-
-            await prisma.serviceListing.update({
-                where: { service_id: serviceListingId },
-                data: {
-                    service_title: service_title.trim(),
-                    service_description: service_description.trim(),
-                    service_startingprice: parseFloat(service_startingprice)
-                }
-            });
-
-            const specificService = existingService.specific_services[0];
-            if (specificService) {
-                const certificate = await prisma.certificate.findUnique({
-                    where: { certificate_id: parseInt(certificate_id) }
-                });
-
-                if (!certificate || certificate.provider_id !== providerId) {
-                    throw new Error('New certificate not found or does not belong to you.');
-                }
-
-                const categoryName = certificate.certificate_name.split(' ')[0];
-                let category = await prisma.serviceCategory.findFirst({
-                    where: { category_name: categoryName }
-                });
-                if (!category) {
-                    category = await prisma.serviceCategory.create({
-                        data: { category_name: categoryName }
-                    });
-                }
-
-                await prisma.specificService.update({
-                    where: { specific_service_id: specificService.specific_service_id },
-                    data: {
-                        category_id: category.category_id,
-                        specific_service_title: service_title.trim(),
-                        specific_service_description: service_description.trim()
-                    }
-                });
-
-                const existingCoveredService = await prisma.coveredService.findFirst({
-                    where: { specific_service_id: specificService.specific_service_id }
-                });
-
-                if (existingCoveredService) {
-                    await prisma.coveredService.update({
-                        where: { covered_service_id: existingCoveredService.covered_service_id },
-                        data: { certificate_id: parseInt(certificate_id) }
-                    });
-                } else {
-                    await prisma.coveredService.create({
-                        data: {
-                            specific_service_id: specificService.specific_service_id,
-                            certificate_id: parseInt(certificate_id)
-                        }
-                    });
-                }
+        // Check if the service exists and belongs to the provider
+        const existingService = await prisma.serviceListing.findFirst({
+            where: {
+                service_id: serviceListingId,
+                provider_id: providerId
             }
         });
-        
-        const completeService = await prisma.serviceListing.findUnique({
+
+        if (!existingService) {
+            return res.status(404).json({
+                success: false,
+                message: 'Service not found or access denied'
+            });
+        }
+
+        // Verify that the category exists
+        const category = await prisma.serviceCategory.findUnique({
+            where: { category_id: parseInt(category_id) }
+        });
+
+        if (!category) {
+            return res.status(404).json({
+                success: false,
+                message: 'Category not found. Please select a valid category.'
+            });
+        }
+
+        // Update the service listing
+        const updatedService = await prisma.serviceListing.update({
             where: { service_id: serviceListingId },
+            data: {
+                service_title: service_title.trim(),
+                service_description: service_description.trim(),
+                service_startingprice: parseFloat(service_startingprice),
+                category_id: parseInt(category_id)
+            },
             include: {
-                specific_services: {
-                    include: {
-                        category: true,
-                        covered_by_certificates: { include: { certificate: true } }
-                    }
-                }
+                service_photos: true,
+                category: true
             }
         });
 
         res.status(200).json({
             success: true,
             message: 'Service updated successfully',
-            data: completeService
+            data: updatedService
         });
 
     } catch (error) {
         console.error('Error updating service:', error);
-        if (error.message.includes('Service not found') || error.message.includes('New certificate not found')) {
-            return res.status(404).json({ success: false, message: error.message });
-        }
         res.status(500).json({
             success: false,
             message: 'Error updating service',
@@ -453,25 +368,9 @@ export const deleteService = async (req, res) => {
                 success: false,
                 message: 'Service not found or access denied'
             });
-        }        // Delete related records first to avoid foreign key constraint violations
-        // Get all specific services for this service
-        const specificServices = await prisma.specificService.findMany({
-            where: { service_id: parseInt(serviceId) }
-        });
-
-        // Delete all covered services that reference these specific services
-        for (const specificService of specificServices) {
-            await prisma.coveredService.deleteMany({
-                where: { specific_service_id: specificService.specific_service_id }
-            });
         }
 
-        // Delete related specific services
-        await prisma.specificService.deleteMany({
-            where: { service_id: parseInt(serviceId) }
-        });
-
-        // Delete the service listing
+        // Delete the service listing (service_photos will be deleted automatically due to cascade)
         await prisma.serviceListing.delete({
             where: { service_id: parseInt(serviceId) }
         });
@@ -493,7 +392,9 @@ export const deleteService = async (req, res) => {
 export const toggleServiceAvailability = async (req, res) => {
     try {
         const { serviceId } = req.params;
-        const providerId = req.userId;        // Check if service exists and belongs to provider
+        const providerId = req.userId;
+
+        // Check if service exists and belongs to provider
         const existingService = await prisma.serviceListing.findFirst({
             where: {
                 service_id: parseInt(serviceId),
@@ -506,7 +407,9 @@ export const toggleServiceAvailability = async (req, res) => {
                 success: false,
                 message: 'Service not found or access denied'
             });
-        }        // Toggle availability
+        }
+
+        // Toggle availability
         const updatedService = await prisma.serviceListing.update({
             where: { service_id: parseInt(serviceId) },
             data: {
@@ -514,18 +417,12 @@ export const toggleServiceAvailability = async (req, res) => {
             },
             include: {
                 serviceProvider: true,
-                specific_services: {
-                    include: {
-                        category: true,
-                        covered_by_certificates: {
-                            include: {
-                                certificate: true
-                            }
-                        }
-                    }
-                }
+                category: true,
+                service_photos: true
             }
-        });        res.status(200).json({
+        });
+
+        res.status(200).json({
             success: true,
             message: `Service ${updatedService.servicelisting_isActive ? 'activated' : 'deactivated'} successfully`,
             data: updatedService
@@ -565,7 +462,7 @@ export const getServiceCategories = async (req, res) => {
     }
 };
 
-// Get provider certificates for dropdown
+// Get provider certificates for dropdown (keeping for backward compatibility)
 export const getProviderCertificates = async (req, res) => {
     try {
         const providerId = req.userId;
@@ -583,7 +480,8 @@ export const getProviderCertificates = async (req, res) => {
             }
         });
 
-        res.status(200).json({            success: true,
+        res.status(200).json({
+            success: true,
             data: certificates
         });
     } catch (error) {
@@ -595,7 +493,7 @@ export const getProviderCertificates = async (req, res) => {
     }
 };
 
-// Get certificate-service mappings
+// Get certificate-service mappings (keeping for backward compatibility)
 export const getCertificateServices = async (req, res) => {
     try {
         const categoriesData = loadServiceCategoriesData();

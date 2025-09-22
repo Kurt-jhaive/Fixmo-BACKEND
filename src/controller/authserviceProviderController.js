@@ -114,6 +114,11 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
         let parsedCertificateNames, parsedCertificateNumbers, parsedExpiryDates;
         let parsedProfessions, parsedExperiences;
         
+        console.log('Raw professions received:', professions);
+        console.log('Raw experiences received:', experiences);
+        console.log('Type of professions:', typeof professions);
+        console.log('Type of experiences:', typeof experiences);
+        
         try {
             parsedCertificateNames = typeof certificateNames === 'string' ? JSON.parse(certificateNames) : certificateNames;
             parsedCertificateNumbers = typeof certificateNumbers === 'string' ? JSON.parse(certificateNumbers) : certificateNumbers;
@@ -121,12 +126,17 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             parsedProfessions = typeof professions === 'string' ? JSON.parse(professions) : professions;
             parsedExperiences = typeof experiences === 'string' ? JSON.parse(experiences) : experiences;
         } catch (e) {
+            console.log('Error parsing JSON, using raw values:', e.message);
             parsedCertificateNames = certificateNames;
             parsedCertificateNumbers = certificateNumbers;
             parsedExpiryDates = expiryDates;
             parsedProfessions = professions;
             parsedExperiences = experiences;
         }
+        
+        console.log('Parsed professions:', parsedProfessions);
+        console.log('Parsed experiences:', parsedExperiences);
+        console.log('Is parsedProfessions an array?', Array.isArray(parsedProfessions));
 
         // Since email is already verified in step 1, we skip OTP verification here
         // Only verify OTP if it's not a dummy value (for backward compatibility)
@@ -227,13 +237,22 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
 
         // Create provider professions if provided
         const createdProfessions = [];
+        console.log('Starting profession creation...');
+        console.log('parsedProfessions:', parsedProfessions);
+        console.log('Is array?', Array.isArray(parsedProfessions));
+        
         if (parsedProfessions && Array.isArray(parsedProfessions)) {
+            console.log('Processing', parsedProfessions.length, 'professions');
             for (let i = 0; i < parsedProfessions.length; i++) {
                 const profession = parsedProfessions[i];
                 const experience = Array.isArray(parsedExperiences) ? parsedExperiences[i] : parsedExperiences;
                 
+                console.log(`Processing profession ${i}:`, profession);
+                console.log(`Processing experience ${i}:`, experience);
+                
                 if (profession && profession.trim()) {
                     try {
+                        console.log('Creating profession in database...');
                         const providerProfession = await prisma.providerProfession.create({
                             data: {
                                 provider_id: newProvider.provider_id,
@@ -241,14 +260,21 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
                                 experience: experience ? experience.trim() : '0 years'
                             }
                         });
+                        console.log('Profession created successfully:', providerProfession);
                         createdProfessions.push(providerProfession);
                     } catch (professionError) {
                         console.error('Error creating profession:', professionError);
                         // Continue with other professions but log the error
                     }
+                } else {
+                    console.log('Skipping empty profession at index', i);
                 }
             }
-        }// Delete the used OTP
+        } else {
+            console.log('No professions to process or not an array');
+        }
+        
+        console.log('Final createdProfessions:', createdProfessions);// Delete the used OTP
         await cleanupOTP(provider_email);
 
         // Send registration success email

@@ -174,15 +174,17 @@ export const createRating = async (req, res) => {
 // Get all ratings for a specific provider
 export const getProviderRatings = async (req, res) => {
     try {
-        const { provider_id } = req.params;
+        const { providerId } = req.params; // Changed from provider_id to providerId
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
+        console.log('Getting provider ratings for provider ID:', providerId);
+
         // Get ratings with pagination
         const ratings = await prisma.rating.findMany({
             where: {
-                provider_id: parseInt(provider_id),
+                provider_id: parseInt(providerId), // Changed from provider_id to providerId
                 rated_by: 'customer'
             },
             include: {
@@ -216,7 +218,7 @@ export const getProviderRatings = async (req, res) => {
         // Get total count for pagination
         const totalRatings = await prisma.rating.count({
             where: {
-                provider_id: parseInt(provider_id),
+                provider_id: parseInt(providerId), // Changed from provider_id to providerId
                 rated_by: 'customer'
             }
         });
@@ -224,7 +226,7 @@ export const getProviderRatings = async (req, res) => {
         // Calculate rating statistics
         const ratingStats = await prisma.rating.aggregate({
             where: {
-                provider_id: parseInt(provider_id),
+                provider_id: parseInt(providerId), // Changed from provider_id to providerId
                 rated_by: 'customer'
             },
             _avg: {
@@ -239,7 +241,7 @@ export const getProviderRatings = async (req, res) => {
         const ratingDistribution = await Promise.all([1, 2, 3, 4, 5].map(async (star) => {
             const count = await prisma.rating.count({
                 where: {
-                    provider_id: parseInt(provider_id),
+                    provider_id: parseInt(providerId), // Changed from provider_id to providerId
                     rated_by: 'customer',
                     rating_value: star
                 }

@@ -1261,23 +1261,33 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 const hasActiveAppointments = availability.appointments && availability.appointments.length > 0;
                 const isPastDate = requestedDate < new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
                 
-                // Check if the time slot is in the past (for today only)
-                let isPast = false;
+                // Check if booking is still allowed (for today only - until 3 PM)
+                let isBookingAllowed = true;
                 const today = new Date();
                 const isToday = requestedDate.toDateString() === today.toDateString();
                 
                 if (isToday) {
-                    const currentTime = today.getHours() * 60 + today.getMinutes();
-                    const [hours, minutes] = availability.startTime.split(':');
-                    const slotTime = parseInt(hours) * 60 + parseInt(minutes);
-                    isPast = slotTime <= currentTime;
+                    const currentHour = today.getHours();
+                    // Allow booking until 3 PM (15:00) today, regardless of individual time slots
+                    isBookingAllowed = currentHour < 15;
                 }
                 
                 // Provider is available if:
                 // 1. Not a past date
-                // 2. Not a past time (if today)
+                // 2. Booking is still allowed (before 3 PM if today)
                 // 3. No active appointments on this specific date
-                const isAvailable = !isPastDate && !(isPast && isToday) && !hasActiveAppointments;
+                const isAvailable = !isPastDate && isBookingAllowed && !hasActiveAppointments;
+                
+                // Add debug logging for today's filtering
+                if (isToday) {
+                    console.log(`🔍 Provider ${availability.provider_id} slot ${availability.startTime}-${availability.endTime}:`, {
+                        isPastDate,
+                        isBookingAllowed,
+                        hasActiveAppointments,
+                        currentHour: today.getHours(),
+                        isAvailable
+                    });
+                }
                 
                 if (isAvailable) {
                     availableProviderIds.add(availability.provider_id);
@@ -1557,21 +1567,20 @@ export const getProviderBookingAvailability = async (req, res) => {
             // not for the entire week or future weeks
             const hasActiveAppointments = slot.appointments && slot.appointments.length > 0;
             
-            // Check if slot is in the past (for today only)
-            let isPast = false;
+            // Check if booking is still allowed (for today only - until 3 PM)
+            let isBookingAllowed = true;
             const today = new Date();
             const isToday = requestedDate.toDateString() === today.toDateString();
             
             if (isToday) {
-                const currentTime = today.getHours() * 60 + today.getMinutes();
-                const [hours, minutes] = slot.startTime.split(':');
-                const slotTime = parseInt(hours) * 60 + parseInt(minutes);
-                isPast = slotTime <= currentTime;
+                const currentHour = today.getHours();
+                // Allow booking until 3 PM (15:00) today, regardless of individual time slots
+                isBookingAllowed = currentHour < 15;
             }
             
             // Rolling Weekly Recurring Logic:
             // - Past dates: not available
-            // - Past times (today only): not available  
+            // - After 3 PM today: not available for same-day booking
             // - Has active appointments on THIS SPECIFIC DATE: booked
             // - Otherwise: available (even if booked on previous weeks)
             //
@@ -1586,8 +1595,8 @@ export const getProviderBookingAvailability = async (req, res) => {
             if (isPastDate) {
                 status = 'past';
                 isAvailable = false;
-            } else if (isPast && isToday) {
-                status = 'past';
+            } else if (isToday && !isBookingAllowed) {
+                status = 'booking_closed_for_today';
                 isAvailable = false;
             } else if (hasActiveAppointments) {
                 status = 'booked';
@@ -1602,13 +1611,17 @@ export const getProviderBookingAvailability = async (req, res) => {
                 provider_id: slot.provider_id,
                 availability_isActive: slot.availability_isActive,
                 isBooked: hasActiveAppointments,
-                isPast: isPastDate || (isPast && isToday),
+                isPastDate: isPastDate,
+                isBookingAllowed: isBookingAllowed,
+                isToday: isToday,
                 isAvailable,
                 status,
                 appointmentsOnThisDate: slot.appointments.length,
                 debugInfo: {
                     requestedDate: requestedDate.toISOString(),
                     dayOfWeek,
+                    currentHour: isToday ? today.getHours() : null,
+                    bookingCutoffTime: isToday ? '15:00' : null,
                     searchDateRange: {
                         start: startOfDay.toISOString(),
                         end: endOfDay.toISOString()

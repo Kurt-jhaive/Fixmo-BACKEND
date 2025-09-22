@@ -358,6 +358,446 @@ Get all available service listings with multiple photos support.
 
 ---
 
+## 6. Get Service Categories (Public)
+
+### Endpoint
+```
+GET /api/services/categories
+```
+
+### Description
+Get all available service categories for dropdown selection. This is a public endpoint that doesn't require authentication.
+
+### Success Response (200)
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "category_id": 1,
+      "category_name": "Plumbing"
+    },
+    {
+      "category_id": 2,
+      "category_name": "Electrical"
+    },
+    {
+      "category_id": 3,
+      "category_name": "Cleaning"
+    }
+  ]
+}
+```
+
+---
+
+## 7. Get Service by ID
+
+### Endpoint
+```
+GET /api/services/services/{serviceId}
+```
+
+### Description
+Get a specific service by ID for the authenticated provider.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `serviceId` | integer | Yes | Service ID in the URL path |
+
+### Example Request
+```
+GET /api/services/services/123
+Authorization: Bearer <jwt_token>
+```
+
+### Success Response (200)
+```json
+{
+  "success": true,
+  "data": {
+    "service_id": 123,
+    "service_title": "Professional Home Cleaning",
+    "service_description": "Complete home cleaning service including all rooms",
+    "service_startingprice": 500,
+    "category_id": 2,
+    "provider_id": 456,
+    "servicelisting_isActive": true,
+    "created_at": "2025-01-15T10:30:00.000Z",
+    "service_photos": [
+      {
+        "id": 1,
+        "imageUrl": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/service-photos/service_123_0.jpg",
+        "uploadedAt": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "category": {
+      "category_id": 2,
+      "category_name": "Cleaning"
+    }
+  }
+}
+```
+
+### Error Response (404)
+```json
+{
+  "success": false,
+  "message": "Service not found or access denied"
+}
+```
+
+---
+
+## 8. Update Service Listing
+
+### Endpoint
+```
+PUT /api/services/services/{serviceId}
+```
+
+### Description
+Update an existing service listing for the authenticated provider.
+
+### Content-Type
+```
+application/json
+```
+
+### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `serviceId` | integer | Yes | Service ID in the URL path |
+| `service_title` | string | Yes | Updated title of the service |
+| `service_description` | string | Yes | Updated description of the service |
+| `service_startingprice` | number | Yes | Updated starting price |
+| `category_id` | integer | Yes | Updated service category ID |
+
+### Example Request
+```json
+PUT /api/services/services/123
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+
+{
+  "service_title": "Premium Home Cleaning Service",
+  "service_description": "Professional deep cleaning service for homes and offices",
+  "service_startingprice": 750,
+  "category_id": 2
+}
+```
+
+### Success Response (200)
+```json
+{
+  "success": true,
+  "message": "Service updated successfully",
+  "data": {
+    "service_id": 123,
+    "service_title": "Premium Home Cleaning Service",
+    "service_description": "Professional deep cleaning service for homes and offices",
+    "service_startingprice": 750,
+    "category_id": 2,
+    "provider_id": 456,
+    "servicelisting_isActive": true,
+    "service_photos": [
+      {
+        "id": 1,
+        "imageUrl": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/service-photos/service_123_0.jpg",
+        "uploadedAt": "2025-01-15T10:30:00.000Z"
+      }
+    ],
+    "category": {
+      "category_id": 2,
+      "category_name": "Cleaning"
+    }
+  }
+}
+```
+
+### Error Response (400)
+```json
+{
+  "success": false,
+  "message": "All fields are required (service_title, service_description, service_startingprice, category_id)."
+}
+```
+
+---
+
+## 9. Delete Service Listing
+
+### Endpoint
+```
+DELETE /api/services/services/{serviceId}
+```
+
+### Description
+Delete a service listing. This will also automatically delete all associated service photos.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `serviceId` | integer | Yes | Service ID in the URL path |
+
+### Example Request
+```
+DELETE /api/services/services/123
+Authorization: Bearer <jwt_token>
+```
+
+### Success Response (200)
+```json
+{
+  "success": true,
+  "message": "Service deleted successfully"
+}
+```
+
+### Error Response (404)
+```json
+{
+  "success": false,
+  "message": "Service not found or access denied"
+}
+```
+
+---
+
+## 10. Toggle Service Availability
+
+### Endpoint
+```
+PATCH /api/services/services/{serviceId}/toggle
+```
+
+### Description
+Toggle the availability status of a service listing (activate/deactivate).
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `serviceId` | integer | Yes | Service ID in the URL path |
+
+### Example Request
+```
+PATCH /api/services/services/123/toggle
+Authorization: Bearer <jwt_token>
+```
+
+### Success Response (200)
+```json
+{
+  "success": true,
+  "message": "Service activated successfully",
+  "data": {
+    "service_id": 123,
+    "service_title": "Professional Home Cleaning",
+    "service_description": "Complete home cleaning service including all rooms",
+    "service_startingprice": 500,
+    "servicelisting_isActive": true,
+    "serviceProvider": {
+      "provider_id": 456,
+      "provider_first_name": "John",
+      "provider_last_name": "Smith"
+    },
+    "category": {
+      "category_id": 2,
+      "category_name": "Cleaning"
+    },
+    "service_photos": [
+      {
+        "id": 1,
+        "imageUrl": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/service-photos/service_123_0.jpg",
+        "uploadedAt": "2025-01-15T10:30:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## 11. Get Provider Certificates
+
+### Endpoint
+```
+GET /api/services/certificates
+```
+
+### Description
+Get all certificates for the authenticated provider (for backward compatibility).
+
+### Success Response (200)
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "certificate_id": 1,
+      "certificate_name": "Electrical Safety Certificate",
+      "certificate_file_path": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/certificates/cert_1.pdf",
+      "expiry_date": "2025-12-31T00:00:00.000Z"
+    },
+    {
+      "certificate_id": 2,
+      "certificate_name": "Plumbing License",
+      "certificate_file_path": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/certificates/cert_2.pdf",
+      "expiry_date": "2026-06-30T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+## 12. Get Certificate Services Mapping
+
+### Endpoint
+```
+GET /api/services/certificate-services
+```
+
+### Description
+Get certificate-service mappings from JSON file (for backward compatibility). This is a public endpoint.
+
+### Success Response (200)
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "category_id": 1,
+      "category_name": "Plumbing",
+      "required_certificates": ["Plumbing License", "Safety Certificate"]
+    },
+    {
+      "category_id": 2,
+      "category_name": "Electrical",
+      "required_certificates": ["Electrical License", "Safety Certificate"]
+    }
+  ]
+}
+```
+
+---
+
+## Service Controller Endpoints Summary
+
+### Public Endpoints (No Authentication)
+- `GET /api/services/categories` - Get service categories
+- `GET /api/services/certificate-services` - Get certificate mappings
+
+### Protected Endpoints (Provider Authentication Required)
+- `GET /api/services/services` - Get all provider services with photos
+- `GET /api/services/services/{serviceId}` - Get specific service by ID
+- `POST /api/services/services` - Create service with multiple photos (max 5)
+- `PUT /api/services/services/{serviceId}` - Update service details
+- `DELETE /api/services/services/{serviceId}` - Delete service and photos
+- `PATCH /api/services/services/{serviceId}/toggle` - Toggle service availability
+- `GET /api/services/certificates` - Get provider certificates
+
+### Key Features
+- **Multiple Photo Support**: Up to 5 photos per service with Cloudinary storage
+- **Category Integration**: Direct category_id relationship with ServiceCategory
+- **Availability Toggle**: Easy activation/deactivation of services
+- **Data Validation**: Comprehensive input validation and error handling
+- **Provider Security**: All operations restricted to service owner
+- **Backward Compatibility**: Legacy certificate endpoints maintained
+
+---
+
+## 13. Get Provider Ratings
+
+### Endpoint
+```
+GET /api/ratings/provider/{providerId}
+```
+
+### Description
+Get all ratings for a specific provider with pagination and statistics.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `providerId` | integer | Yes | Provider ID in the URL path |
+| `page` | integer | No | Page number for pagination (default: 1) |
+| `limit` | integer | No | Number of ratings per page (default: 10) |
+
+### Example Request
+```
+GET /api/ratings/provider/123?page=1&limit=5
+```
+
+### Success Response (200)
+```json
+{
+  "success": true,
+  "data": {
+    "ratings": [
+      {
+        "id": 1,
+        "rating_value": 5,
+        "rating_comment": "Excellent service! Very professional and thorough.",
+        "rating_photo": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/ratings/rating_1.jpg",
+        "appointment_id": 456,
+        "user_id": 789,
+        "provider_id": 123,
+        "rated_by": "customer",
+        "created_at": "2025-01-15T14:30:00.000Z",
+        "user": {
+          "user_id": 789,
+          "first_name": "John",
+          "last_name": "Doe",
+          "profile_photo": "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/profiles/user_789.jpg"
+        },
+        "appointment": {
+          "appointment_id": 456,
+          "scheduled_date": "2025-01-10T09:00:00.000Z",
+          "service": {
+            "service_title": "Professional Home Cleaning"
+          }
+        }
+      }
+    ],
+    "pagination": {
+      "current_page": 1,
+      "total_pages": 3,
+      "total_ratings": 15,
+      "has_next": true,
+      "has_prev": false
+    },
+    "statistics": {
+      "average_rating": 4.67,
+      "total_ratings": 15,
+      "rating_distribution": [
+        { "star": 1, "count": 0 },
+        { "star": 2, "count": 1 },
+        { "star": 3, "count": 2 },
+        { "star": 4, "count": 5 },
+        { "star": 5, "count": 7 }
+      ]
+    }
+  }
+}
+```
+
+### Error Response (500)
+```json
+{
+  "success": false,
+  "message": "Internal server error while fetching ratings"
+}
+```
+
+---
+
 ## Error Codes
 
 | Status | Description | Common Causes |
