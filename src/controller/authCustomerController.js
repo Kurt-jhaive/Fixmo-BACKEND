@@ -1230,25 +1230,38 @@ export const getServiceListingsForCustomer = async (req, res) => {
             // Get all provider IDs from the listings
             const providerIds = serviceListings.map(listing => listing.serviceProvider.provider_id);
             
+            // First, get all active appointments for all providers on the requested date
+            const activeAppointments = await prisma.appointment.findMany({
+                where: {
+                    provider_id: { in: providerIds },
+                    scheduled_date: {
+                        gte: startOfDay,
+                        lt: endOfDay
+                    },
+                    appointment_status: {
+                        in: ['scheduled', 'in-progress']
+                    }
+                },
+                select: {
+                    provider_id: true,
+                    appointment_status: true,
+                    scheduled_date: true
+                }
+            });
+            
+            // Create a set of provider IDs that have active appointments on this date
+            const providersWithActiveAppointments = new Set(
+                activeAppointments.map(apt => apt.provider_id)
+            );
+            
+            console.log('🚫 Providers with active appointments on', date, ':', Array.from(providersWithActiveAppointments));
+            
             // Get availability data for all providers for the requested day of week
             const providerAvailability = await prisma.availability.findMany({
                 where: {
                     provider_id: { in: providerIds },
                     dayOfWeek: dayOfWeek,
                     availability_isActive: true
-                },
-                include: {
-                    appointments: {
-                        where: {
-                            scheduled_date: {
-                                gte: startOfDay,
-                                lt: endOfDay
-                            },
-                            appointment_status: {
-                                in: ['accepted', 'pending', 'approved', 'confirmed', 'on the way']
-                            }
-                        }
-                    }
                 }
             });
             
@@ -1258,7 +1271,8 @@ export const getServiceListingsForCustomer = async (req, res) => {
             const availableProviderIds = new Set();
             
             providerAvailability.forEach(availability => {
-                const hasActiveAppointments = availability.appointments && availability.appointments.length > 0;
+                // Check if this provider has any active appointments on the requested date
+                const hasActiveAppointments = providersWithActiveAppointments.has(availability.provider_id);
                 const isPastDate = requestedDate < new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
                 
                 // Check if booking is still allowed (for today only - until 3 PM)
@@ -1268,26 +1282,23 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 
                 if (isToday) {
                     const currentHour = today.getHours();
-                    // Allow booking until 3 PM (15:00) today, regardless of individual time slots
+                    // Allow booking until 3 PM (15:00) today
                     isBookingAllowed = currentHour < 15;
                 }
                 
-                // Provider is available if:
+                // Provider slot is available if:
                 // 1. Not a past date
                 // 2. Booking is still allowed (before 3 PM if today)
-                // 3. No active appointments on this specific date
+                // 3. No active appointments for this provider on this date
                 const isAvailable = !isPastDate && isBookingAllowed && !hasActiveAppointments;
                 
-                // Add debug logging for today's filtering
-                if (isToday) {
-                    console.log(`🔍 Provider ${availability.provider_id} slot ${availability.startTime}-${availability.endTime}:`, {
-                        isPastDate,
-                        isBookingAllowed,
-                        hasActiveAppointments,
-                        currentHour: today.getHours(),
-                        isAvailable
-                    });
-                }
+                // Add debug logging for availability checking
+                console.log(`🔍 Provider ${availability.provider_id} slot ${availability.startTime}-${availability.endTime}:`, {
+                    isPastDate,
+                    isBookingAllowed: isToday ? `Before 3PM: ${isBookingAllowed}` : 'Not today',
+                    hasActiveAppointments,
+                    isAvailable
+                });
                 
                 if (isAvailable) {
                     availableProviderIds.add(availability.provider_id);
@@ -1299,7 +1310,8 @@ export const getServiceListingsForCustomer = async (req, res) => {
                         totalSlots: 0,
                         availableSlots: 0,
                         bookedSlots: 0,
-                        hasAvailability: false
+                        hasAvailability: false,
+                        availableSlotsDetails: [] // Array to store available slot details with availability_id
                     };
                 }
                 
@@ -1307,6 +1319,13 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 if (isAvailable) {
                     availabilityInfo[availability.provider_id].availableSlots++;
                     availabilityInfo[availability.provider_id].hasAvailability = true;
+                    // Add the available slot details including availability_id
+                    availabilityInfo[availability.provider_id].availableSlotsDetails.push({
+                        availability_id: availability.availability_id,
+                        startTime: availability.startTime,
+                        endTime: availability.endTime,
+                        dayOfWeek: availability.dayOfWeek
+                    });
                 } else if (hasActiveAppointments) {
                     availabilityInfo[availability.provider_id].bookedSlots++;
                 }
@@ -1324,6 +1343,7 @@ export const getServiceListingsForCustomer = async (req, res) => {
                         availableSlots: 0,
                         bookedSlots: 0,
                         hasAvailability: false,
+                        availableSlotsDetails: [], // Initialize empty array for consistency
                         reason: 'No availability set for this day of week'
                     };
                 }
@@ -1380,6 +1400,7 @@ export const getServiceListingsForCustomer = async (req, res) => {
                         totalSlots: availability.totalSlots,
                         availableSlots: availability.availableSlots,
                         bookedSlots: availability.bookedSlots,
+                        availableSlotsDetails: availability.availableSlotsDetails || [], // Include detailed slots with availability_id
                         reason: availability.reason || null
                     }
                 })

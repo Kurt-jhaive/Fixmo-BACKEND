@@ -162,8 +162,11 @@ Create a new appointment between a customer and service provider.
 - `customer_id` (integer)
 - `provider_id` (integer)
 - `scheduled_date` (string, ISO format)
-- `availability_id` (integer) - The availability slot ID
+- `availability_id` (integer) - The availability slot ID from service listings endpoint
 - `service_id` (integer) - The service listing ID
+
+**Important Note:** 
+The `availability_id` should be obtained from the Service Listings endpoint (endpoint #15) when filtering by date. The endpoint returns `availableSlotsDetails` array where each slot contains the required `availability_id` value.
 
 **Optional Fields:**
 - `appointment_status` (string, default: "scheduled")
@@ -207,7 +210,7 @@ Create a new appointment between a customer and service provider.
 ```json
 {
   "success": false,
-  "message": "Customer ID, Provider ID, and scheduled date are required"
+  "message": "Customer ID, Provider ID, scheduled date, availability ID, and service ID are required"
 }
 ```
 
@@ -625,9 +628,168 @@ Get comprehensive statistics about appointments.
 
 ---
 
+## Service Provider Search and Availability
+
+### 15. Get Service Listings with Availability Filtering
+Search for service providers with optional date-based availability filtering. When a date is provided, only providers with available slots on that date are returned, including their `availability_id` values needed for booking.
+
+**Endpoint:** `GET /service-listings-customer`
+
+**Query Parameters:**
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| page | integer | No | 1 | Page number for pagination |
+| limit | integer | No | 12 | Number of items per page |
+| search | string | No | - | Search term for service title, description, or provider name |
+| category | string | No | - | Filter by service category |
+| location | string | No | - | Filter by provider location |
+| sortBy | string | No | rating | Sort order (rating, price-low, price-high, newest) |
+| date | string | No | - | Filter by availability date (YYYY-MM-DD format) |
+
+**Response (without date filtering):**
+```json
+{
+  "message": "Service listings retrieved successfully",
+  "listings": [
+    {
+      "id": 1,
+      "title": "Plumbing Services",
+      "description": "Professional plumbing repairs and installations",
+      "startingPrice": 150.00,
+      "service_photos": [
+        {
+          "id": 1,
+          "imageUrl": "https://cloudinary.com/image1.jpg",
+          "uploadedAt": "2025-09-20T10:00:00.000Z"
+        }
+      ],
+      "provider": {
+        "id": 1,
+        "name": "John Smith",
+        "userName": "johnsmith_plumber",
+        "rating": 4.5,
+        "location": "Downtown Area",
+        "profilePhoto": "https://cloudinary.com/profile1.jpg"
+      },
+      "categories": ["Plumbing", "Home Maintenance"],
+      "specificServices": [
+        {
+          "id": 1,
+          "title": "Leak Repair",
+          "description": "Fix all types of pipe leaks"
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "currentPage": 1,
+    "totalPages": 5,
+    "totalCount": 48,
+    "hasNext": true,
+    "hasPrev": false
+  }
+}
+```
+
+**Response (with date filtering - includes availability_id):**
+```json
+{
+  "message": "Service listings for 2025-09-25 (Thursday) retrieved successfully",
+  "listings": [
+    {
+      "id": 1,
+      "title": "Plumbing Services",
+      "description": "Professional plumbing repairs and installations",
+      "startingPrice": 150.00,
+      "service_photos": [
+        {
+          "id": 1,
+          "imageUrl": "https://cloudinary.com/image1.jpg",
+          "uploadedAt": "2025-09-20T10:00:00.000Z"
+        }
+      ],
+      "provider": {
+        "id": 1,
+        "name": "John Smith",
+        "userName": "johnsmith_plumber",
+        "rating": 4.5,
+        "location": "Downtown Area",
+        "profilePhoto": "https://cloudinary.com/profile1.jpg"
+      },
+      "categories": ["Plumbing", "Home Maintenance"],
+      "specificServices": [
+        {
+          "id": 1,
+          "title": "Leak Repair",
+          "description": "Fix all types of pipe leaks"
+        }
+      ],
+      "availability": {
+        "date": "2025-09-25",
+        "dayOfWeek": "Thursday",
+        "hasAvailability": true,
+        "totalSlots": 3,
+        "availableSlots": 2,
+        "bookedSlots": 1,
+        "availableSlotsDetails": [
+          {
+            "availability_id": 15,
+            "startTime": "09:00",
+            "endTime": "10:00",
+            "dayOfWeek": "Thursday"
+          },
+          {
+            "availability_id": 16,
+            "startTime": "14:00",
+            "endTime": "15:00",
+            "dayOfWeek": "Thursday"
+          }
+        ],
+        "reason": null
+      }
+    }
+  ],
+  "pagination": {
+    "currentPage": 1,
+    "totalPages": 2,
+    "totalCount": 15,
+    "hasNext": true,
+    "hasPrev": false
+  },
+  "dateFilter": {
+    "requestedDate": "2025-09-25",
+    "dayOfWeek": "Thursday",
+    "totalProvidersBeforeFiltering": 48,
+    "availableProvidersAfterFiltering": 15,
+    "filteringApplied": true
+  }
+}
+```
+
+**Key Features:**
+- **Date-based filtering**: When `date` parameter is provided, only providers available on that date are returned
+- **Active appointment filtering**: Providers are excluded if they have active appointments (scheduled, in-progress, pending, etc.) on the searched date
+- **Completed appointment inclusion**: Providers with finished, cancelled, or completed appointments can still be booked again
+- **Availability details**: Each available provider includes `availableSlotsDetails` array with `availability_id` values
+- **Booking integration**: The `availability_id` values can be used directly in appointment creation requests
+- **Smart filtering**: Excludes past dates and applies 3 PM cutoff for same-day bookings
+- **3 PM same-day rule**: Cannot book appointments for today after 3 PM, regardless of provider availability
+- **Comprehensive search**: Supports search by service title, description, provider name, category, and location
+
+**Usage Example:**
+```bash
+# Search for plumbers available on September 25, 2025
+curl "http://localhost:3000/api/service-listings-customer?search=plumber&date=2025-09-25&location=downtown"
+
+# Get highest rated providers without date filtering
+curl "http://localhost:3000/api/service-listings-customer?sortBy=rating&limit=10"
+```
+
+---
+
 ## Rating Endpoints
 
-### 12. Submit Rating
+### 16. Submit Rating
 Submit a rating for a completed appointment.
 
 **Endpoint:** `POST /appointments/:appointmentId/rating`
@@ -698,7 +860,7 @@ Submit a rating for a completed appointment.
 
 ---
 
-### 13. Get Appointment Ratings
+### 17. Get Appointment Ratings
 Get all ratings for a specific appointment.
 
 **Endpoint:** `GET /appointments/:appointmentId/ratings`
@@ -730,7 +892,7 @@ Get all ratings for a specific appointment.
 
 ---
 
-### 14. Check Rating Eligibility
+### 18. Check Rating Eligibility
 Check if a user can rate a specific appointment.
 
 **Endpoint:** `GET /appointments/:appointmentId/can-rate`

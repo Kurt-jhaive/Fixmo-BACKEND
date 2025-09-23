@@ -267,7 +267,9 @@ export const createAppointment = async (req, res) => {
                 scheduled_date: scheduledDateTime,
                 appointment_status,
                 final_price: final_price ? parseFloat(final_price) : null,
-                repairDescription: repairDescription || null
+                repairDescription: repairDescription || null,
+                availability_id: parseInt(availability_id),
+                service_id: parseInt(service_id)
             },
             include: {
                 customer: {
