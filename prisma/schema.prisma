@@ -79,7 +79,8 @@ model ServiceListing {
   service_startingprice   Float
   provider_id             Int
   servicelisting_isActive Boolean                @default(true)
-  service_photos                  ServicePhoto[]
+  warranty                Int?
+  service_photos          ServicePhoto[]
   appointments            Appointment[]
   serviceProvider         ServiceProviderDetails @relation(fields: [provider_id], references: [provider_id])
   specific_services       SpecificService[]
