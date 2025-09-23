@@ -193,16 +193,18 @@ export const createAppointment = async (req, res) => {
             customer_id,
             provider_id,
             scheduled_date,
-            appointment_status = 'pending',
+            appointment_status = 'scheduled',
             final_price,
-            repairDescription
+            repairDescription,
+            availability_id,
+            service_id
         } = req.body;
 
         // Validate required fields
-        if (!customer_id || !provider_id || !scheduled_date) {
+        if (!customer_id || !provider_id || !scheduled_date || !availability_id || !service_id) {
             return res.status(400).json({
                 success: false,
-                message: 'Customer ID, Provider ID, and scheduled date are required'
+                message: 'Customer ID, Provider ID, scheduled date, availability ID, and service ID are required'
             });
         }
 
@@ -245,7 +247,7 @@ export const createAppointment = async (req, res) => {
                 provider_id: parseInt(provider_id),
                 scheduled_date: scheduledDateTime,
                 appointment_status: {
-                    in: ['pending', 'confirmed', 'in-progress']
+                    in: ['scheduled', 'in-progress']
                 }
             }
         });
@@ -347,7 +349,7 @@ export const updateAppointment = async (req, res) => {
                         provider_id: existingAppointment.provider_id,
                         scheduled_date: scheduledDateTime,
                         appointment_status: {
-                            in: ['pending', 'confirmed', 'in-progress']
+                            in: ['scheduled', 'in-progress']
                         },
                         appointment_id: {
                             not: parseInt(appointmentId)
@@ -481,7 +483,7 @@ export const updateAppointmentStatus = async (req, res) => {
         }
 
         // Validate status values
-        const validStatuses = ['pending', 'approved', 'confirmed', 'in-progress', 'finished', 'completed', 'cancelled', 'no-show'];
+        const validStatuses = ['scheduled', 'in-progress', 'finished', 'completed', 'cancelled', 'no-show'];
         if (!validStatuses.includes(status)) {
             return res.status(400).json({
                 success: false,
@@ -716,7 +718,7 @@ export const rescheduleAppointment = async (req, res) => {
                 provider_id: existingAppointment.provider_id,
                 scheduled_date: newScheduledDateTime,
                 appointment_status: {
-                    in: ['pending', 'confirmed', 'in-progress']
+                    in: ['scheduled', 'in-progress']
                 },
                 appointment_id: {
                     not: parseInt(appointmentId)
