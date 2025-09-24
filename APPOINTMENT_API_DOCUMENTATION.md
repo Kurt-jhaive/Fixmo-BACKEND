@@ -14,6 +14,23 @@ Most endpoints require JWT authentication. Include the token in the Authorizatio
 Authorization: Bearer <your-jwt-token>
 ```
 
+## Email Notifications
+The appointment system automatically sends email notifications to both customers and service providers when certain actions occur:
+
+### Booking Confirmation Emails
+- **When:** Automatically sent when a new appointment is created
+- **Recipients:** Both customer and service provider
+- **Content:** Appointment details including booking ID, customer info, service details, scheduled date (date only), and provider contact information
+- **Date Format:** Shows only date (e.g., "Wednesday, October 30, 2024") without time
+
+### Cancellation & Completion Emails
+- **When:** Sent when appointments are cancelled or marked as completed
+- **Recipients:** Both customer and service provider
+- **Content:** Appointment details with cancellation reason or completion confirmation
+- **Date Format:** Shows full date and time (e.g., "Wednesday, October 30, 2024 at 6:00 PM")
+
+**Note:** Email sending failures will not prevent appointment operations from completing successfully.
+
 ---
 
 ## Endpoints
@@ -66,6 +83,11 @@ Retrieve all appointments with filtering, pagination, and sorting options.
         "provider_phone_number": "+0987654321",
         "provider_location": "456 Service Ave",
         "provider_rating": 4.5
+      },
+      "service": {
+        "service_id": 1,
+        "service_title": "Plumbing Repair",
+        "service_startingprice": 100.00
       },
       "appointment_rating": []
     }
@@ -123,6 +145,11 @@ Retrieve a specific appointment by its ID.
       "provider_location": "456 Service Ave",
       "provider_profile_photo": "https://cloudinary.com/provider1.jpg",
       "provider_rating": 4.5
+    },
+    "service": {
+      "service_id": 1,
+      "service_title": "Plumbing Repair",
+      "service_startingprice": 100.00
     },
     "appointment_rating": []
   }
@@ -199,6 +226,11 @@ The `availability_id` should be obtained from the Service Listings endpoint (end
       "provider_last_name": "Smith",
       "provider_email": "jane@example.com",
       "provider_phone_number": "+0987654321"
+    },
+    "service": {
+      "service_id": 1,
+      "service_title": "Plumbing Repair",
+      "service_startingprice": 100.00
     }
   }
 }
@@ -288,6 +320,11 @@ Update an existing appointment's details.
       "provider_last_name": "Smith",
       "provider_email": "jane@example.com",
       "provider_phone_number": "+0987654321"
+    },
+    "service": {
+      "service_id": 1,
+      "service_title": "Plumbing Repair",
+      "service_startingprice": 100.00
     }
   }
 }
@@ -341,12 +378,13 @@ Update only the status of an appointment.
 ```
 
 **Valid Status Values:**
-- `scheduled`
-- `in-progress`
-- `finished`
-- `completed`
-- `cancelled`
-- `no-show`
+- `scheduled` - Initial status when appointment is booked
+- `on-the-way` - Provider is traveling to the appointment
+- `in-progress` - Service is currently being performed
+- `in-warranty` - Service is completed but still under warranty period
+- `finished` - Service work is completed
+- `completed` - Appointment fully completed and ready for rating
+- `cancelled` - Appointment has been cancelled
 
 **Response:**
 ```json
@@ -368,6 +406,11 @@ Update only the status of an appointment.
     "serviceProvider": {
       "provider_first_name": "Jane",
       "provider_last_name": "Smith"
+    },
+    "service": {
+      "service_id": 1,
+      "service_title": "Plumbing Repair",
+      "service_startingprice": 100.00
     }
   }
 }
@@ -409,6 +452,11 @@ Cancel an appointment with a reason.
     "serviceProvider": {
       "provider_first_name": "Jane",
       "provider_last_name": "Smith"
+    },
+    "service": {
+      "service_id": 1,
+      "service_title": "Plumbing Repair",
+      "service_startingprice": 100.00
     }
   }
 }
@@ -443,7 +491,7 @@ Reschedule an appointment to a new date and time.
     "customer_id": 1,
     "provider_id": 1,
     "scheduled_date": "2025-09-26T10:00:00.000Z",
-    "appointment_status": "pending",
+    "appointment_status": "scheduled",
     "customer": {
       "user_id": 1,
       "first_name": "John",
@@ -457,6 +505,11 @@ Reschedule an appointment to a new date and time.
       "provider_last_name": "Smith",
       "provider_email": "jane@example.com",
       "provider_phone_number": "+0987654321"
+    },
+    "service": {
+      "service_id": 1,
+      "service_title": "Plumbing Repair",
+      "service_startingprice": 100.00
     }
   }
 }
@@ -524,6 +577,11 @@ Get all appointments for a specific service provider.
         "user_location": "123 Main St",
         "profile_photo": "https://cloudinary.com/profile1.jpg"
       },
+      "service": {
+        "service_id": 1,
+        "service_title": "Plumbing Repair",
+        "service_startingprice": 100.00
+      },
       "appointment_rating": [
         {
           "rating_value": 5,
@@ -580,6 +638,11 @@ Same as provider appointments endpoint.
         "provider_location": "456 Service Ave",
         "provider_profile_photo": "https://cloudinary.com/provider1.jpg",
         "provider_rating": 4.5
+      },
+      "service": {
+        "service_id": 1,
+        "service_title": "Plumbing Repair",
+        "service_startingprice": 100.00
       },
       "appointment_rating": []
     }

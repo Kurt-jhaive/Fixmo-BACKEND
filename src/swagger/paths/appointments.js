@@ -24,7 +24,7 @@
  *         name: status
  *         schema:
  *           type: string
- *           enum: [pending, approved, confirmed, in-progress, finished, completed, cancelled, no-show]
+ *           enum: [scheduled, on-the-way, in-progress, in-warranty, finished, completed, cancelled, backjob]
  *         description: Filter by appointment status
  *       - in: query
  *         name: provider_id
@@ -122,6 +122,8 @@
  *               - customer_id
  *               - provider_id
  *               - scheduled_date
+ *               - availability_id
+ *               - service_id
  *             properties:
  *               customer_id:
  *                 type: integer
@@ -139,15 +141,15 @@
  *               availability_id:
  *                 type: integer
  *                 example: 789
- *                 description: ID of the provider's availability slot (optional - will use/create default if not provided)
+ *                 description: ID of the provider's availability slot (required; from service listings availability)
  *               service_id:
  *                 type: integer
  *                 example: 101
- *                 description: ID of the service being booked (optional - will use/create default if not provided)
+ *                 description: ID of the service listing being booked (required)
  *               appointment_status:
  *                 type: string
- *                 enum: [pending, approved, confirmed, in-progress, finished, completed, cancelled, no-show]
- *                 default: pending
+ *                 enum: [scheduled, on-the-way, in-progress, in-warranty, finished, completed, cancelled]
+ *                 default: scheduled
  *                 description: Current status of the appointment
  *               final_price:
  *                 type: number
@@ -240,7 +242,7 @@
  *                 description: New scheduled date (checked for conflicts)
  *               appointment_status:
  *                 type: string
- *                 enum: [pending, approved, confirmed, in-progress, finished, completed, cancelled, no-show]
+ *                 enum: [scheduled, on-the-way, in-progress, in-warranty, finished, completed, cancelled]
  *               final_price:
  *                 type: number
  *                 format: float
@@ -516,4 +518,216 @@
  *                     $ref: '#/components/schemas/Appointment'
  *                 pagination:
  *                   $ref: '#/components/schemas/PaginationResponse'
+ */
+
+/**
+ * @swagger
+ * /api/appointments/{appointmentId}/backjob/apply:
+ *   post:
+ *     tags: [Appointments]
+ *     summary: Apply for backjob during warranty (customer)
+ *     description: Customer can raise a backjob request when the appointment is in warranty.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: appointmentId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Appointment ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - reason
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 example: Issue reoccurred within warranty period
+ *               evidence:
+ *                 description: Optional JSON evidence payload (links, notes, etc.)
+ *                 schema:
+ *                   type: object
+ *     responses:
+ *       201:
+ *         description: Backjob application submitted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: Backjob application submitted }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     backjob:
+ *                       $ref: '#/components/schemas/BackjobApplication'
+ *                     appointment:
+ *                       $ref: '#/components/schemas/Appointment'
+ *       400:
+ *         description: Invalid state or payload
+ *       403:
+ *         description: Forbidden (not the owning customer)
+ *       409:
+ *         description: Duplicate active backjob
+ */
+
+/**
+ * @swagger
+ * /api/appointments/backjob/{backjobId}/dispute:
+ *   post:
+ *     tags: [Appointments]
+ *     summary: Dispute a backjob (provider)
+ *     description: Provider disputes a customer's backjob request with reason/evidence.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: backjobId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               dispute_reason: { type: string, example: Work passed QA; likely misuse }
+ *               dispute_evidence:
+ *                 description: Optional JSON evidence payload
+ *                 schema:
+ *                   type: object
+ *     responses:
+ *       200:
+ *         description: Backjob disputed
+ *       403:
+ *         description: Forbidden (not the assigned provider)
+ *       404:
+ *         description: Backjob not found
+ */
+
+/**
+ * @swagger
+ * /api/appointments/backjobs:
+ *   get:
+ *     tags: [Appointments]
+ *     summary: List backjob applications (admin)
+ *     description: Admin can list and filter backjob applications.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [pending, approved, disputed, cancelled-by-admin, cancelled-by-user]
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10 }
+ *     responses:
+ *       200:
+ *         description: Backjobs retrieved
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/BackjobApplication'
+ *                 pagination:
+ *                   $ref: '#/components/schemas/PaginationResponse'
+ */
+
+/**
+ * @swagger
+ * /api/appointments/backjobs/{backjobId}:
+ *   patch:
+ *     tags: [Appointments]
+ *     summary: Admin decision on backjob
+ *     description: Approve backjob, cancel by admin, or mark cancelled by user.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: backjobId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [action]
+ *             properties:
+ *               action:
+ *                 type: string
+ *                 enum: [approve, cancel-by-admin, cancel-by-user]
+ *               admin_notes:
+ *                 type: string
+ *                 example: Approved after reviewing evidence
+ *     responses:
+ *       200:
+ *         description: Backjob updated
+ *       400:
+ *         description: Invalid action
+ *       404:
+ *         description: Backjob not found
+ */
+
+/**
+ * @swagger
+ * /api/appointments/{appointmentId}/backjob/reschedule:
+ *   patch:
+ *     tags: [Appointments]
+ *     summary: Provider reschedules an approved backjob
+ *     description: Reschedules appointment (same ID) and sets status to scheduled.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: appointmentId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [new_scheduled_date, availability_id]
+ *             properties:
+ *               new_scheduled_date: { type: string, format: date-time }
+ *               availability_id: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Appointment rescheduled
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data: { $ref: '#/components/schemas/Appointment' }
+ *       400:
+ *         description: Invalid input or no approved backjob
+ *       403:
+ *         description: Forbidden (not the assigned provider)
+ *       409:
+ *         description: Conflict with existing appointment
  */

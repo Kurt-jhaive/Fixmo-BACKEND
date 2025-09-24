@@ -28,6 +28,7 @@ model User {
   user_appointments Appointment[]
   user_rating       Rating[]
   conversations     Conversation[]
+  backjob_applications BackjobApplication[] @relation("UserBackjobs")
 }
 
 model ServiceProviderDetails {
@@ -56,6 +57,7 @@ model ServiceProviderDetails {
   provider_services       ServiceListing[]
   conversations           Conversation[]
   provider_professions    ProviderProfession[]
+  backjob_applications    BackjobApplication[] @relation("ProviderBackjobs")
 }
 
 model Certificate {
@@ -159,6 +161,7 @@ model Appointment {
   service             ServiceListing         @relation(fields: [service_id], references: [service_id])
   appointment_rating  Rating[]
   conversation        Conversation?
+  backjob_applications BackjobApplication[]
 }
 
 model Rating {
@@ -229,4 +232,26 @@ model Message {
   conversation    Conversation @relation(fields: [conversation_id], references: [conversation_id])
   replied_to      Message?     @relation("MessageReplies", fields: [replied_to_id], references: [message_id])
   replies         Message[]    @relation("MessageReplies")
+}
+
+// Backjob application raised during warranty period for an appointment
+model BackjobApplication {
+  backjob_id               Int                    @id @default(autoincrement())
+  appointment_id           Int
+  customer_id              Int
+  provider_id              Int
+  status                   String                 @default("pending") // pending, approved, disputed, cancelled-by-admin, cancelled-by-user, rescheduled
+  reason                   String
+  evidence                 Json?
+  provider_dispute_reason  String?
+  provider_dispute_evidence Json?
+  admin_notes              String?
+  created_at               DateTime               @default(now())
+  updated_at               DateTime               @updatedAt
+
+  appointment              Appointment            @relation(fields: [appointment_id], references: [appointment_id])
+  customer                 User                   @relation("UserBackjobs", fields: [customer_id], references: [user_id])
+  provider                 ServiceProviderDetails @relation("ProviderBackjobs", fields: [provider_id], references: [provider_id])
+
+  @@index([appointment_id])
 }

@@ -17,6 +17,7 @@ import {
     canRateAppointment
 } from '../controller/appointmentController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
+import { adminAuthMiddleware } from '../middleware/adminAuthMiddleware.js';
 
 const router = express.Router();
 
@@ -47,5 +48,23 @@ router.get('/customer/:customerId', getCustomerAppointments);   // GET /api/appo
 router.post('/:appointmentId/ratings', authMiddleware, submitRating);          // POST /api/appointments/:id/ratings - Submit rating for appointment
 router.get('/:appointmentId/ratings', authMiddleware, getAppointmentRatings);  // GET /api/appointments/:id/ratings - Get ratings for appointment  
 router.get('/:appointmentId/can-rate', authMiddleware, canRateAppointment);    // GET /api/appointments/:id/can-rate - Check if user can rate appointment
+
+// Backjob routes
+import { applyBackjob, disputeBackjob, listBackjobs, updateBackjobStatus, rescheduleFromBackjob } from '../controller/appointmentController.js';
+
+// Customer applies for backjob (must be in-warranty)
+router.post('/:appointmentId/backjob/apply', authMiddleware, applyBackjob);
+
+// Provider disputes a backjob
+router.post('/backjob/:backjobId/dispute', authMiddleware, disputeBackjob);
+
+// Admin lists backjobs
+router.get('/backjobs', adminAuthMiddleware, listBackjobs);
+
+// Admin updates backjob status (approve/cancel)
+router.patch('/backjobs/:backjobId', adminAuthMiddleware, updateBackjobStatus);
+
+// Provider reschedules an approved backjob
+router.patch('/:appointmentId/backjob/reschedule', authMiddleware, rescheduleFromBackjob);
 
 export default router;

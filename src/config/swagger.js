@@ -157,7 +157,7 @@ const options = {
             provider_id: { type: 'integer', description: 'Service provider for the appointment' },
             appointment_status: { 
               type: 'string', 
-              enum: ['pending', 'approved', 'confirmed', 'in-progress', 'finished', 'completed', 'cancelled', 'no-show'],
+              enum: ['scheduled', 'on-the-way', 'in-progress', 'in-warranty', 'finished', 'completed', 'cancelled', 'backjob'],
               description: 'Current appointment status' 
             },
             scheduled_date: { type: 'string', format: 'date-time', description: 'Scheduled appointment date and time' },
@@ -255,7 +255,7 @@ const options = {
       },
       {
         name: 'Appointments',
-        description: 'Appointment booking and management'
+        description: 'Appointment booking and management (includes Backjob workflow)'
       },
       {
         name: 'Ratings',
@@ -286,7 +286,8 @@ const options = {
   apis: [
     './src/route/*.js',
     './src/controller/*.js',
-    './src/swagger/paths/*.js'
+    './src/swagger/paths/*.js',
+    './src/swagger/components/*.js'
   ],
 };
 

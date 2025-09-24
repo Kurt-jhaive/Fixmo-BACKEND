@@ -451,6 +451,13 @@ export const updateAppointment = async (req, res) => {
                         provider_email: true,
                         provider_phone_number: true
                     }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
                 }
             }
         });
@@ -568,6 +575,13 @@ export const updateAppointmentStatus = async (req, res) => {
                         provider_first_name: true,
                         provider_last_name: true
                     }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
                 }
             }
         });
@@ -632,6 +646,13 @@ export const cancelAppointment = async (req, res) => {
                     select: {
                         provider_first_name: true,
                         provider_last_name: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
                     }
                 }
             }
@@ -807,6 +828,13 @@ export const rescheduleAppointment = async (req, res) => {
                         provider_email: true,
                         provider_phone_number: true
                     }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
                 }
             }
         });
@@ -874,6 +902,13 @@ export const getProviderAppointments = async (req, res) => {
                             phone_number: true,
                             user_location: true,
                             profile_photo: true
+                        }
+                    },
+                    service: {
+                        select: {
+                            service_id: true,
+                            service_title: true,
+                            service_startingprice: true
                         }
                     },
                     appointment_rating: {
@@ -965,6 +1000,13 @@ export const getCustomerAppointments = async (req, res) => {
                             provider_location: true,
                             provider_profile_photo: true,
                             provider_rating: true
+                        }
+                    },
+                    service: {
+                        select: {
+                            service_id: true,
+                            service_title: true,
+                            service_startingprice: true
                         }
                     },
                     appointment_rating: {
@@ -1231,6 +1273,241 @@ export const submitRating = async (req, res) => {
             message: 'Error submitting rating',
             error: error.message
         });
+    }
+};
+
+// BACKJOB WORKFLOW
+// Apply for backjob (customer) when appointment is in-warranty
+export const applyBackjob = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        const { reason, evidence } = req.body;
+
+        if (!reason) {
+            return res.status(400).json({ success: false, message: 'Reason is required' });
+        }
+
+        const appointment = await prisma.appointment.findUnique({
+            where: { appointment_id: parseInt(appointmentId) },
+        });
+
+        if (!appointment) {
+            return res.status(404).json({ success: false, message: 'Appointment not found' });
+        }
+
+        // Only the owning customer can apply
+        if (req.userType !== 'customer' || (req.userId && req.userId !== appointment.customer_id)) {
+            return res.status(403).json({ success: false, message: 'Only the appointment customer can apply for a backjob' });
+        }
+
+        if (appointment.appointment_status !== 'in-warranty') {
+            return res.status(400).json({ success: false, message: 'Backjob can only be applied during warranty' });
+        }
+
+        // Prevent duplicate active backjob applications for the same appointment
+        const existingActive = await prisma.backjobApplication.findFirst({
+            where: {
+                appointment_id: appointment.appointment_id,
+                status: { in: ['pending', 'approved', 'disputed'] }
+            }
+        });
+        if (existingActive) {
+            return res.status(409).json({ success: false, message: 'An active backjob request already exists for this appointment' });
+        }
+
+        // Create backjob application
+        const backjob = await prisma.backjobApplication.create({
+            data: {
+                appointment_id: appointment.appointment_id,
+                customer_id: appointment.customer_id,
+                provider_id: appointment.provider_id,
+                reason,
+                evidence: evidence || null,
+            },
+        });
+
+        // Update appointment status to backjob
+        const updatedAppointment = await prisma.appointment.update({
+            where: { appointment_id: appointment.appointment_id },
+            data: { appointment_status: 'backjob' },
+        });
+
+        return res.status(201).json({ success: true, message: 'Backjob application submitted', data: { backjob, appointment: updatedAppointment } });
+    } catch (error) {
+        console.error('Error applying backjob:', error);
+        return res.status(500).json({ success: false, message: 'Error applying backjob', error: error.message });
+    }
+};
+
+// Provider disputes backjob (cannot cancel)
+export const disputeBackjob = async (req, res) => {
+    try {
+        const { backjobId } = req.params;
+        const { dispute_reason, dispute_evidence } = req.body;
+
+        const backjob = await prisma.backjobApplication.findUnique({ where: { backjob_id: parseInt(backjobId) } });
+        if (!backjob) {
+            return res.status(404).json({ success: false, message: 'Backjob application not found' });
+        }
+
+        // Only the assigned provider can dispute
+        if (req.userType !== 'provider' || (req.userId && req.userId !== backjob.provider_id)) {
+            return res.status(403).json({ success: false, message: 'Only the appointment provider can dispute a backjob' });
+        }
+
+        const updated = await prisma.backjobApplication.update({
+            where: { backjob_id: backjob.backjob_id },
+            data: {
+                status: 'disputed',
+                provider_dispute_reason: dispute_reason || null,
+                provider_dispute_evidence: dispute_evidence || null,
+            },
+        });
+
+        return res.status(200).json({ success: true, message: 'Backjob disputed', data: updated });
+    } catch (error) {
+        console.error('Error disputing backjob:', error);
+        return res.status(500).json({ success: false, message: 'Error disputing backjob', error: error.message });
+    }
+};
+
+// Admin: list backjob applications with filters
+export const listBackjobs = async (req, res) => {
+    try {
+        const { status, page = 1, limit = 10 } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const take = parseInt(limit);
+
+        const where = status ? { status } : {};
+        const [items, total] = await Promise.all([
+            prisma.backjobApplication.findMany({
+                where,
+                include: {
+                    appointment: true,
+                    customer: { select: { user_id: true, first_name: true, last_name: true, email: true } },
+                    provider: { select: { provider_id: true, provider_first_name: true, provider_last_name: true, provider_email: true } },
+                },
+                orderBy: { created_at: 'desc' },
+                skip, take,
+            }),
+            prisma.backjobApplication.count({ where }),
+        ]);
+
+        return res.status(200).json({ success: true, data: items, pagination: { current_page: parseInt(page), total_pages: Math.ceil(total / take), total_count: total, limit: take } });
+    } catch (error) {
+        console.error('Error listing backjobs:', error);
+        return res.status(500).json({ success: false, message: 'Error listing backjobs', error: error.message });
+    }
+};
+
+// Admin: update backjob status (approve -> provider reschedules; cancel-by-admin -> appointment completed)
+export const updateBackjobStatus = async (req, res) => {
+    try {
+        const { backjobId } = req.params;
+        const { action, admin_notes } = req.body; // action: approve | cancel-by-admin | cancel-by-user
+
+        const backjob = await prisma.backjobApplication.findUnique({ where: { backjob_id: parseInt(backjobId) } });
+        if (!backjob) {
+            return res.status(404).json({ success: false, message: 'Backjob application not found' });
+        }
+
+    let newStatus = backjob.status;
+    let appointmentUpdate = null;
+
+        if (action === 'approve') {
+            newStatus = 'approved';
+            // Appointment remains in 'backjob' until provider reschedules
+        } else if (action === 'cancel-by-admin') {
+            newStatus = 'cancelled-by-admin';
+            appointmentUpdate = { appointment_status: 'completed' };
+        } else if (action === 'cancel-by-user') {
+            newStatus = 'cancelled-by-user';
+            // Appointment returns to warranty state
+            appointmentUpdate = { appointment_status: 'in-warranty' };
+        } else {
+            return res.status(400).json({ success: false, message: 'Invalid action' });
+        }
+
+        const updatedBackjob = await prisma.backjobApplication.update({
+            where: { backjob_id: backjob.backjob_id },
+            data: { status: newStatus, admin_notes: admin_notes || null },
+        });
+
+        if (appointmentUpdate) {
+            await prisma.appointment.update({ where: { appointment_id: backjob.appointment_id }, data: appointmentUpdate });
+        }
+
+        return res.status(200).json({ success: true, message: 'Backjob updated', data: updatedBackjob });
+    } catch (error) {
+        console.error('Error updating backjob:', error);
+        return res.status(500).json({ success: false, message: 'Error updating backjob', error: error.message });
+    }
+};
+
+// Provider reschedules an approved backjob: choose available date; appointment becomes scheduled (same ID)
+export const rescheduleFromBackjob = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        const { new_scheduled_date, availability_id } = req.body;
+
+        if (!new_scheduled_date || !availability_id) {
+            return res.status(400).json({ success: false, message: 'New scheduled date and availability_id are required' });
+        }
+
+        const appointment = await prisma.appointment.findUnique({ where: { appointment_id: parseInt(appointmentId) } });
+        if (!appointment) {
+            return res.status(404).json({ success: false, message: 'Appointment not found' });
+        }
+
+        if (appointment.appointment_status !== 'backjob') {
+            return res.status(400).json({ success: false, message: 'Appointment is not in backjob status' });
+        }
+
+        // Only the assigned provider can reschedule
+        if (req.userType !== 'provider' || (req.userId && req.userId !== appointment.provider_id)) {
+            return res.status(403).json({ success: false, message: 'Only the appointment provider can reschedule a backjob' });
+        }
+
+        // Ensure there is an approved backjob for this appointment
+        const approvedBackjob = await prisma.backjobApplication.findFirst({
+            where: { appointment_id: appointment.appointment_id, status: 'approved' }
+        });
+        if (!approvedBackjob) {
+            return res.status(400).json({ success: false, message: 'No approved backjob found for this appointment' });
+        }
+
+        const newDate = new Date(new_scheduled_date);
+        if (isNaN(newDate.getTime())) {
+            return res.status(400).json({ success: false, message: 'Invalid date format' });
+        }
+
+        // Conflict check
+        const conflict = await prisma.appointment.findFirst({
+            where: {
+                provider_id: appointment.provider_id,
+                scheduled_date: newDate,
+                appointment_status: { in: ['scheduled', 'on-the-way', 'in-progress'] },
+                appointment_id: { not: appointment.appointment_id },
+            },
+        });
+        if (conflict) {
+            return res.status(409).json({ success: false, message: 'Provider already has an appointment at this time' });
+        }
+
+        const updated = await prisma.appointment.update({
+            where: { appointment_id: appointment.appointment_id },
+            data: { scheduled_date: newDate, availability_id: parseInt(availability_id), appointment_status: 'scheduled' },
+            include: {
+                customer: { select: { user_id: true, first_name: true, last_name: true, email: true, phone_number: true } },
+                serviceProvider: { select: { provider_id: true, provider_first_name: true, provider_last_name: true, provider_email: true, provider_phone_number: true } },
+                service: { select: { service_id: true, service_title: true, service_startingprice: true } }
+            }
+        });
+
+        return res.status(200).json({ success: true, message: 'Backjob appointment rescheduled', data: updated });
+    } catch (error) {
+        console.error('Error rescheduling backjob appointment:', error);
+        return res.status(500).json({ success: false, message: 'Error rescheduling backjob appointment', error: error.message });
     }
 };
 
