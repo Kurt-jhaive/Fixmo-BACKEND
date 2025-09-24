@@ -48,9 +48,7 @@ export const sendBookingConfirmationToCustomer = async (customerEmail, bookingDe
         weekday: 'long',
         year: 'numeric',
         month: 'long',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
+        day: 'numeric'
     });
 
     const mailOptions = {
@@ -129,9 +127,7 @@ export const sendBookingConfirmationToProvider = async (providerEmail, bookingDe
         weekday: 'long',
         year: 'numeric',
         month: 'long',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
+        day: 'numeric'
     });
 
     const mailOptions = {

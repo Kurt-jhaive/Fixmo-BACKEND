@@ -82,6 +82,12 @@ export const getAllAppointments = async (req, res) => {
                                 }
                             }
                         }
+                    },
+                    service: {
+                        select: {
+                            service_title: true,
+                            service_startingprice: true
+                        }
                     }
                 },
                 orderBy: {
@@ -159,6 +165,12 @@ export const getAppointmentById = async (req, res) => {
                                 last_name: true
                             }
                         }
+                    }
+                },
+                service: {
+                    select: {
+                        service_title: true,
+                        service_startingprice: true
                     }
                 }
             }
@@ -247,7 +259,7 @@ export const createAppointment = async (req, res) => {
                 provider_id: parseInt(provider_id),
                 scheduled_date: scheduledDateTime,
                 appointment_status: {
-                    in: ['scheduled', 'in-progress']
+                    in: ['scheduled', 'on-the-way', 'in-progress']
                 }
             }
         });
@@ -289,9 +301,44 @@ export const createAppointment = async (req, res) => {
                         provider_email: true,
                         provider_phone_number: true
                     }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
                 }
             }
         });
+
+        // Send email notification for scheduled appointment
+        try {
+            const { sendBookingConfirmationToCustomer, sendBookingConfirmationToProvider } = await import('../services/mailer.js');
+            
+            // Format booking details for email
+            const bookingDetails = {
+                customerName: `${appointment.customer.first_name} ${appointment.customer.last_name}`,
+                customerPhone: appointment.customer.phone_number,
+                customerEmail: appointment.customer.email,
+                serviceTitle: appointment.service?.service_title || 'Service',
+                providerName: `${appointment.serviceProvider.provider_first_name} ${appointment.serviceProvider.provider_last_name}`,
+                providerPhone: appointment.serviceProvider.provider_phone_number,
+                providerEmail: appointment.serviceProvider.provider_email,
+                scheduledDate: appointment.scheduled_date,
+                appointmentId: appointment.appointment_id,
+                startingPrice: appointment.service?.service_startingprice || 0,
+                repairDescription: appointment.repairDescription
+            };
+            console.log('📧 BookingDetails (createAppointment):', bookingDetails);
+            
+            await sendBookingConfirmationToCustomer(appointment.customer.email, bookingDetails);
+            await sendBookingConfirmationToProvider(appointment.serviceProvider.provider_email, bookingDetails);
+            console.log('✅ Booking confirmation emails sent successfully');
+        } catch (emailError) {
+            console.error('❌ Error sending booking confirmation emails:', emailError);
+            // Don't fail the appointment creation if email fails
+        }
 
         res.status(201).json({
             success: true,
@@ -351,7 +398,7 @@ export const updateAppointment = async (req, res) => {
                         provider_id: existingAppointment.provider_id,
                         scheduled_date: scheduledDateTime,
                         appointment_status: {
-                            in: ['scheduled', 'in-progress']
+                            in: ['scheduled', 'on-the-way', 'in-progress']
                         },
                         appointment_id: {
                             not: parseInt(appointmentId)
@@ -485,8 +532,8 @@ export const updateAppointmentStatus = async (req, res) => {
         }
 
         // Validate status values
-        const validStatuses = ['scheduled', 'in-progress', 'finished', 'completed', 'cancelled', 'no-show'];
-        if (!validStatuses.includes(status)) {
+        const validStatuses = ['scheduled', 'on-the-way', 'in-progress', 'in-warranty', 'finished', 'completed', 'cancelled'];
+        if (!validStatuses.includes(status.toLowerCase())) {
             return res.status(400).json({
                 success: false,
                 message: `Invalid status. Valid statuses are: ${validStatuses.join(', ')}`
@@ -720,7 +767,7 @@ export const rescheduleAppointment = async (req, res) => {
                 provider_id: existingAppointment.provider_id,
                 scheduled_date: newScheduledDateTime,
                 appointment_status: {
-                    in: ['scheduled', 'in-progress']
+                    in: ['scheduled', 'on-the-way', 'in-progress']
                 },
                 appointment_id: {
                     not: parseInt(appointmentId)
@@ -740,7 +787,7 @@ export const rescheduleAppointment = async (req, res) => {
             where: { appointment_id: parseInt(appointmentId) },
             data: {
                 scheduled_date: newScheduledDateTime,
-                appointment_status: 'pending' // Reset to pending when rescheduled
+                appointment_status: 'scheduled' // Reset to scheduled when rescheduled
             },
             include: {
                 customer: {

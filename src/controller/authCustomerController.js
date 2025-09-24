@@ -463,6 +463,7 @@ export const addAppointment = async (req, res) => {
                 startingPrice: newAppointment.service.service_startingprice,
                 repairDescription: newAppointment.repairDescription
             };
+            console.log('📧 BookingDetails (auth createAppointment):', bookingDetails);
 
             // Send confirmation email to customer
             await sendBookingConfirmationToCustomer(newAppointment.customer.email, bookingDetails);
@@ -1239,7 +1240,7 @@ export const getServiceListingsForCustomer = async (req, res) => {
                         lt: endOfDay
                     },
                     appointment_status: {
-                        in: ['scheduled', 'in-progress']
+                        in: ['scheduled', 'on-the-way', 'in-progress']
                     }
                 },
                 select: {
