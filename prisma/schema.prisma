@@ -155,6 +155,11 @@ model Appointment {
   availability_id     Int
   service_id          Int
   cancellation_reason String?
+  // Warranty tracking
+  warranty_days       Int?                   // Copied from ServiceListing.warranty at creation time
+  finished_at         DateTime?              // When provider marks service done
+  completed_at        DateTime?              // When customer marks service completed (or auto-completed)
+  warranty_expires_at DateTime?              // finished_at + warranty_days
   availability        Availability           @relation(fields: [availability_id], references: [availability_id])
   customer            User                   @relation(fields: [customer_id], references: [user_id])
   serviceProvider     ServiceProviderDetails @relation(fields: [provider_id], references: [provider_id])

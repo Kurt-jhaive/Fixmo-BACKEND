@@ -195,3 +195,31 @@ httpServer.listen(port, '0.0.0.0', () => {
   console.log(`💬 WebSocket server initialized for real-time messaging`);
   console.log(`🗄️ Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
 });
+
+// Auto-complete appointments after warranty window if customer hasn't completed
+// Runs every 6 hours to reduce load; uses warranty_days and finished_at/warranty_expires_at
+const AUTO_COMPLETE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+setInterval(async () => {
+  try {
+    const now = new Date();
+    // Find appointments that are in-warranty, have warranty_expires_at in the past, and are not completed/backjob/cancelled
+    const expired = await prisma.appointment.findMany({
+      where: {
+        appointment_status: 'in-warranty',
+        warranty_expires_at: { lte: now },
+      },
+      select: { appointment_id: true }
+    });
+
+    if (expired.length > 0) {
+      const ids = expired.map(a => a.appointment_id);
+      await prisma.appointment.updateMany({
+        where: { appointment_id: { in: ids } },
+        data: { appointment_status: 'completed', completed_at: now }
+      });
+      console.log(`✅ Auto-completed ${ids.length} appointment(s) after warranty expiration.`);
+    }
+  } catch (err) {
+    console.error('Auto-complete job error:', err);
+  }
+}, AUTO_COMPLETE_INTERVAL_MS);

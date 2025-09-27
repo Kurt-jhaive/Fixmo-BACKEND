@@ -522,6 +522,38 @@
 
 /**
  * @swagger
+ * /api/appointments/{appointmentId}/complete:
+ *   post:
+ *     tags: [Appointments]
+ *     summary: Customer marks appointment completed
+ *     description: Marks the appointment as completed within warranty; triggers rating requirement.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: appointmentId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Appointment marked as completed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 message: { type: string }
+ *                 data: { $ref: '#/components/schemas/Appointment' }
+ *       403:
+ *         description: Forbidden (not the owning customer)
+ *       404:
+ *         description: Appointment not found
+ */
+
+/**
+ * @swagger
  * /api/appointments/{appointmentId}/backjob/apply:
  *   post:
  *     tags: [Appointments]

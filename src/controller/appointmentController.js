@@ -46,7 +46,7 @@ export const getAllAppointments = async (req, res) => {
         }
 
         // Get appointments with pagination
-        const [appointments, totalCount] = await Promise.all([
+        const [appointmentsRaw, totalCount] = await Promise.all([
             prisma.appointment.findMany({
                 where: whereClause,
                 include: {
@@ -75,6 +75,7 @@ export const getAllAppointments = async (req, res) => {
                         select: {
                             rating_value: true,
                             rating_comment: true,
+                            rated_by: true,
                             user: {
                                 select: {
                                     first_name: true,
@@ -98,6 +99,17 @@ export const getAllAppointments = async (req, res) => {
             }),
             prisma.appointment.count({ where: whereClause })
         ]);
+
+        const now = new Date();
+        const appointments = appointmentsRaw.map(a => {
+            let days_left = null;
+            if (a.warranty_expires_at) {
+                const diffMs = a.warranty_expires_at.getTime() - now.getTime();
+                days_left = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+            }
+            const needs_rating = a.appointment_status === 'completed' && !a.appointment_rating?.some(r => r.rated_by === 'customer');
+            return { ...a, days_left, needs_rating };
+        });
 
         const totalPages = Math.ceil(totalCount / take);
 
@@ -183,9 +195,17 @@ export const getAppointmentById = async (req, res) => {
             });
         }
 
+        const now2 = new Date();
+        let days_left = null;
+        if (appointment.warranty_expires_at) {
+            const diffMs = appointment.warranty_expires_at.getTime() - now2.getTime();
+            days_left = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+        }
+        const needs_rating = appointment.appointment_status === 'completed' && !appointment.appointment_rating?.some(r => r.rated_by === 'customer');
+
         res.status(200).json({
             success: true,
-            data: appointment
+            data: { ...appointment, days_left, needs_rating }
         });
 
     } catch (error) {
@@ -271,6 +291,16 @@ export const createAppointment = async (req, res) => {
             });
         }
 
+        // Load service to capture warranty_days
+        const service = await prisma.serviceListing.findUnique({
+            where: { service_id: parseInt(service_id) },
+            select: { service_id: true, service_title: true, service_startingprice: true, warranty: true }
+        });
+
+        if (!service) {
+            return res.status(404).json({ success: false, message: 'Service listing not found' });
+        }
+
         // Create appointment
         const appointment = await prisma.appointment.create({
             data: {
@@ -281,7 +311,8 @@ export const createAppointment = async (req, res) => {
                 final_price: final_price ? parseFloat(final_price) : null,
                 repairDescription: repairDescription || null,
                 availability_id: parseInt(availability_id),
-                service_id: parseInt(service_id)
+                service_id: parseInt(service_id),
+                warranty_days: service.warranty ?? null
             },
             include: {
                 customer: {
@@ -306,7 +337,8 @@ export const createAppointment = async (req, res) => {
                     select: {
                         service_id: true,
                         service_title: true,
-                        service_startingprice: true
+                        service_startingprice: true,
+                        warranty: true
                     }
                 }
             }
@@ -539,7 +571,7 @@ export const updateAppointmentStatus = async (req, res) => {
         }
 
         // Validate status values
-        const validStatuses = ['scheduled', 'on-the-way', 'in-progress', 'in-warranty', 'finished', 'completed', 'cancelled'];
+    const validStatuses = ['scheduled', 'on-the-way', 'in-progress', 'in-warranty', 'finished', 'completed', 'cancelled'];
         if (!validStatuses.includes(status.toLowerCase())) {
             return res.status(400).json({
                 success: false,
@@ -559,10 +591,45 @@ export const updateAppointmentStatus = async (req, res) => {
             });
         }
 
-        // Update appointment status
+        // Compute additional fields for certain transitions
+        const dataUpdate = { appointment_status: status };
+
+        if (status === 'finished') {
+            dataUpdate.finished_at = new Date();
+            // When work is finished, start the warranty window (enters in-warranty)
+            dataUpdate.appointment_status = 'in-warranty';
+            // warranty_expires_at will be set upon completion trigger or here based on finished_at
+            // Set now if warranty_days exists
+            const warrantyDays = existingAppointment.warranty_days;
+            if (warrantyDays && Number.isInteger(warrantyDays)) {
+                const expires = new Date();
+                expires.setDate(expires.getDate() + warrantyDays);
+                dataUpdate.warranty_expires_at = expires;
+            }
+        }
+
+        if (status === 'completed') {
+            dataUpdate.completed_at = new Date();
+            // Keep warranty_expires_at as previously set (from finished), do not change status further
+        }
+
+        if (status === 'in-warranty') {
+            if (!existingAppointment.finished_at) {
+                dataUpdate.finished_at = new Date();
+            }
+            const warrantyDays = existingAppointment.warranty_days;
+            if (warrantyDays && Number.isInteger(warrantyDays)) {
+                const base = dataUpdate.finished_at ? new Date(dataUpdate.finished_at) : (existingAppointment.finished_at ? new Date(existingAppointment.finished_at) : new Date());
+                const expires = new Date(base);
+                expires.setDate(expires.getDate() + warrantyDays);
+                dataUpdate.warranty_expires_at = expires;
+            }
+        }
+
+        // Update appointment status and timing fields
         const updatedAppointment = await prisma.appointment.update({
             where: { appointment_id: parseInt(appointmentId) },
-            data: { appointment_status: status },
+            data: dataUpdate,
             include: {
                 customer: {
                     select: {
@@ -889,7 +956,7 @@ export const getProviderAppointments = async (req, res) => {
             }
         }
 
-        const [appointments, totalCount] = await Promise.all([
+        const [appointmentsRaw, totalCount] = await Promise.all([
             prisma.appointment.findMany({
                 where: whereClause,
                 include: {
@@ -914,7 +981,8 @@ export const getProviderAppointments = async (req, res) => {
                     appointment_rating: {
                         select: {
                             rating_value: true,
-                            rating_comment: true
+                            rating_comment: true,
+                            rated_by: true
                         }
                     }
                 },
@@ -926,6 +994,17 @@ export const getProviderAppointments = async (req, res) => {
             }),
             prisma.appointment.count({ where: whereClause })
         ]);
+
+        const now3 = new Date();
+        const appointments = appointmentsRaw.map(a => {
+            let days_left = null;
+            if (a.warranty_expires_at) {
+                const diffMs = a.warranty_expires_at.getTime() - now3.getTime();
+                days_left = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+            }
+            const needs_rating = a.appointment_status === 'completed' && !a.appointment_rating?.some(r => r.rated_by === 'customer');
+            return { ...a, days_left, needs_rating };
+        });
 
         const totalPages = Math.ceil(totalCount / take);
 
@@ -986,7 +1065,7 @@ export const getCustomerAppointments = async (req, res) => {
             }
         }
 
-        const [appointments, totalCount] = await Promise.all([
+        const [appointmentsRaw2, totalCount] = await Promise.all([
             prisma.appointment.findMany({
                 where: whereClause,
                 include: {
@@ -1012,7 +1091,8 @@ export const getCustomerAppointments = async (req, res) => {
                     appointment_rating: {
                         select: {
                             rating_value: true,
-                            rating_comment: true
+                            rating_comment: true,
+                            rated_by: true
                         }
                     }
                 },
@@ -1024,6 +1104,17 @@ export const getCustomerAppointments = async (req, res) => {
             }),
             prisma.appointment.count({ where: whereClause })
         ]);
+
+        const now4 = new Date();
+        const appointments = appointmentsRaw2.map(a => {
+            let days_left = null;
+            if (a.warranty_expires_at) {
+                const diffMs = a.warranty_expires_at.getTime() - now4.getTime();
+                days_left = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+            }
+            const needs_rating = a.appointment_status === 'completed' && !a.appointment_rating?.some(r => r.rated_by === 'customer');
+            return { ...a, days_left, needs_rating };
+        });
 
         const totalPages = Math.ceil(totalCount / take);
 
@@ -1598,5 +1689,58 @@ export const canRateAppointment = async (req, res) => {
             message: 'Error checking rating eligibility',
             error: error.message
         });
+    }
+};
+
+// Customer marks appointment completed (manual completion inside warranty window)
+export const completeAppointmentByCustomer = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+
+        const appointment = await prisma.appointment.findUnique({ where: { appointment_id: parseInt(appointmentId) } });
+        if (!appointment) {
+            return res.status(404).json({ success: false, message: 'Appointment not found' });
+        }
+
+        // Only owning customer can complete
+        if (req.userType !== 'customer' || (req.userId && req.userId !== appointment.customer_id)) {
+            return res.status(403).json({ success: false, message: 'Only the appointment customer can mark as completed' });
+        }
+
+        // Only allow if finished (in-warranty) or in-warranty
+        if (!['in-warranty', 'finished', 'completed'].includes(appointment.appointment_status)) {
+            return res.status(400).json({ success: false, message: 'Appointment is not eligible for completion' });
+        }
+
+        if (appointment.appointment_status === 'completed') {
+            return res.status(200).json({ success: true, message: 'Already completed', data: appointment });
+        }
+
+        const dataUpdate = { appointment_status: 'completed', completed_at: new Date() };
+
+        // Ensure warranty_expires_at is set based on finished_at + warranty_days if not already
+        if (!appointment.warranty_expires_at) {
+            const base = appointment.finished_at ? new Date(appointment.finished_at) : new Date();
+            if (appointment.warranty_days && Number.isInteger(appointment.warranty_days)) {
+                const expires = new Date(base);
+                expires.setDate(expires.getDate() + appointment.warranty_days);
+                dataUpdate.warranty_expires_at = expires;
+            }
+        }
+
+        const updated = await prisma.appointment.update({
+            where: { appointment_id: appointment.appointment_id },
+            data: dataUpdate,
+            include: {
+                customer: { select: { user_id: true, first_name: true, last_name: true } },
+                serviceProvider: { select: { provider_id: true, provider_first_name: true, provider_last_name: true } },
+                service: { select: { service_id: true, service_title: true, service_startingprice: true } }
+            }
+        });
+
+        return res.status(200).json({ success: true, message: 'Appointment marked as completed', data: updated });
+    } catch (error) {
+        console.error('Error completing appointment:', error);
+        return res.status(500).json({ success: false, message: 'Error completing appointment', error: error.message });
     }
 };

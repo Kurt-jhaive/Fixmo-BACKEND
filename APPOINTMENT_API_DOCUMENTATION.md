@@ -18,18 +18,43 @@ Authorization: Bearer <your-jwt-token>
 The appointment system automatically sends email notifications to both customers and service providers when certain actions occur:
 
 ### Booking Confirmation Emails
-- **When:** Automatically sent when a new appointment is created
-- **Recipients:** Both customer and service provider
-- **Content:** Appointment details including booking ID, customer info, service details, scheduled date (date only), and provider contact information
-- **Date Format:** Shows only date (e.g., "Wednesday, October 30, 2024") without time
+- **When:** Automatically sent when a new appointment is created via `POST /appointments`
+- **Recipients:** Both customer and service provider receive separate emails
+- **Email Templates:** 
+  - Customer: Booking confirmation with provider details
+  - Provider: New booking notification with customer details
+- **Content Includes:**
+  - Customer/Provider name and contact information
+  - Service title and starting price
+  - Scheduled date and time
+  - Appointment ID for reference
+  - Repair description (if provided)
+- **Implementation:** Uses `sendBookingConfirmationToCustomer()` and `sendBookingConfirmationToProvider()` from mailer service
 
-### Cancellation & Completion Emails
-- **When:** Sent when appointments are cancelled or marked as completed
-- **Recipients:** Both customer and service provider
-- **Content:** Appointment details with cancellation reason or completion confirmation
-- **Date Format:** Shows full date and time (e.g., "Wednesday, October 30, 2024 at 6:00 PM")
+### Email Error Handling
+- **Resilient Design:** Email sending failures do not prevent appointment operations from completing successfully
+- **Logging:** Email errors are logged with detailed error messages for debugging
+- **User Experience:** Appointments are created even if email delivery fails, ensuring smooth booking process
 
-**Note:** Email sending failures will not prevent appointment operations from completing successfully.
+### Email Content Format
+**Booking Details Object:**
+```javascript
+{
+  customerName: "John Doe",
+  customerPhone: "+1234567890", 
+  customerEmail: "john@example.com",
+  serviceTitle: "Plumbing Repair",
+  providerName: "Jane Smith",
+  providerPhone: "+0987654321",
+  providerEmail: "jane@example.com", 
+  scheduledDate: "2025-09-25T10:00:00.000Z",
+  appointmentId: 1,
+  startingPrice: 150.00,
+  repairDescription: "Fix leaking pipe"
+}
+```
+
+**Note:** All email operations are asynchronous and won't block the main appointment creation flow.
 
 ---
 
@@ -63,10 +88,16 @@ Retrieve all appointments with filtering, pagination, and sorting options.
       "customer_id": 1,
       "provider_id": 1,
       "scheduled_date": "2025-09-25T10:00:00.000Z",
-      "appointment_status": "scheduled",
+      "appointment_status": "in-warranty",
       "final_price": 150.00,
       "repairDescription": "Fix leaking pipe",
       "cancellation_reason": null,
+      "warranty_days": 30,
+      "finished_at": "2025-09-20T14:30:00.000Z",
+      "warranty_expires_at": "2025-10-20T14:30:00.000Z",
+      "completed_at": null,
+      "days_left": 26,
+      "needs_rating": false,
       "customer": {
         "user_id": 1,
         "first_name": "John",
@@ -381,10 +412,19 @@ Update only the status of an appointment.
 - `scheduled` - Initial status when appointment is booked
 - `on-the-way` - Provider is traveling to the appointment
 - `in-progress` - Service is currently being performed
-- `in-warranty` - Service is completed but still under warranty period
-- `finished` - Service work is completed
-- `completed` - Appointment fully completed and ready for rating
+- `finished` - Service work is completed (automatically transitions to 'in-warranty' if warranty period exists)
+- `in-warranty` - Service is completed and within warranty period
+- `completed` - Appointment fully completed (warranty period ended or manually completed by customer)
+- `backjob` - Customer has applied for warranty work due to issues
 - `cancelled` - Appointment has been cancelled
+
+**Status Transition Flow:**
+1. `scheduled` → `on-the-way` → `in-progress` → `finished`
+2. `finished` → `in-warranty` (automatic if warranty_days exists)
+3. `in-warranty` → `completed` (manual by customer or automatic after warranty expires)
+4. `in-warranty` → `backjob` (if customer applies for warranty work)
+5. `backjob` → `scheduled` (when provider reschedules after approved backjob)
+6. Any status → `cancelled` (with cancellation reason)
 
 **Response:**
 ```json
@@ -693,7 +733,7 @@ Get comprehensive statistics about appointments.
 
 ## Service Provider Search and Availability
 
-### 15. Get Service Listings with Availability Filtering
+### 21. Get Service Listings with Availability Filtering
 Search for service providers with optional date-based availability filtering. When a date is provided, only providers with available slots on that date are returned, including their `availability_id` values needed for booking.
 
 **Endpoint:** `GET /service-listings-customer`
@@ -850,9 +890,375 @@ curl "http://localhost:3000/api/service-listings-customer?sortBy=rating&limit=10
 
 ---
 
+## Backjob (Warranty Claims) Endpoints
+
+### 12. Apply for Backjob
+Apply for a backjob when an appointment is under warranty and requires additional work.
+
+**Endpoint:** `POST /appointments/:appointmentId/apply-backjob`
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| appointmentId | integer | Yes | The appointment ID |
+
+**Request Body:**
+```json
+{
+  "reason": "The pipe is still leaking after the initial repair",
+  "evidence": "Photo URL or description of the issue"
+}
+```
+
+**Required Fields:**
+- `reason` (string) - Detailed reason for the backjob request
+
+**Optional Fields:**
+- `evidence` (string) - Supporting evidence (photos, descriptions, etc.)
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Backjob application submitted",
+  "data": {
+    "backjob": {
+      "backjob_id": 1,
+      "appointment_id": 1,
+      "customer_id": 1,
+      "provider_id": 1,
+      "reason": "The pipe is still leaking after the initial repair",
+      "evidence": "Photo URL or description of the issue",
+      "status": "pending",
+      "created_at": "2025-09-24T10:00:00.000Z"
+    },
+    "appointment": {
+      "appointment_id": 1,
+      "appointment_status": "backjob"
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+*403 - Unauthorized:*
+```json
+{
+  "success": false,
+  "message": "Only the appointment customer can apply for a backjob"
+}
+```
+
+*400 - Invalid Status:*
+```json
+{
+  "success": false,
+  "message": "Backjob can only be applied during warranty"
+}
+```
+
+*409 - Duplicate Request:*
+```json
+{
+  "success": false,
+  "message": "An active backjob request already exists for this appointment"
+}
+```
+
+---
+
+### 13. Dispute Backjob
+Provider can dispute a backjob request with evidence.
+
+**Endpoint:** `POST /backjobs/:backjobId/dispute`
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| backjobId | integer | Yes | The backjob application ID |
+
+**Request Body:**
+```json
+{
+  "dispute_reason": "The work was completed according to specifications and is functioning properly",
+  "dispute_evidence": "Photos showing completed work and current status"
+}
+```
+
+**Optional Fields:**
+- `dispute_reason` (string) - Reason for disputing the backjob
+- `dispute_evidence` (string) - Supporting evidence for the dispute
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Backjob disputed",
+  "data": {
+    "backjob_id": 1,
+    "appointment_id": 1,
+    "status": "disputed",
+    "provider_dispute_reason": "The work was completed according to specifications and is functioning properly",
+    "provider_dispute_evidence": "Photos showing completed work and current status"
+  }
+}
+```
+
+**Error Response:**
+```json
+{
+  "success": false,
+  "message": "Only the appointment provider can dispute a backjob"
+}
+```
+
+---
+
+### 14. List Backjob Applications
+Admin endpoint to list all backjob applications with filtering.
+
+**Endpoint:** `GET /backjobs`
+
+**Query Parameters:**
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| status | string | No | - | Filter by backjob status |
+| page | integer | No | 1 | Page number for pagination |
+| limit | integer | No | 10 | Number of items per page |
+
+**Valid Status Values:**
+- `pending` - Awaiting admin review
+- `approved` - Approved for rescheduling
+- `disputed` - Provider has disputed the claim
+- `cancelled-by-admin` - Admin cancelled the request
+- `cancelled-by-user` - User cancelled the request
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "backjob_id": 1,
+      "appointment_id": 1,
+      "customer_id": 1,
+      "provider_id": 1,
+      "reason": "The pipe is still leaking after the initial repair",
+      "evidence": "Photo evidence",
+      "status": "pending",
+      "created_at": "2025-09-24T10:00:00.000Z",
+      "appointment": {
+        "appointment_id": 1,
+        "scheduled_date": "2025-09-20T10:00:00.000Z",
+        "appointment_status": "backjob"
+      },
+      "customer": {
+        "user_id": 1,
+        "first_name": "John",
+        "last_name": "Doe",
+        "email": "john@example.com"
+      },
+      "provider": {
+        "provider_id": 1,
+        "provider_first_name": "Jane",
+        "provider_last_name": "Smith",
+        "provider_email": "jane@example.com"
+      }
+    }
+  ],
+  "pagination": {
+    "current_page": 1,
+    "total_pages": 2,
+    "total_count": 15,
+    "limit": 10
+  }
+}
+```
+
+---
+
+### 15. Update Backjob Status
+Admin endpoint to approve, cancel, or update backjob applications.
+
+**Endpoint:** `PATCH /backjobs/:backjobId/status`
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| backjobId | integer | Yes | The backjob application ID |
+
+**Request Body:**
+```json
+{
+  "action": "approve",
+  "admin_notes": "Approved after review of evidence"
+}
+```
+
+**Required Fields:**
+- `action` (string) - Action to take: "approve", "cancel-by-admin", or "cancel-by-user"
+
+**Optional Fields:**
+- `admin_notes` (string) - Administrative notes
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Backjob updated",
+  "data": {
+    "backjob_id": 1,
+    "status": "approved",
+    "admin_notes": "Approved after review of evidence"
+  }
+}
+```
+
+**Action Effects:**
+- `approve`: Backjob is approved, provider can reschedule
+- `cancel-by-admin`: Backjob cancelled, appointment returns to 'completed'
+- `cancel-by-user`: Backjob cancelled, appointment returns to 'in-warranty'
+
+---
+
+### 16. Reschedule from Backjob
+Provider reschedules an approved backjob to a new date.
+
+**Endpoint:** `POST /appointments/:appointmentId/reschedule-backjob`
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| appointmentId | integer | Yes | The appointment ID |
+
+**Request Body:**
+```json
+{
+  "new_scheduled_date": "2025-09-26T10:00:00.000Z",
+  "availability_id": 25
+}
+```
+
+**Required Fields:**
+- `new_scheduled_date` (string, ISO format) - New appointment date and time
+- `availability_id` (integer) - Provider's availability slot ID
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Backjob appointment rescheduled",
+  "data": {
+    "appointment_id": 1,
+    "scheduled_date": "2025-09-26T10:00:00.000Z",
+    "availability_id": 25,
+    "appointment_status": "scheduled",
+    "customer": {
+      "user_id": 1,
+      "first_name": "John",
+      "last_name": "Doe",
+      "email": "john@example.com",
+      "phone_number": "+1234567890"
+    },
+    "serviceProvider": {
+      "provider_id": 1,
+      "provider_first_name": "Jane",
+      "provider_last_name": "Smith",
+      "provider_email": "jane@example.com",
+      "provider_phone_number": "+0987654321"
+    },
+    "service": {
+      "service_id": 1,
+      "service_title": "Plumbing Repair",
+      "service_startingprice": 100.00
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+*400 - No Approved Backjob:*
+```json
+{
+  "success": false,
+  "message": "No approved backjob found for this appointment"
+}
+```
+
+*403 - Unauthorized:*
+```json
+{
+  "success": false,
+  "message": "Only the appointment provider can reschedule a backjob"
+}
+```
+
+---
+
+### 17. Complete Appointment by Customer
+Customer can manually mark an appointment as completed during the warranty window.
+
+**Endpoint:** `POST /appointments/:appointmentId/complete-by-customer`
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| appointmentId | integer | Yes | The appointment ID |
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Appointment marked as completed",
+  "data": {
+    "appointment_id": 1,
+    "appointment_status": "completed",
+    "completed_at": "2025-09-24T10:00:00.000Z",
+    "warranty_expires_at": "2025-10-24T10:00:00.000Z",
+    "customer": {
+      "user_id": 1,
+      "first_name": "John",
+      "last_name": "Doe"
+    },
+    "serviceProvider": {
+      "provider_id": 1,
+      "provider_first_name": "Jane",
+      "provider_last_name": "Smith"
+    },
+    "service": {
+      "service_id": 1,
+      "service_title": "Plumbing Repair",
+      "service_startingprice": 100.00
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+*400 - Invalid Status:*
+```json
+{
+  "success": false,
+  "message": "Appointment is not eligible for completion"
+}
+```
+
+*403 - Unauthorized:*
+```json
+{
+  "success": false,
+  "message": "Only the appointment customer can mark as completed"
+}
+```
+
+---
+
 ## Rating Endpoints
 
-### 16. Submit Rating
+### 18. Submit Rating
 Submit a rating for a completed appointment.
 
 **Endpoint:** `POST /appointments/:appointmentId/rating`
@@ -923,7 +1329,7 @@ Submit a rating for a completed appointment.
 
 ---
 
-### 17. Get Appointment Ratings
+### 19. Get Appointment Ratings
 Get all ratings for a specific appointment.
 
 **Endpoint:** `GET /appointments/:appointmentId/ratings`
@@ -955,7 +1361,7 @@ Get all ratings for a specific appointment.
 
 ---
 
-### 18. Check Rating Eligibility
+### 20. Check Rating Eligibility
 Check if a user can rate a specific appointment.
 
 **Endpoint:** `GET /appointments/:appointmentId/can-rate`
@@ -1037,13 +1443,21 @@ Check if a user can rate a specific appointment.
 
 ### Appointment Status Values
 - `scheduled` - Appointment is scheduled
-- `pending` - Appointment needs confirmation
-- `confirmed` - Appointment is confirmed
-- `in-progress` - Appointment is currently happening
-- `finished` - Service work is finished
-- `completed` - Appointment is fully completed
+- `on-the-way` - Provider is traveling to appointment location
+- `in-progress` - Service is currently being performed
+- `finished` - Service work is finished (triggers warranty period if applicable)
+- `in-warranty` - Service completed and within warranty period
+- `completed` - Appointment fully completed and ready for rating
+- `backjob` - Customer has requested warranty work
 - `cancelled` - Appointment was cancelled
-- `no-show` - Customer/provider didn't show up
+
+### Warranty System
+- **warranty_days**: Number of warranty days for the service (from service listing)
+- **finished_at**: Timestamp when service work was completed
+- **warranty_expires_at**: Calculated expiration date (finished_at + warranty_days)
+- **completed_at**: Timestamp when appointment was marked as fully completed
+- **days_left**: Calculated remaining warranty days (null if no warranty)
+- **needs_rating**: Boolean indicating if customer rating is pending
 
 ### Rating Values
 - Rating values must be integers between 1 and 5

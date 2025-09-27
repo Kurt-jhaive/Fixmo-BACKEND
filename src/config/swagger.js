@@ -166,7 +166,11 @@ const options = {
             final_price: { type: 'number', format: 'float', nullable: true, description: 'Final agreed price' },
             availability_id: { type: 'integer', description: 'Associated availability slot' },
             service_id: { type: 'integer', description: 'Service being requested' },
-            cancellation_reason: { type: 'string', nullable: true, description: 'Reason for cancellation if cancelled' }
+            cancellation_reason: { type: 'string', nullable: true, description: 'Reason for cancellation if cancelled' },
+            warranty_days: { type: 'integer', nullable: true, description: 'Warranty days copied from service at booking' },
+            finished_at: { type: 'string', format: 'date-time', nullable: true, description: 'When provider finished the work' },
+            completed_at: { type: 'string', format: 'date-time', nullable: true, description: 'When customer marked completed or auto-completed' },
+            warranty_expires_at: { type: 'string', format: 'date-time', nullable: true, description: 'When warranty window expires' }
           }
         },
         Rating: {

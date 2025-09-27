@@ -14,7 +14,8 @@ import {
     getAppointmentStats,
     submitRating,
     getAppointmentRatings,
-    canRateAppointment
+    canRateAppointment,
+    completeAppointmentByCustomer
 } from '../controller/appointmentController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { adminAuthMiddleware } from '../middleware/adminAuthMiddleware.js';
@@ -37,6 +38,7 @@ router.patch('/:appointmentId/status', updateAppointmentStatus); // PATCH /api/a
 router.put('/:appointmentId/cancel', cancelAppointment);         // PUT /api/appointments/:id/cancel - Cancel appointment with reason
 router.post('/:appointmentId/rate', rateAppointment);            // POST /api/appointments/:id/rate - Rate appointment/customer
 router.patch('/:appointmentId/reschedule', rescheduleAppointment); // PATCH /api/appointments/:id/reschedule - Reschedule appointment
+router.post('/:appointmentId/complete', completeAppointmentByCustomer); // POST /api/appointments/:id/complete - Customer completes appointment
 
 // Provider-specific routes
 router.get('/provider/:providerId', getProviderAppointments);   // GET /api/appointments/provider/:providerId - Get provider's appointments
