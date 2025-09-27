@@ -669,7 +669,7 @@ export const updateAppointmentStatus = async (req, res) => {
     }
 };
 
-// Cancel appointment with reason
+// Cancel appointment with reason (User cancellation with email notifications)
 export const cancelAppointment = async (req, res) => {
     try {
         const { appointmentId } = req.params;
@@ -684,7 +684,34 @@ export const cancelAppointment = async (req, res) => {
 
         // Check if appointment exists
         const existingAppointment = await prisma.appointment.findUnique({
-            where: { appointment_id: parseInt(appointmentId) }
+            where: { appointment_id: parseInt(appointmentId) },
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        phone_number: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
+                }
+            }
         });
 
         if (!existingAppointment) {
@@ -704,15 +731,20 @@ export const cancelAppointment = async (req, res) => {
             include: {
                 customer: {
                     select: {
+                        user_id: true,
                         first_name: true,
                         last_name: true,
-                        email: true
+                        email: true,
+                        phone_number: true
                     }
                 },
                 serviceProvider: {
                     select: {
+                        provider_id: true,
                         provider_first_name: true,
-                        provider_last_name: true
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
                     }
                 },
                 service: {
@@ -725,9 +757,45 @@ export const cancelAppointment = async (req, res) => {
             }
         });
 
+        // Send cancellation email notifications
+        try {
+            const { sendBookingCancellationToCustomer, sendBookingCancellationEmail } = await import('../services/mailer.js');
+            
+            // Format cancellation details for email
+            const cancellationDetails = {
+                customerName: `${updatedAppointment.customer.first_name} ${updatedAppointment.customer.last_name}`,
+                customerPhone: updatedAppointment.customer.phone_number,
+                customerEmail: updatedAppointment.customer.email,
+                serviceTitle: updatedAppointment.service?.service_title || 'Service',
+                providerName: `${updatedAppointment.serviceProvider.provider_first_name} ${updatedAppointment.serviceProvider.provider_last_name}`,
+                providerPhone: updatedAppointment.serviceProvider.provider_phone_number,
+                providerEmail: updatedAppointment.serviceProvider.provider_email,
+                scheduledDate: updatedAppointment.scheduled_date,
+                appointmentId: updatedAppointment.appointment_id,
+                startingPrice: updatedAppointment.service?.service_startingprice || 0,
+                repairDescription: updatedAppointment.repairDescription,
+                cancellationReason: cancellation_reason,
+                cancelledBy: 'customer' // or determine based on user type
+            };
+
+            console.log('📧 Sending cancellation emails for appointment:', updatedAppointment.appointment_id);
+            
+            // Send email to customer
+            await sendBookingCancellationToCustomer(updatedAppointment.customer.email, cancellationDetails);
+            console.log('✅ Cancellation email sent to customer:', updatedAppointment.customer.email);
+            
+            // Send email to provider
+            await sendBookingCancellationEmail(updatedAppointment.serviceProvider.provider_email, cancellationDetails);
+            console.log('✅ Cancellation email sent to provider:', updatedAppointment.serviceProvider.provider_email);
+            
+        } catch (emailError) {
+            console.error('❌ Error sending cancellation emails:', emailError);
+            // Don't fail the cancellation if email fails
+        }
+
         res.status(200).json({
             success: true,
-            message: 'Appointment cancelled successfully',
+            message: 'Appointment cancelled successfully and notifications sent',
             data: updatedAppointment
         });
 
@@ -736,6 +804,158 @@ export const cancelAppointment = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error cancelling appointment',
+            error: error.message
+        });
+    }
+};
+
+// Admin cancel appointment with enhanced email notifications
+export const adminCancelAppointment = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        const { cancellation_reason, admin_notes } = req.body;
+
+        if (!cancellation_reason) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cancellation reason is required'
+            });
+        }
+
+        // Check if appointment exists
+        const existingAppointment = await prisma.appointment.findUnique({
+            where: { appointment_id: parseInt(appointmentId) },
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        phone_number: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
+                }
+            }
+        });
+
+        if (!existingAppointment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Appointment not found'
+            });
+        }
+
+        // Prevent cancelling already cancelled appointments
+        if (existingAppointment.appointment_status === 'cancelled') {
+            return res.status(400).json({
+                success: false,
+                message: 'Appointment is already cancelled'
+            });
+        }
+
+        // Update appointment status to cancelled with admin details
+        const updatedAppointment = await prisma.appointment.update({
+            where: { appointment_id: parseInt(appointmentId) },
+            data: { 
+                appointment_status: 'cancelled',
+                cancellation_reason: cancellation_reason
+            },
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        phone_number: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
+                }
+            }
+        });
+
+        // Send enhanced cancellation email notifications for admin cancellations
+        try {
+            const { sendBookingCancellationToCustomer, sendBookingCancellationEmail } = await import('../services/mailer.js');
+            
+            // Format cancellation details for email with admin context
+            const cancellationDetails = {
+                customerName: `${updatedAppointment.customer.first_name} ${updatedAppointment.customer.last_name}`,
+                customerPhone: updatedAppointment.customer.phone_number,
+                customerEmail: updatedAppointment.customer.email,
+                serviceTitle: updatedAppointment.service?.service_title || 'Service',
+                providerName: `${updatedAppointment.serviceProvider.provider_first_name} ${updatedAppointment.serviceProvider.provider_last_name}`,
+                providerPhone: updatedAppointment.serviceProvider.provider_phone_number,
+                providerEmail: updatedAppointment.serviceProvider.provider_email,
+                scheduledDate: updatedAppointment.scheduled_date,
+                appointmentId: updatedAppointment.appointment_id,
+                startingPrice: updatedAppointment.service?.service_startingprice || 0,
+                repairDescription: updatedAppointment.repairDescription,
+                cancellationReason: `${cancellation_reason}${admin_notes ? ` | Admin Notes: ${admin_notes}` : ''}`,
+                cancelledBy: 'admin'
+            };
+
+            console.log('📧 Sending admin cancellation emails for appointment:', updatedAppointment.appointment_id);
+            
+            // Send email to customer with admin cancellation context
+            await sendBookingCancellationToCustomer(updatedAppointment.customer.email, cancellationDetails);
+            console.log('✅ Admin cancellation email sent to customer:', updatedAppointment.customer.email);
+            
+            // Send email to provider with admin cancellation context
+            await sendBookingCancellationEmail(updatedAppointment.serviceProvider.provider_email, cancellationDetails);
+            console.log('✅ Admin cancellation email sent to provider:', updatedAppointment.serviceProvider.provider_email);
+            
+        } catch (emailError) {
+            console.error('❌ Error sending admin cancellation emails:', emailError);
+            // Don't fail the cancellation if email fails
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Appointment cancelled by admin successfully and notifications sent',
+            data: {
+                ...updatedAppointment,
+                cancellation_type: 'admin',
+                admin_notes: admin_notes
+            }
+        });
+
+    } catch (error) {
+        console.error('Error in admin appointment cancellation:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error cancelling appointment by admin',
             error: error.message
         });
     }

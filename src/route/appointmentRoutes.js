@@ -7,6 +7,7 @@ import {
     deleteAppointment,
     updateAppointmentStatus,
     cancelAppointment,
+    adminCancelAppointment,
     rateAppointment,
     rescheduleAppointment,
     getProviderAppointments,
@@ -36,6 +37,7 @@ router.delete('/:appointmentId', deleteAppointment);           // DELETE /api/ap
 // Status and scheduling management
 router.patch('/:appointmentId/status', updateAppointmentStatus); // PATCH /api/appointments/:id/status - Update appointment status
 router.put('/:appointmentId/cancel', cancelAppointment);         // PUT /api/appointments/:id/cancel - Cancel appointment with reason
+router.post('/:appointmentId/admin-cancel', adminAuthMiddleware, adminCancelAppointment); // POST /api/appointments/:id/admin-cancel - Admin cancel appointment with enhanced tracking
 router.post('/:appointmentId/rate', rateAppointment);            // POST /api/appointments/:id/rate - Rate appointment/customer
 router.patch('/:appointmentId/reschedule', rescheduleAppointment); // PATCH /api/appointments/:id/reschedule - Reschedule appointment
 router.post('/:appointmentId/complete', completeAppointmentByCustomer); // POST /api/appointments/:id/complete - Customer completes appointment
