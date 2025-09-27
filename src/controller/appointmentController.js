@@ -1616,17 +1616,53 @@ export const applyBackjob = async (req, res) => {
         }
 
         // Prevent duplicate active backjob applications for the same appointment
+        // Allow new application if existing one was disputed or cancelled
         const existingActive = await prisma.backjobApplication.findFirst({
             where: {
                 appointment_id: appointment.appointment_id,
-                status: { in: ['pending', 'approved', 'disputed'] }
+                status: { in: ['approved'] } // Only block if there's already an approved, non-disputed backjob
             }
         });
         if (existingActive) {
-            return res.status(409).json({ success: false, message: 'An active backjob request already exists for this appointment' });
+            return res.status(409).json({ 
+                success: false, 
+                message: 'An active approved backjob already exists for this appointment. Provider can reschedule or dispute it.' 
+            });
         }
 
-        // Create backjob application
+        // Get appointment details with customer, provider, and service info for emails
+        const appointmentWithDetails = await prisma.appointment.findUnique({
+            where: { appointment_id: appointment.appointment_id },
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        phone_number: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
+                }
+            }
+        });
+
+        // Create backjob application with auto-approval
         const backjob = await prisma.backjobApplication.create({
             data: {
                 appointment_id: appointment.appointment_id,
@@ -1634,6 +1670,7 @@ export const applyBackjob = async (req, res) => {
                 provider_id: appointment.provider_id,
                 reason,
                 evidence: evidence || null,
+                status: 'approved' // Auto-approve the backjob application
             },
         });
 
@@ -1643,7 +1680,37 @@ export const applyBackjob = async (req, res) => {
             data: { appointment_status: 'backjob' },
         });
 
-        return res.status(201).json({ success: true, message: 'Backjob application submitted', data: { backjob, appointment: updatedAppointment } });
+        // Send email notifications for backjob application
+        try {
+            const { sendBackjobApplicationToCustomer, sendBackjobApplicationToProvider } = await import('../services/backjob-mailer.js');
+            
+            // Prepare email details
+            const emailDetails = {
+                customerName: `${appointmentWithDetails.customer.first_name} ${appointmentWithDetails.customer.last_name}`,
+                customerPhone: appointmentWithDetails.customer.phone_number,
+                serviceTitle: appointmentWithDetails.service?.service_title || 'Service',
+                providerName: `${appointmentWithDetails.serviceProvider.provider_first_name} ${appointmentWithDetails.serviceProvider.provider_last_name}`,
+                providerPhone: appointmentWithDetails.serviceProvider.provider_phone_number,
+                appointmentId: appointment.appointment_id,
+                backjobId: backjob.backjob_id,
+                reason: reason,
+                scheduledDate: appointment.scheduled_date
+            };
+
+            console.log('📧 Sending backjob application emails...');
+            await sendBackjobApplicationToCustomer(appointmentWithDetails.customer.email, emailDetails);
+            await sendBackjobApplicationToProvider(appointmentWithDetails.serviceProvider.provider_email, emailDetails);
+            console.log('✅ Backjob application emails sent successfully');
+        } catch (emailError) {
+            console.error('❌ Error sending backjob application emails:', emailError);
+            // Don't fail the backjob creation if email fails
+        }
+
+        return res.status(201).json({ 
+            success: true, 
+            message: 'Backjob application automatically approved - provider can now reschedule or dispute', 
+            data: { backjob, appointment: updatedAppointment } 
+        });
     } catch (error) {
         console.error('Error applying backjob:', error);
         return res.status(500).json({ success: false, message: 'Error applying backjob', error: error.message });
@@ -1666,6 +1733,50 @@ export const disputeBackjob = async (req, res) => {
             return res.status(403).json({ success: false, message: 'Only the appointment provider can dispute a backjob' });
         }
 
+        // Check if backjob is in a disputable state (approved or pending)
+        if (!['approved', 'pending'].includes(backjob.status)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `Cannot dispute a backjob with status: ${backjob.status}` 
+            });
+        }
+
+        // Get backjob details with appointment, customer, provider, and service info
+        const backjobWithDetails = await prisma.backjobApplication.findUnique({
+            where: { backjob_id: backjob.backjob_id },
+            include: {
+                appointment: {
+                    include: {
+                        customer: {
+                            select: {
+                                user_id: true,
+                                first_name: true,
+                                last_name: true,
+                                email: true,
+                                phone_number: true
+                            }
+                        },
+                        serviceProvider: {
+                            select: {
+                                provider_id: true,
+                                provider_first_name: true,
+                                provider_last_name: true,
+                                provider_email: true,
+                                provider_phone_number: true
+                            }
+                        },
+                        service: {
+                            select: {
+                                service_id: true,
+                                service_title: true,
+                                service_startingprice: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
         const updated = await prisma.backjobApplication.update({
             where: { backjob_id: backjob.backjob_id },
             data: {
@@ -1674,6 +1785,29 @@ export const disputeBackjob = async (req, res) => {
                 provider_dispute_evidence: dispute_evidence || null,
             },
         });
+
+        // Send email notification to customer about dispute
+        try {
+            const { sendBackjobDisputeToCustomer } = await import('../services/backjob-mailer.js');
+            
+            // Prepare email details
+            const emailDetails = {
+                customerName: `${backjobWithDetails.appointment.customer.first_name} ${backjobWithDetails.appointment.customer.last_name}`,
+                serviceTitle: backjobWithDetails.appointment.service?.service_title || 'Service',
+                providerName: `${backjobWithDetails.appointment.serviceProvider.provider_first_name} ${backjobWithDetails.appointment.serviceProvider.provider_last_name}`,
+                appointmentId: backjobWithDetails.appointment_id,
+                backjobId: backjob.backjob_id,
+                disputeReason: dispute_reason || 'No reason provided',
+                originalReason: backjobWithDetails.reason
+            };
+
+            console.log('📧 Sending backjob dispute email to customer...');
+            await sendBackjobDisputeToCustomer(backjobWithDetails.appointment.customer.email, emailDetails);
+            console.log('✅ Backjob dispute email sent successfully');
+        } catch (emailError) {
+            console.error('❌ Error sending backjob dispute email:', emailError);
+            // Don't fail the dispute if email fails
+        }
 
         return res.status(200).json({ success: true, message: 'Backjob disputed', data: updated });
     } catch (error) {
@@ -1814,6 +1948,32 @@ export const rescheduleFromBackjob = async (req, res) => {
                 service: { select: { service_id: true, service_title: true, service_startingprice: true } }
             }
         });
+
+        // Send email notifications for backjob reschedule
+        try {
+            const { sendBackjobRescheduleToCustomer, sendBackjobRescheduleToProvider } = await import('../services/backjob-mailer.js');
+            
+            // Prepare email details
+            const emailDetails = {
+                customerName: `${updated.customer.first_name} ${updated.customer.last_name}`,
+                customerPhone: updated.customer.phone_number,
+                serviceTitle: updated.service?.service_title || 'Service',
+                providerName: `${updated.serviceProvider.provider_first_name} ${updated.serviceProvider.provider_last_name}`,
+                providerPhone: updated.serviceProvider.provider_phone_number,
+                appointmentId: updated.appointment_id,
+                backjobId: approvedBackjob.backjob_id,
+                newScheduledDate: newDate,
+                originalReason: approvedBackjob.reason
+            };
+
+            console.log('📧 Sending backjob reschedule emails...');
+            await sendBackjobRescheduleToCustomer(updated.customer.email, emailDetails);
+            await sendBackjobRescheduleToProvider(updated.serviceProvider.provider_email, emailDetails);
+            console.log('✅ Backjob reschedule emails sent successfully');
+        } catch (emailError) {
+            console.error('❌ Error sending backjob reschedule emails:', emailError);
+            // Don't fail the reschedule if email fails
+        }
 
         return res.status(200).json({ success: true, message: 'Backjob appointment rescheduled', data: updated });
     } catch (error) {
