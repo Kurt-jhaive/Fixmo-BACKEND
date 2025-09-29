@@ -149,6 +149,52 @@
             border: 1px solid #bee5eb;
         }
 
+        /* Appointment Status Styles */
+        .appointment-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: bold;
+            margin-left: 8px;
+        }
+
+        .appointment-status.in-warranty {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .appointment-status.completed {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .appointment-status.expired {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .appointment-status.unknown {
+            background: #e2e3e5;
+            color: #383d41;
+            border: 1px solid #d6d8db;
+        }
+
+        .warranty-info {
+            font-size: 11px;
+            color: #6c757d;
+            margin-top: 4px;
+        }
+
+        .conversation-blocked {
+            background: #f8d7da !important;
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
         .chat-header {
             background: #f8f9fa;
             padding: 15px 20px;
@@ -342,6 +388,34 @@
             float: right;
         }
 
+        .warranty-status {
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 5px;
+        }
+
+        .warranty-active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .warranty-expired {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .warranty-none {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .admin-section {
+            border-top: 2px solid #dee2e6;
+            margin-top: 10px;
+            padding-top: 15px;
+        }
+
         @media (max-width: 768px) {
             .chat-container {
                 flex-direction: column;
@@ -361,8 +435,9 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔧 Fixmo Chat Test Interface</h1>
-            <p>Test real-time messaging between customers and service providers</p>
+            <h1>🔧 Fixmo Warranty Chat Test Interface</h1>
+            <p>Test warranty-based conversations between customers and service providers</p>
+            <small style="opacity: 0.9;">💡 Single conversation per customer-provider pair • Warranty-based access control • Auto-expiry cleanup</small>
             
             <!-- Test Mode Toggle -->
             <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 6px; margin-bottom: 20px;">
@@ -409,15 +484,50 @@
                     <div id="providerStatus" class="status disconnected">Not connected</div>
                 </div>
 
-                <!-- Test Controls -->
+                <!-- Warranty Conversation Controls -->
                 <div class="login-section">
-                    <h3>🧪 Test Controls</h3>
+                    <h3>💬 Warranty Conversations</h3>
                     <div class="form-group">
-                        <label>Appointment ID</label>
-                        <input type="number" id="appointmentId" placeholder="123">
+                        <label>Customer ID</label>
+                        <input type="number" id="customerId" placeholder="1" value="1">
                     </div>
-                    <button class="btn btn-success" onclick="createConversation()">Create Conversation</button>
+                    <div class="form-group">
+                        <label>Provider ID</label>
+                        <input type="number" id="providerId" placeholder="1" value="1">
+                    </div>
+                    <button class="btn btn-success" onclick="createConversation()">Create/Find Conversation</button>
                     <button class="btn btn-danger" onclick="disconnect()">Disconnect All</button>
+                    <small style="color: #6c757d; display: block; margin-top: 5px;">
+                        💡 One conversation per customer-provider pair
+                    </small>
+                </div>
+
+                <!-- Appointment Status Controls -->
+                <div class="login-section">
+                    <h3>📋 Appointment Status</h3>
+                    <div class="form-group">
+                        <label>Check Customer-Provider Status</label>
+                        <div style="display: flex; gap: 5px;">
+                            <input type="number" id="statusCustomerId" placeholder="Customer ID" style="flex: 1;">
+                            <input type="number" id="statusProviderId" placeholder="Provider ID" style="flex: 1;">
+                        </div>
+                    </div>
+                    <button class="btn" onclick="checkAppointmentStatus()">Check Status</button>
+                    <button class="btn btn-danger" onclick="simulateExpiredWarranty()">Simulate Expiry</button>
+                    <div id="appointmentStatusInfo" class="status info" style="display: none; margin-top: 10px;">
+                        Status information will appear here
+                    </div>
+                </div>
+
+                <!-- Warranty Admin Controls -->
+                <div class="login-section">
+                    <h3>⚙️ Warranty Admin</h3>
+                    <button class="btn" onclick="checkWarrantyStatus()">Check Status</button>
+                    <button class="btn btn-danger" onclick="triggerWarrantyCleanup()">Manual Cleanup</button>
+                    <button class="btn" onclick="getExpiredConversations()">View Expired</button>
+                    <div id="warrantyInfo" class="status info" style="display: none; margin-top: 10px;">
+                        Warranty information will appear here
+                    </div>
                 </div>
 
                 <!-- Conversations List -->
@@ -443,14 +553,29 @@
 
                 <div class="messages-container" id="messagesContainer">
                     <div style="text-align: center; color: #6c757d; margin-top: 50px;">
-                        <h3>Welcome to Fixmo Chat!</h3>
-                        <p><strong>Testing Instructions:</strong></p>
-                        <ol style="text-align: left; max-width: 400px; margin: 20px auto;">
-                            <li>Login as customer and/or provider using existing accounts</li>
-                            <li>Enter an existing appointment ID (check your database)</li>
-                            <li>Click "Create Conversation" to start</li>
-                            <li>Start chatting in real-time!</li>
+                        <h3>🧪 Fixmo Chat - Appointment Status Testing</h3>
+                        <p><strong>New Appointment-Aware Testing:</strong></p>
+                        <ol style="text-align: left; max-width: 500px; margin: 20px auto;">
+                            <li><strong>Login</strong> as customer and/or provider using existing accounts</li>
+                            <li><strong>Enter Customer & Provider IDs</strong> (must have appointments together)</li>
+                            <li><strong>Create Conversation</strong> - Only works for appointments with active warranty</li>
+                            <li><strong>Check Status:</strong> 
+                                <br>• ✅ <strong>In-Warranty</strong>: Chat active, messages allowed
+                                <br>• ❌ <strong>Completed</strong>: Chat blocked, warranty expired
+                            </li>
+                            <li><strong>Test Features:</strong> 
+                                <br>• Use "Check Status" to verify appointment status
+                                <br>• Try "Simulate Expiry" to test warranty validation
+                                <br>• Watch conversations auto-close when appointments complete
+                            </li>
                         </ol>
+                        <div style="background: #e7f3ff; padding: 15px; border-radius: 8px; margin: 20px auto; max-width: 500px; border-left: 4px solid #007bff;">
+                            <strong>💡 Key Changes:</strong><br>
+                            • Conversations automatically close when appointments are completed<br>
+                            • Messaging only allowed during warranty period<br>
+                            • Real-time appointment status checking<br>
+                            • Visual indicators for appointment states
+                        </div>
                         <p style="margin-top: 20px;"><em>💡 Tip: Open multiple browser tabs to test both user types simultaneously</em></p>
                     </div>
                 </div>
@@ -718,10 +843,11 @@
         }
 
         async function createConversation() {
-            const appointmentId = document.getElementById('appointmentId').value;
+            const customerId = document.getElementById('customerId').value;
+            const providerId = document.getElementById('providerId').value;
             
-            if (!appointmentId) {
-                alert('Please enter an appointment ID');
+            if (!customerId || !providerId) {
+                alert('Please enter both Customer ID and Provider ID');
                 return;
             }
 
@@ -732,7 +858,7 @@
 
             try {
                 const token = currentSocket.token || 'test-token'; // Fallback for testing
-                // First create the conversation
+                // Create or find the conversation using new warranty system
                 const response = await fetch(`${API_BASE}/api/messages/conversations`, {
                     method: 'POST',
                     headers: { 
@@ -740,7 +866,8 @@
                         'Authorization': `Bearer ${token}`
                     },
                     body: JSON.stringify({ 
-                        appointmentId: parseInt(appointmentId),
+                        customerId: parseInt(customerId),
+                        providerId: parseInt(providerId),
                         userType: currentUserType
                     })
                 });
@@ -772,10 +899,20 @@
                     await loadConversation(currentConversationId);
                     
                     // Send initial message
-                    await sendMessage('Conversation started');
+                    await sendMessage('✅ Conversation started - Appointment warranty active');
                 } else {
                     console.error('Create conversation failed:', data);
-                    alert('Failed to create conversation: ' + (data.message || 'Unknown error'));
+                    
+                    // Enhanced error handling for appointment-specific issues
+                    let errorMessage = data.message || 'Unknown error';
+                    
+                    if (errorMessage.includes('warranty') || errorMessage.includes('expired')) {
+                        alert(`❌ Cannot create conversation: ${errorMessage}\n\n💡 This means the appointment is completed or warranty has expired.`);
+                    } else if (errorMessage.includes('appointment')) {
+                        alert(`❌ Cannot create conversation: ${errorMessage}\n\n💡 Please check if there's a valid appointment between this customer and provider.`);
+                    } else {
+                        alert(`❌ Failed to create conversation: ${errorMessage}`);
+                    }
                 }
             } catch (error) {
                 console.error('Error creating conversation:', error);
@@ -813,18 +950,64 @@
                 return;
             }
 
-            container.innerHTML = conversations.map(conv => `
-                <div class="conversation-item ${conv.conversation_id === currentConversationId ? 'active' : ''}" 
+            container.innerHTML = conversations.map(conv => {
+                const participant = conv.participant || {};
+                const participantName = participant.first_name || participant.provider_first_name || 
+                                      `ID: ${participant.user_id || participant.provider_id}`;
+                
+                // Determine appointment status and styling
+                let statusClass = 'unknown';
+                let statusText = 'Unknown';
+                let conversationClass = '';
+                
+                if (conv.appointment_status) {
+                    switch (conv.appointment_status) {
+                        case 'in-warranty':
+                            statusClass = 'in-warranty';
+                            statusText = '✅ In Warranty';
+                            break;
+                        case 'completed':
+                            statusClass = 'completed';
+                            statusText = '❌ Completed';
+                            conversationClass = 'conversation-blocked';
+                            break;
+                        default:
+                            statusClass = 'unknown';
+                            statusText = `⚠️ ${conv.appointment_status}`;
+                    }
+                } else {
+                    // Fallback to old warranty check
+                    if (conv.warranty_expires) {
+                        const expiryDate = new Date(conv.warranty_expires);
+                        const isExpired = expiryDate < new Date();
+                        const daysLeft = Math.ceil((expiryDate - new Date()) / (1000 * 60 * 60 * 24));
+                        
+                        if (isExpired) {
+                            statusClass = 'expired';
+                            statusText = '❌ Expired';
+                            conversationClass = 'conversation-blocked';
+                        } else {
+                            statusClass = 'in-warranty';
+                            statusText = `✅ ${daysLeft}d left`;
+                        }
+                    }
+                }
+                
+                return `
+                <div class="conversation-item ${conversationClass} ${conv.conversation_id === currentConversationId ? 'active' : ''}" 
                      onclick="selectConversation(${conv.conversation_id})">
                     <div class="conversation-title">
-                        Appointment #${conv.appointment?.appointment_id || 'N/A'}
+                        ${participantName}
+                        <span class="appointment-status ${statusClass}">${statusText}</span>
                         ${conv.unread_count > 0 ? `<span class="unread-count">${conv.unread_count}</span>` : ''}
                     </div>
                     <div class="conversation-preview">
-                        ${conv.last_message || 'No messages yet'}
+                        ${conv.last_message?.content || 'No messages yet'}
                     </div>
+                    ${conv.appointment_status ? `<div class="warranty-info">Appointment: ${conv.appointment_status}</div>` : ''}
                 </div>
-            `).join('');
+                `;
+            }).join('');
         }
 
         async function selectConversation(conversationId) {
@@ -858,9 +1041,53 @@
                 
                 if (data.success || data.data) {
                     const conversation = data.data || data.conversation;
-                    const appointmentId = conversation.appointment?.appointment_id || conversation.appointment_id;
-                    document.getElementById('chatTitle').textContent = `Conversation - Appointment #${appointmentId}`;
-                    document.getElementById('chatSubtitle').textContent = `Started ${new Date(conversation.created_at).toLocaleDateString()}`;
+                    
+                    // Update title and subtitle with appointment status info
+                    const customerName = conversation.customer?.first_name || `Customer #${conversation.customer_id}`;
+                    const providerName = conversation.provider?.provider_first_name || `Provider #${conversation.provider_id}`;
+                    
+                    document.getElementById('chatTitle').textContent = `${customerName} ↔ ${providerName}`;
+                    
+                    // Show appointment and warranty status
+                    let subtitle = `Started ${new Date(conversation.created_at).toLocaleDateString()}`;
+                    
+                    // Check appointment status first
+                    if (conversation.appointment_status) {
+                        switch (conversation.appointment_status) {
+                            case 'in-warranty':
+                                subtitle += ` • ✅ In Warranty - Messaging Active`;
+                                break;
+                            case 'completed':
+                                subtitle += ` • ❌ Appointment Completed - Messaging Closed`;
+                                // Disable message input
+                                document.getElementById('messageInput').disabled = true;
+                                document.getElementById('sendBtn').disabled = true;
+                                break;
+                            default:
+                                subtitle += ` • ⚠️ Status: ${conversation.appointment_status}`;
+                        }
+                    } else {
+                        // Fallback to old warranty check
+                        if (conversation.warranty_expires) {
+                            const expiryDate = new Date(conversation.warranty_expires);
+                            const isExpired = expiryDate < new Date();
+                            const daysLeft = Math.ceil((expiryDate - new Date()) / (1000 * 60 * 60 * 24));
+                            
+                            if (isExpired) {
+                                subtitle += ` • ❌ Warranty Expired - Messaging Blocked`;
+                                document.getElementById('messageInput').disabled = true;
+                                document.getElementById('sendBtn').disabled = true;
+                            } else {
+                                subtitle += ` • ✅ Warranty: ${daysLeft} days left`;
+                                document.getElementById('messageInput').disabled = false;
+                                document.getElementById('sendBtn').disabled = false;
+                            }
+                        } else {
+                            subtitle += ` • ⚠️ No active warranty`;
+                        }
+                    }
+                    
+                    document.getElementById('chatSubtitle').textContent = subtitle;
                     
                     displayMessages(conversation.messages || []);
                     scrollToBottom();
@@ -1046,12 +1273,270 @@
             document.getElementById('conversationsList').innerHTML = '<p style="color: #6c757d; font-size: 12px;">Login to see conversations</p>';
         }
 
+        // Warranty Admin Functions
+        async function checkWarrantyStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/warranty/status`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const info = document.getElementById('warrantyInfo');
+                    info.style.display = 'block';
+                    info.innerHTML = `
+                        <strong>📊 Warranty System Status</strong><br>
+                        <small>
+                        • Active conversations: ${data.statistics?.conversations_by_status?.active || 0}<br>
+                        • Closed conversations: ${data.statistics?.conversations_by_status?.closed || 0}<br>
+                        • With warranty: ${data.statistics?.active_with_warranty || 0}<br>
+                        • Pending expiry: ${data.statistics?.pending_expiry || 0}<br>
+                        • Job runs: ${data.job_status?.schedule || 'N/A'}
+                        </small>
+                    `;
+                } else {
+                    alert('Failed to get warranty status: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error checking warranty status:', error);
+                alert('Error checking warranty status: ' + error.message);
+            }
+        }
+
+        async function triggerWarrantyCleanup() {
+            if (!confirm('This will close all expired warranty conversations. Continue?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/warranty/cleanup`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    const info = document.getElementById('warrantyInfo');
+                    info.style.display = 'block';
+                    info.className = 'status connected';
+                    info.innerHTML = `
+                        <strong>✅ Cleanup Completed</strong><br>
+                        <small>
+                        • Conversations closed: ${data.results?.conversations_closed || 0}<br>
+                        • Closed IDs: [${data.results?.closed_conversation_ids?.join(', ') || 'none'}]
+                        </small>
+                    `;
+                    
+                    // Refresh conversations list
+                    if (currentSocket) {
+                        await loadConversations();
+                    }
+                } else {
+                    alert('Cleanup failed: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error triggering cleanup:', error);
+                alert('Error triggering cleanup: ' + error.message);
+            }
+        }
+
+        async function getExpiredConversations() {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/warranty/expired`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const expired = data.expired_conversations || [];
+                    const info = document.getElementById('warrantyInfo');
+                    info.style.display = 'block';
+                    info.className = 'status disconnected';
+                    
+                    if (expired.length === 0) {
+                        info.innerHTML = '<strong>✅ No expired conversations found</strong>';
+                    } else {
+                        const expiredList = expired.map(conv => 
+                            `ID: ${conv.conversation_id} (C:${conv.customer_id} ↔ P:${conv.provider_id})`
+                        ).join('<br>');
+                        
+                        info.innerHTML = `
+                            <strong>⚠️ Found ${expired.length} expired conversations:</strong><br>
+                            <small>${expiredList}</small>
+                        `;
+                    }
+                } else {
+                    alert('Failed to get expired conversations: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error getting expired conversations:', error);
+                alert('Error getting expired conversations: ' + error.message);
+            }
+        }
+
         // Update conversations list periodically
         setInterval(() => {
             if (currentSocket) {
                 loadConversations();
             }
         }, 5000);
+
+        // New Appointment Status Functions
+        async function checkAppointmentStatus() {
+            const customerId = document.getElementById('statusCustomerId').value;
+            const providerId = document.getElementById('statusProviderId').value;
+            
+            if (!customerId || !providerId) {
+                alert('Please enter both Customer ID and Provider ID');
+                return;
+            }
+
+            try {
+                // Use the conversation warranty service endpoint to check appointment status
+                const token = currentSocket?.token || 'test-token';
+                const response = await fetch(`${API_BASE}/api/messages/conversations`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ 
+                        customerId: parseInt(customerId),
+                        providerId: parseInt(providerId),
+                        userType: currentUserType || 'customer'
+                    })
+                });
+                
+                const data = await response.json();
+                const statusDiv = document.getElementById('appointmentStatusInfo');
+                
+                if (data.success && data.data) {
+                    statusDiv.style.display = 'block';
+                    statusDiv.className = 'status info';
+                    statusDiv.innerHTML = `
+                        <strong>Appointment Status Check:</strong><br>
+                        Customer ID: ${customerId}<br>
+                        Provider ID: ${providerId}<br>
+                        Conversation ID: ${data.data.conversation_id}<br>
+                        Status: ${data.data.status}<br>
+                        Warranty Expires: ${data.data.warranty_expires || 'Not set'}<br>
+                        <em>Check the conversations list to see updated status</em>
+                    `;
+                    
+                    // Refresh conversations to see updated status
+                    loadConversations();
+                } else {
+                    statusDiv.style.display = 'block';
+                    statusDiv.className = 'status disconnected';
+                    statusDiv.textContent = `Failed to check status: ${data.message || 'Unknown error'}`;
+                }
+            } catch (error) {
+                console.error('Error checking appointment status:', error);
+                const statusDiv = document.getElementById('appointmentStatusInfo');
+                statusDiv.style.display = 'block';
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        async function simulateExpiredWarranty() {
+            if (!currentConversationId) {
+                alert('Please select a conversation first');
+                return;
+            }
+
+            if (!confirm('This will simulate an expired warranty for testing. Continue?')) {
+                return;
+            }
+
+            try {
+                // This would typically be done through appointment status update
+                // For testing, we'll try to send a message to trigger validation
+                const token = currentSocket?.token || 'test-token';
+                const response = await fetch(`${API_BASE}/api/messages/conversations/${currentConversationId}`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ 
+                        content: '[TEST] Checking warranty status...',
+                        messageType: 'text',
+                        userType: currentUserType
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!data.success && data.message) {
+                    alert(`Warranty Status: ${data.message}`);
+                    // Refresh conversations to see updated status
+                    loadConversations();
+                    loadConversation(currentConversationId);
+                } else {
+                    alert('Warranty is still active - message sent successfully');
+                }
+            } catch (error) {
+                console.error('Error simulating warranty expiry:', error);
+                alert(`Error: ${error.message}`);
+            }
+        }
+
+        // Override the original sendMessage function with appointment status validation
+        async function sendMessage(messageContent = null) {
+            const content = messageContent || document.getElementById('messageInput').value.trim();
+            
+            if (!content) {
+                alert('Please enter a message');
+                return;
+            }
+
+            if (!currentConversationId || !currentSocket) {
+                alert('No active conversation. Please select a conversation first.');
+                return;
+            }
+
+            try {
+                const token = currentSocket.token || 'test-token';
+                
+                // Send via HTTP API (which includes appointment status validation)
+                const response = await fetch(`${API_BASE}/api/messages/conversations/${currentConversationId}`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ 
+                        content,
+                        messageType: 'text',
+                        userType: currentUserType
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Message sent successfully
+                    document.getElementById('messageInput').value = '';
+                    
+                    // Also emit via WebSocket for real-time delivery (if available)
+                    if (currentSocket.emit && !isTestMode) {
+                        currentSocket.emit('send_message', {
+                            conversationId: currentConversationId,
+                            content,
+                            messageType: 'text'
+                        });
+                    }
+                } else {
+                    // Handle appointment-related errors
+                    alert(`Cannot send message: ${data.message}`);
+                    
+                    // If the conversation is closed due to appointment completion, refresh the UI
+                    if (data.message.includes('closed') || data.message.includes('completed') || data.message.includes('expired')) {
+                        loadConversations();
+                        loadConversation(currentConversationId);
+                    }
+                }
+            } catch (error) {
+                console.error('Error sending message:', error);
+                alert(`Error sending message: ${error.message}`);
+            }
+        }
     </script>
 </body>
 </html>

@@ -165,7 +165,6 @@ model Appointment {
   serviceProvider     ServiceProviderDetails @relation(fields: [provider_id], references: [provider_id])
   service             ServiceListing         @relation(fields: [service_id], references: [service_id])
   appointment_rating  Rating[]
-  conversation        Conversation?
   backjob_applications BackjobApplication[]
 }
 
@@ -207,17 +206,18 @@ model Admin {
 
 model Conversation {
   conversation_id   Int                    @id @default(autoincrement())
-  appointment_id    Int                    @unique
   customer_id       Int
   provider_id       Int
   status            String                 @default("active") // active, archived, closed
+  warranty_expires  DateTime?              // When this conversation should close due to warranty expiry
   last_message_at   DateTime?
   created_at        DateTime               @default(now())
   updated_at        DateTime               @updatedAt
-  appointment       Appointment            @relation(fields: [appointment_id], references: [appointment_id])
   customer          User                   @relation(fields: [customer_id], references: [user_id])
   provider          ServiceProviderDetails @relation(fields: [provider_id], references: [provider_id])
   messages          Message[]
+  
+  @@unique([customer_id, provider_id]) // Only one active conversation per customer-provider pair
 }
 
 model Message {

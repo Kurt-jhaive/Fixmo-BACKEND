@@ -14,8 +14,10 @@ import appointmentRoutes from './route/appointmentRoutes.js';
 import adminRoutes from './route/adminRoutes.js';
 import ratingRoutes from './route/ratingRoutes.js';
 import messageRoutes from './route/messageRoutes.js';
+import warrantyAdminRoutes from './route/warrantyAdminRoutes.js';
 import testRoutes from './route/testRoutes.js';
 import { setWebSocketServer } from './controller/messageController.js';
+import { setWebSocketServer as setWarrantyJobWebSocket, initializeWarrantyExpiryJob } from './services/warrantyExpiryJob.js';
 import cors from 'cors';
 import { specs, swaggerUi } from './config/swagger.js';
 import MessageWebSocketServer from './services/MessageWebSocketServer.js';
@@ -152,6 +154,7 @@ app.use('/api/availability', availabilityRoutes); // Availability management rou
 app.use('/api/appointments', appointmentRoutes); // Appointment management routes
 app.use('/api/ratings', ratingRoutes); // Rating management routes
 app.use('/api/messages', messageRoutes); // Message management routes
+app.use('/api/admin/warranty', warrantyAdminRoutes); // Warranty management admin routes
 app.use('/api/test', testRoutes); // Test routes for Cloudinary and other features
 
 // 404 handler for undefined routes (without wildcard)
@@ -186,13 +189,18 @@ app.use((err, req, res, next) => {
 // Initialize WebSocket server
 const messageWebSocket = new MessageWebSocketServer(httpServer);
 
-// Pass WebSocket server to message controller
+// Pass WebSocket server to message controller and warranty service
 setWebSocketServer(messageWebSocket);
+setWarrantyJobWebSocket(messageWebSocket);
+
+// Initialize warranty expiry cleanup job
+initializeWarrantyExpiryJob();
 
 httpServer.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Fixmo Backend API Server is running on http://0.0.0.0:${port}`);
   console.log(`📱 Ready for React Native connections`);
   console.log(`💬 WebSocket server initialized for real-time messaging`);
+  console.log(`⏰ Warranty expiry cleanup job initialized`);
   console.log(`🗄️ Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
 });
 

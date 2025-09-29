@@ -220,10 +220,18 @@ class MessageWebSocketServer {
                     ]
                 },
                 include: {
-                    appointment: {
+                    customer: {
                         select: {
-                            appointment_status: true,
-                            scheduled_date: true
+                            user_id: true,
+                            first_name: true,
+                            last_name: true
+                        }
+                    },
+                    provider: {
+                        select: {
+                            provider_id: true,
+                            provider_first_name: true,
+                            provider_last_name: true
                         }
                     }
                 }
@@ -233,10 +241,14 @@ class MessageWebSocketServer {
                 throw new Error('Conversation not found or access denied');
             }
 
-            // Check if appointment allows messaging
-            const allowedStatuses = ['confirmed', 'in-progress', 'completed'];
-            if (!allowedStatuses.includes(conversation.appointment.appointment_status)) {
-                throw new Error('Messaging not available for this appointment status');
+            // Check if conversation is within warranty period (using warranty-based access)
+            if (conversation.status !== 'active') {
+                throw new Error('Conversation is not active');
+            }
+
+            // Check if warranty has expired
+            if (conversation.warranty_expires && new Date() > conversation.warranty_expires) {
+                throw new Error('Conversation warranty period has expired');
             }
 
             const roomName = `conversation_${conversationId}`;

@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { handleAppointmentWarranty } from '../services/conversationWarrantyService.js';
 
 const prisma = new PrismaClient();
 
@@ -344,6 +345,15 @@ export const createAppointment = async (req, res) => {
             }
         });
 
+        // Handle warranty-based conversation creation/extension
+        try {
+            await handleAppointmentWarranty(appointment, 'booked');
+            console.log('✅ Conversation warranty handling completed for booking');
+        } catch (warrantyError) {
+            console.error('❌ Error handling appointment warranty:', warrantyError);
+            // Don't fail the appointment creation if warranty handling fails
+        }
+
         // Send email notification for scheduled appointment
         try {
             const { sendBookingConfirmationToCustomer, sendBookingConfirmationToProvider } = await import('../services/mailer.js');
@@ -652,6 +662,18 @@ export const updateAppointmentStatus = async (req, res) => {
                 }
             }
         });
+
+        // Handle warranty-based conversation updates for finished/completed status
+        try {
+            if (status === 'finished' || status === 'completed' || status === 'in-warranty') {
+                const eventType = status === 'completed' ? 'completed' : 'finished';
+                await handleAppointmentWarranty(updatedAppointment, eventType);
+                console.log(`✅ Conversation warranty handling completed for ${status}`);
+            }
+        } catch (warrantyError) {
+            console.error('❌ Error handling appointment warranty:', warrantyError);
+            // Don't fail the status update if warranty handling fails
+        }
 
         res.status(200).json({
             success: true,
@@ -2117,6 +2139,15 @@ export const completeAppointmentByCustomer = async (req, res) => {
                 service: { select: { service_id: true, service_title: true, service_startingprice: true } }
             }
         });
+
+        // Handle warranty-based conversation updates
+        try {
+            await handleAppointmentWarranty(updated, 'completed');
+            console.log('✅ Conversation warranty handling completed for customer completion');
+        } catch (warrantyError) {
+            console.error('❌ Error handling appointment warranty:', warrantyError);
+            // Don't fail the completion if warranty handling fails
+        }
 
         return res.status(200).json({ success: true, message: 'Appointment marked as completed', data: updated });
     } catch (error) {
