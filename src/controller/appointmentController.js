@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { handleAppointmentWarranty } from '../services/conversationWarrantyService.js';
+import { uploadToCloudinary } from '../services/cloudinaryService.js';
 
 const prisma = new PrismaClient();
 
@@ -608,31 +609,57 @@ export const updateAppointmentStatus = async (req, res) => {
             dataUpdate.finished_at = new Date();
             // When work is finished, start the warranty window (enters in-warranty)
             dataUpdate.appointment_status = 'in-warranty';
-            // warranty_expires_at will be set upon completion trigger or here based on finished_at
-            // Set now if warranty_days exists
-            const warrantyDays = existingAppointment.warranty_days;
-            if (warrantyDays && Number.isInteger(warrantyDays)) {
+            
+            // Handle warranty resumption from paused state (backjob scenario)
+            if (existingAppointment.warranty_paused_at && existingAppointment.warranty_remaining_days !== null) {
+                // Resume warranty from paused state - use remaining days from when it was paused
                 const expires = new Date();
-                expires.setDate(expires.getDate() + warrantyDays);
+                expires.setDate(expires.getDate() + existingAppointment.warranty_remaining_days);
                 dataUpdate.warranty_expires_at = expires;
+                // Clear pause fields
+                dataUpdate.warranty_paused_at = null;
+                dataUpdate.warranty_remaining_days = null;
+            } else {
+                // Normal warranty calculation for first-time completion
+                const warrantyDays = existingAppointment.warranty_days;
+                if (warrantyDays && Number.isInteger(warrantyDays)) {
+                    const expires = new Date();
+                    expires.setDate(expires.getDate() + warrantyDays);
+                    dataUpdate.warranty_expires_at = expires;
+                }
             }
         }
 
         if (status === 'completed') {
             dataUpdate.completed_at = new Date();
-            // Keep warranty_expires_at as previously set (from finished), do not change status further
+            // Expire warranty immediately when appointment is marked completed
+            dataUpdate.warranty_expires_at = new Date();
         }
 
         if (status === 'in-warranty') {
             if (!existingAppointment.finished_at) {
                 dataUpdate.finished_at = new Date();
             }
-            const warrantyDays = existingAppointment.warranty_days;
-            if (warrantyDays && Number.isInteger(warrantyDays)) {
-                const base = dataUpdate.finished_at ? new Date(dataUpdate.finished_at) : (existingAppointment.finished_at ? new Date(existingAppointment.finished_at) : new Date());
+            
+            // Handle warranty resumption from paused state (backjob scenario)
+            if (existingAppointment.warranty_paused_at && existingAppointment.warranty_remaining_days !== null) {
+                // Resume warranty from paused state - use remaining days from when it was paused
+                const base = dataUpdate.finished_at ? new Date(dataUpdate.finished_at) : new Date();
                 const expires = new Date(base);
-                expires.setDate(expires.getDate() + warrantyDays);
+                expires.setDate(expires.getDate() + existingAppointment.warranty_remaining_days);
                 dataUpdate.warranty_expires_at = expires;
+                // Clear pause fields
+                dataUpdate.warranty_paused_at = null;
+                dataUpdate.warranty_remaining_days = null;
+            } else {
+                // Normal warranty calculation for first-time completion
+                const warrantyDays = existingAppointment.warranty_days;
+                if (warrantyDays && Number.isInteger(warrantyDays)) {
+                    const base = dataUpdate.finished_at ? new Date(dataUpdate.finished_at) : (existingAppointment.finished_at ? new Date(existingAppointment.finished_at) : new Date());
+                    const expires = new Date(base);
+                    expires.setDate(expires.getDate() + warrantyDays);
+                    dataUpdate.warranty_expires_at = expires;
+                }
             }
         }
 
@@ -1610,6 +1637,90 @@ export const submitRating = async (req, res) => {
 };
 
 // BACKJOB WORKFLOW
+// Upload evidence files for backjob applications
+export const uploadBackjobEvidence = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'No evidence files provided'
+            });
+        }
+
+        // Verify appointment exists and user has access
+        const appointment = await prisma.appointment.findUnique({
+            where: { appointment_id: parseInt(appointmentId) }
+        });
+
+        if (!appointment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Appointment not found'
+            });
+        }
+
+        // Only the customer or provider can upload evidence
+        if (req.userType === 'customer' && appointment.customer_id !== req.userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only the appointment customer can upload evidence'
+            });
+        }
+
+        if (req.userType === 'provider' && appointment.provider_id !== req.userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only the appointment provider can upload evidence'
+            });
+        }
+
+        const uploadedFiles = [];
+        
+        // Upload each file to Cloudinary
+        for (const file of req.files) {
+            try {
+                const fileUrl = await uploadToCloudinary(
+                    file.buffer,
+                    'fixmo/backjob-evidence',
+                    `evidence_${appointmentId}_${req.userId}_${Date.now()}`
+                );
+                
+                uploadedFiles.push({
+                    url: fileUrl,
+                    originalName: file.originalname,
+                    mimetype: file.mimetype,
+                    size: file.size
+                });
+            } catch (uploadError) {
+                console.error('Error uploading evidence file to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Error uploading evidence files'
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            message: 'Evidence files uploaded successfully',
+            data: {
+                files: uploadedFiles,
+                total_files: uploadedFiles.length
+            }
+        });
+
+    } catch (error) {
+        console.error('Error uploading backjob evidence:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error uploading evidence',
+            error: error.message
+        });
+    }
+};
+
 // Apply for backjob (customer) when appointment is in-warranty
 export const applyBackjob = async (req, res) => {
     try {
@@ -1618,6 +1729,13 @@ export const applyBackjob = async (req, res) => {
 
         if (!reason) {
             return res.status(400).json({ success: false, message: 'Reason is required' });
+        }
+
+        if (!evidence || (!evidence.files && !evidence.description)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Evidence is required. Please upload photos/videos or provide detailed description.' 
+            });
         }
 
         const appointment = await prisma.appointment.findUnique({
@@ -1696,10 +1814,24 @@ export const applyBackjob = async (req, res) => {
             },
         });
 
-        // Update appointment status to backjob
+        // WARRANTY PAUSE LOGIC: When a backjob is applied, pause the warranty countdown
+        // Calculate remaining warranty days before pausing
+        let warrantyRemainingDays = null;
+        if (appointment.warranty_expires_at) {
+            const now = new Date();
+            const remainingMs = appointment.warranty_expires_at.getTime() - now.getTime();
+            warrantyRemainingDays = Math.max(0, Math.ceil(remainingMs / (1000 * 60 * 60 * 24)));
+        }
+
+        // Update appointment status to backjob and pause warranty
+        // The warranty will resume from this point when the backjob is resolved
         const updatedAppointment = await prisma.appointment.update({
             where: { appointment_id: appointment.appointment_id },
-            data: { appointment_status: 'backjob' },
+            data: { 
+                appointment_status: 'backjob',
+                warranty_paused_at: new Date(), // Mark when warranty was paused
+                warranty_remaining_days: warrantyRemainingDays // Store remaining days to resume later
+            },
         });
 
         // Send email notifications for backjob application
@@ -1808,6 +1940,28 @@ export const disputeBackjob = async (req, res) => {
             },
         });
 
+        // Resume warranty from paused state when backjob is disputed
+        const appointment = await prisma.appointment.findUnique({
+            where: { appointment_id: backjob.appointment_id }
+        });
+
+        if (appointment && appointment.warranty_paused_at && appointment.warranty_remaining_days !== null) {
+            // Resume warranty from where it was paused
+            const now = new Date();
+            const newExpiryDate = new Date(now);
+            newExpiryDate.setDate(newExpiryDate.getDate() + appointment.warranty_remaining_days);
+
+            await prisma.appointment.update({
+                where: { appointment_id: backjob.appointment_id },
+                data: {
+                    appointment_status: 'in-warranty', // Resume warranty period
+                    warranty_expires_at: newExpiryDate,
+                    warranty_paused_at: null, // Clear pause
+                    warranty_remaining_days: null
+                }
+            });
+        }
+
         // Send email notification to customer about dispute
         try {
             const { sendBackjobDisputeToCustomer } = await import('../services/backjob-mailer.js');
@@ -1835,6 +1989,165 @@ export const disputeBackjob = async (req, res) => {
     } catch (error) {
         console.error('Error disputing backjob:', error);
         return res.status(500).json({ success: false, message: 'Error disputing backjob', error: error.message });
+    }
+};
+
+// Customer cancels their own backjob application with reason
+export const cancelBackjobByCustomer = async (req, res) => {
+    try {
+        const { backjobId } = req.params;
+        const { cancellation_reason } = req.body;
+
+        if (!cancellation_reason) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cancellation reason is required'
+            });
+        }
+
+        const backjob = await prisma.backjobApplication.findUnique({
+            where: { backjob_id: parseInt(backjobId) }
+        });
+
+        if (!backjob) {
+            return res.status(404).json({
+                success: false,
+                message: 'Backjob application not found'
+            });
+        }
+
+        // Only the customer who created the backjob can cancel it
+        if (req.userType !== 'customer' || (req.userId && req.userId !== backjob.customer_id)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only the customer who created the backjob can cancel it'
+            });
+        }
+
+        // Check if backjob is in a cancellable state (approved, pending, or disputed)
+        if (!['approved', 'pending', 'disputed'].includes(backjob.status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot cancel a backjob with status: ${backjob.status}`
+            });
+        }
+
+        // Get backjob details with appointment, customer, provider, and service info for emails
+        const backjobWithDetails = await prisma.backjobApplication.findUnique({
+            where: { backjob_id: backjob.backjob_id },
+            include: {
+                appointment: {
+                    include: {
+                        customer: {
+                            select: {
+                                user_id: true,
+                                first_name: true,
+                                last_name: true,
+                                email: true,
+                                phone_number: true
+                            }
+                        },
+                        serviceProvider: {
+                            select: {
+                                provider_id: true,
+                                provider_first_name: true,
+                                provider_last_name: true,
+                                provider_email: true,
+                                provider_phone_number: true
+                            }
+                        },
+                        service: {
+                            select: {
+                                service_id: true,
+                                service_title: true,
+                                service_startingprice: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Update backjob status to cancelled-by-customer
+        const updated = await prisma.backjobApplication.update({
+            where: { backjob_id: backjob.backjob_id },
+            data: {
+                status: 'cancelled-by-customer',
+                customer_cancellation_reason: cancellation_reason,
+            },
+        });
+
+        // Resume warranty from paused state when customer cancels backjob
+        const appointment = await prisma.appointment.findUnique({
+            where: { appointment_id: backjob.appointment_id }
+        });
+
+        if (appointment) {
+            // Prepare appointment update data
+            const appointmentUpdateData = {
+                appointment_status: 'in-warranty' // Always return to in-warranty when backjob is cancelled
+            };
+
+            // If warranty was paused, resume it from where it was paused
+            if (appointment.warranty_paused_at && appointment.warranty_remaining_days !== null) {
+                // Resume warranty from where it was paused
+                const now = new Date();
+                const newExpiryDate = new Date(now);
+                newExpiryDate.setDate(newExpiryDate.getDate() + appointment.warranty_remaining_days);
+
+                appointmentUpdateData.warranty_expires_at = newExpiryDate;
+                appointmentUpdateData.warranty_paused_at = null; // Clear pause
+                appointmentUpdateData.warranty_remaining_days = null;
+            }
+            // If no warranty pause data, just ensure the status is updated
+            // (this handles cases where warranty pause logic might have failed)
+
+            await prisma.appointment.update({
+                where: { appointment_id: backjob.appointment_id },
+                data: appointmentUpdateData
+            });
+        }
+
+        // Send email notifications for backjob cancellation
+        try {
+            const { sendBackjobCancellationToCustomer, sendBackjobCancellationToProvider } = await import('../services/backjob-mailer.js');
+            
+            // Prepare email details
+            const emailDetails = {
+                customerName: `${backjobWithDetails.appointment.customer.first_name} ${backjobWithDetails.appointment.customer.last_name}`,
+                customerPhone: backjobWithDetails.appointment.customer.phone_number,
+                serviceTitle: backjobWithDetails.appointment.service?.service_title || 'Service',
+                providerName: `${backjobWithDetails.appointment.serviceProvider.provider_first_name} ${backjobWithDetails.appointment.serviceProvider.provider_last_name}`,
+                providerPhone: backjobWithDetails.appointment.serviceProvider.provider_phone_number,
+                appointmentId: backjobWithDetails.appointment_id,
+                backjobId: backjob.backjob_id,
+                cancellationReason: cancellation_reason,
+                originalReason: backjobWithDetails.reason,
+                cancelledBy: 'customer'
+            };
+
+            console.log('📧 Sending backjob cancellation emails...');
+            await sendBackjobCancellationToCustomer(backjobWithDetails.appointment.customer.email, emailDetails);
+            await sendBackjobCancellationToProvider(backjobWithDetails.appointment.serviceProvider.provider_email, emailDetails);
+            console.log('✅ Backjob cancellation emails sent successfully');
+        } catch (emailError) {
+            console.error('❌ Error sending backjob cancellation emails:', emailError);
+            // Don't fail the cancellation if email fails
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Backjob cancelled successfully by customer and warranty resumed',
+            data: updated
+        });
+
+    } catch (error) {
+        console.error('Error cancelling backjob by customer:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error cancelling backjob',
+            error: error.message
+        });
     }
 };
 
@@ -1881,16 +2194,40 @@ export const updateBackjobStatus = async (req, res) => {
     let newStatus = backjob.status;
     let appointmentUpdate = null;
 
+        // Get appointment for warranty handling
+        const appointment = await prisma.appointment.findUnique({
+            where: { appointment_id: backjob.appointment_id }
+        });
+
         if (action === 'approve') {
             newStatus = 'approved';
             // Appointment remains in 'backjob' until provider reschedules
         } else if (action === 'cancel-by-admin') {
             newStatus = 'cancelled-by-admin';
             appointmentUpdate = { appointment_status: 'completed' };
+            // Clear warranty pause when admin cancels (ends warranty)
+            if (appointment && appointment.warranty_paused_at) {
+                appointmentUpdate.warranty_paused_at = null;
+                appointmentUpdate.warranty_remaining_days = null;
+                appointmentUpdate.warranty_expires_at = new Date(); // Expire immediately
+            }
         } else if (action === 'cancel-by-user') {
             newStatus = 'cancelled-by-user';
-            // Appointment returns to warranty state
-            appointmentUpdate = { appointment_status: 'in-warranty' };
+            // Resume warranty from paused state when cancelled by user
+            if (appointment && appointment.warranty_paused_at && appointment.warranty_remaining_days !== null) {
+                const now = new Date();
+                const resumeExpiryDate = new Date(now);
+                resumeExpiryDate.setDate(resumeExpiryDate.getDate() + appointment.warranty_remaining_days);
+                
+                appointmentUpdate = { 
+                    appointment_status: 'in-warranty',
+                    warranty_expires_at: resumeExpiryDate,
+                    warranty_paused_at: null,
+                    warranty_remaining_days: null
+                };
+            } else {
+                appointmentUpdate = { appointment_status: 'in-warranty' };
+            }
         } else {
             return res.status(400).json({ success: false, message: 'Invalid action' });
         }
@@ -1961,9 +2298,15 @@ export const rescheduleFromBackjob = async (req, res) => {
             return res.status(409).json({ success: false, message: 'Provider already has an appointment at this time' });
         }
 
+        // Clear warranty pause when rescheduling - warranty will resume from paused state after completion
         const updated = await prisma.appointment.update({
             where: { appointment_id: appointment.appointment_id },
-            data: { scheduled_date: newDate, availability_id: parseInt(availability_id), appointment_status: 'scheduled' },
+            data: { 
+                scheduled_date: newDate, 
+                availability_id: parseInt(availability_id), 
+                appointment_status: 'scheduled',
+                // Keep warranty_paused_at and warranty_remaining_days until work is completed again
+            },
             include: {
                 customer: { select: { user_id: true, first_name: true, last_name: true, email: true, phone_number: true } },
                 serviceProvider: { select: { provider_id: true, provider_first_name: true, provider_last_name: true, provider_email: true, provider_phone_number: true } },
@@ -2120,15 +2463,8 @@ export const completeAppointmentByCustomer = async (req, res) => {
 
         const dataUpdate = { appointment_status: 'completed', completed_at: new Date() };
 
-        // Ensure warranty_expires_at is set based on finished_at + warranty_days if not already
-        if (!appointment.warranty_expires_at) {
-            const base = appointment.finished_at ? new Date(appointment.finished_at) : new Date();
-            if (appointment.warranty_days && Number.isInteger(appointment.warranty_days)) {
-                const expires = new Date(base);
-                expires.setDate(expires.getDate() + appointment.warranty_days);
-                dataUpdate.warranty_expires_at = expires;
-            }
-        }
+        // Expire warranty immediately when customer completes the appointment
+        dataUpdate.warranty_expires_at = new Date();
 
         const updated = await prisma.appointment.update({
             where: { appointment_id: appointment.appointment_id },

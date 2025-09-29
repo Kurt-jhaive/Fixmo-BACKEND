@@ -554,7 +554,67 @@
 
 /**
  * @swagger
- * /api/appointments/{appointmentId}/backjob/apply:
+ * /api/appointments/{appointmentId}/backjob-evidence:
+ *   post:
+ *     tags: [Appointments]
+ *     summary: Upload evidence files for backjob
+ *     description: Upload photos/videos as evidence for backjob applications (customer or provider)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: appointmentId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Appointment ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               evidence_files:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *                 description: Evidence files (images/videos, max 5 files, 10MB each)
+ *     responses:
+ *       200:
+ *         description: Evidence files uploaded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 message: { type: string }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     files:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           url: { type: string }
+ *                           originalName: { type: string }
+ *                           mimetype: { type: string }
+ *                           size: { type: integer }
+ *                     total_files: { type: integer }
+ *       400:
+ *         description: No files provided
+ *       403:
+ *         description: Unauthorized access
+ *       404:
+ *         description: Appointment not found
+ */
+
+/**
+ * @swagger
+ * /api/appointments/{appointmentId}/apply-backjob:
  *   post:
  *     tags: [Appointments]
  *     summary: Apply for backjob during warranty (customer)
@@ -573,17 +633,7 @@
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required:
- *               - reason
- *             properties:
- *               reason:
- *                 type: string
- *                 example: Issue reoccurred within warranty period
- *               evidence:
- *                 description: Optional JSON evidence payload (links, notes, etc.)
- *                 schema:
- *                   type: object
+ *             $ref: '#/components/schemas/BackjobApplicationRequest'
  *     responses:
  *       201:
  *         description: Backjob application submitted
@@ -611,7 +661,7 @@
 
 /**
  * @swagger
- * /api/appointments/backjob/{backjobId}/dispute:
+ * /api/appointments/backjobs/{backjobId}/dispute:
  *   post:
  *     tags: [Appointments]
  *     summary: Dispute a backjob (provider)
@@ -629,13 +679,7 @@
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             properties:
- *               dispute_reason: { type: string, example: Work passed QA; likely misuse }
- *               dispute_evidence:
- *                 description: Optional JSON evidence payload
- *                 schema:
- *                   type: object
+ *             $ref: '#/components/schemas/BackjobDisputeRequest'
  *     responses:
  *       200:
  *         description: Backjob disputed
@@ -643,6 +687,89 @@
  *         description: Forbidden (not the assigned provider)
  *       404:
  *         description: Backjob not found
+ */
+
+/**
+ * @swagger
+ * /api/appointments/backjobs/{backjobId}/cancel:
+ *   post:
+ *     tags: [Appointments]
+ *     summary: Cancel backjob (customer)
+ *     description: Customer cancels their own backjob application with a reason. Warranty will resume from paused state.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: backjobId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: The backjob application ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/BackjobCancellationRequest'
+ *     responses:
+ *       200:
+ *         description: Backjob cancelled successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Backjob cancelled successfully by customer and warranty resumed"
+ *                 data:
+ *                   $ref: '#/components/schemas/BackjobApplication'
+ *       400:
+ *         description: Bad request (missing reason or invalid status)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   examples:
+ *                     missing_reason:
+ *                       value: "Cancellation reason is required"
+ *                     invalid_status:
+ *                       value: "Cannot cancel a backjob with status: cancelled-by-admin"
+ *       403:
+ *         description: Forbidden (not the customer who created the backjob)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Only the customer who created the backjob can cancel it"
+ *       404:
+ *         description: Backjob not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Backjob application not found"
  */
 
 /**
@@ -723,7 +850,7 @@
 
 /**
  * @swagger
- * /api/appointments/{appointmentId}/backjob/reschedule:
+ * /api/appointments/{appointmentId}/reschedule-backjob:
  *   patch:
  *     tags: [Appointments]
  *     summary: Provider reschedules an approved backjob

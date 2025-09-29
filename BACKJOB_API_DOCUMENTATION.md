@@ -23,16 +23,67 @@ Authorization: Bearer <your-jwt-token>
 4. **If provider disputes** → Customer notified, admin review required
 5. **Admin resolves disputes** → Final decision made
 
-### Auto-Approval Feature
-- All backjob applications are **automatically approved** when submitted
-- No manual admin approval required for initial applications
-- Providers can still dispute if they believe work was completed correctly
+### Enhanced Features
+- **Auto-Approval:** All backjob applications are automatically approved when submitted
+- **Evidence Requirements:** Customers must upload photos/videos or provide detailed descriptions
+- **Automatic Warranty Expiry:** Warranty expires immediately when appointment is marked as completed
+- **Auto-Completion:** Jobs are automatically completed when warranty period expires
+- **File Storage:** Evidence files stored securely on Cloudinary with 10MB limit per file
+- **Provider Disputes:** Providers can still dispute if they believe work was completed correctly
 
 ---
 
 ## Endpoints
 
-### 1. Apply for Backjob (Customer)
+### 1. Upload Evidence Files (Customer/Provider)
+Upload photos or videos as evidence for backjob applications.
+
+**Endpoint:** `POST /appointments/:appointmentId/backjob-evidence`
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| appointmentId | integer | Yes | The appointment ID |
+
+**Request Body:**
+- **Content-Type:** `multipart/form-data`
+- **Field:** `evidence_files` (array of files)
+
+**File Requirements:**
+- **Types:** Images (JPG, PNG, GIF, WEBP) and Videos (MP4, MPEG, MOV, AVI, WEBM)
+- **Size Limit:** 10MB per file
+- **Maximum Files:** 5 files per upload
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Evidence files uploaded successfully",
+  "data": {
+    "files": [
+      {
+        "url": "https://res.cloudinary.com/dcx1glkit/image/upload/v123456789/fixmo/backjob-evidence/evidence_123_456_1234567890.jpg",
+        "originalName": "leak_photo.jpg",
+        "mimetype": "image/jpeg",
+        "size": 2048576
+      }
+    ],
+    "total_files": 1
+  }
+}
+```
+
+**Error Responses:**
+```json
+{
+  "success": false,
+  "message": "No evidence files provided"
+}
+```
+
+---
+
+### 2. Apply for Backjob (Customer)
 Customer applies for warranty work when issues persist after service completion.
 
 **Endpoint:** `POST /appointments/:appointmentId/apply-backjob`
@@ -46,15 +97,29 @@ Customer applies for warranty work when issues persist after service completion.
 ```json
 {
   "reason": "The pipe is still leaking after the repair was completed",
-  "evidence": "Photos showing the continuing leak and water damage"
+  "evidence": {
+    "description": "Detailed description of the issue",
+    "files": [
+      {
+        "url": "https://res.cloudinary.com/.../evidence_file1.jpg",
+        "originalName": "leak_photo.jpg",
+        "mimetype": "image/jpeg"
+      }
+    ]
+  }
 }
 ```
 
 **Required Fields:**
 - `reason` (string) - Detailed description of the issue
+- `evidence` (object) - Supporting evidence with photos/videos or detailed description
+  - `description` (string) - Text description of the issue (required if no files)
+  - `files` (array) - Array of uploaded evidence file URLs (required if no description)
 
-**Optional Fields:**
-- `evidence` (string) - Supporting evidence (photos, descriptions, etc.)
+**Evidence Requirements:**
+- Evidence is **mandatory** - must provide either uploaded files or detailed description
+- Use `/appointments/:appointmentId/backjob-evidence` endpoint to upload files first
+- Include the returned file URLs in the evidence.files array
 
 **Response:**
 ```json
@@ -92,6 +157,14 @@ Customer applies for warranty work when issues persist after service completion.
 {
   "success": false,
   "message": "Reason is required"
+}
+```
+
+*400 - Missing Evidence:*
+```json
+{
+  "success": false,
+  "message": "Evidence is required. Please upload photos/videos or provide detailed description."
 }
 ```
 
@@ -188,7 +261,95 @@ Provider can dispute a backjob claim if they believe the original work was compl
 
 ---
 
-### 3. Reschedule Backjob Appointment (Provider)
+### 3. Cancel Backjob (Customer)
+Customer can cancel their own backjob application with a reason. The warranty will resume from where it was paused.
+
+**Endpoint:** `POST /backjobs/:backjobId/cancel`
+
+**Path Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| backjobId | integer | Yes | The backjob application ID |
+
+**Request Body:**
+```json
+{
+  "cancellation_reason": "Issue resolved itself after further inspection"
+}
+```
+
+**Required Fields:**
+- `cancellation_reason` (string) - Reason for cancelling the backjob
+
+**Authentication:** Customer JWT token required
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Backjob cancelled successfully by customer and warranty resumed",
+  "data": {
+    "backjob_id": 123,
+    "appointment_id": 456,
+    "customer_id": 789,
+    "provider_id": 101,
+    "status": "cancelled-by-customer",
+    "reason": "Need additional parts not covered by warranty",
+    "customer_cancellation_reason": "Issue resolved itself after further inspection",
+    "created_at": "2025-09-28T10:00:00.000Z",
+    "updated_at": "2025-09-30T12:00:00.000Z"
+  }
+}
+```
+
+**Business Logic:**
+- Only the customer who created the backjob can cancel it
+- Can cancel backjobs in `approved`, `pending`, or `disputed` status
+- Warranty period is resumed from where it was paused
+- Appointment status returns to `in-warranty`
+- Both customer and provider receive email notifications
+
+**Email Notifications:**
+- ✅ Customer receives cancellation confirmation with warranty resumption details
+- ✅ Provider receives notification that backjob was cancelled by customer
+
+**Error Responses:**
+
+*400 - Missing Reason:*
+```json
+{
+  "success": false,
+  "message": "Cancellation reason is required"
+}
+```
+
+*400 - Invalid Status:*
+```json
+{
+  "success": false,
+  "message": "Cannot cancel a backjob with status: cancelled-by-admin"
+}
+```
+
+*403 - Unauthorized:*
+```json
+{
+  "success": false,
+  "message": "Only the customer who created the backjob can cancel it"
+}
+```
+
+*404 - Not Found:*
+```json
+{
+  "success": false,
+  "message": "Backjob application not found"
+}
+```
+
+---
+
+### 4. Reschedule Backjob Appointment (Provider)
 Provider reschedules an approved backjob to a new date and time.
 
 **Endpoint:** `POST /appointments/:appointmentId/reschedule-backjob`
@@ -287,7 +448,7 @@ Provider reschedules an approved backjob to a new date and time.
 
 ---
 
-### 4. List Backjob Applications (Admin)
+### 5. List Backjob Applications (Admin)
 Admin endpoint to retrieve and filter backjob applications.
 
 **Endpoint:** `GET /backjobs`
@@ -354,7 +515,7 @@ Admin endpoint to retrieve and filter backjob applications.
 
 ---
 
-### 5. Update Backjob Status (Admin)
+### 6. Update Backjob Status (Admin)
 Admin endpoint to manage backjob application statuses.
 
 **Endpoint:** `PATCH /backjobs/:backjobId/status`
@@ -420,7 +581,11 @@ The backjob system uses comprehensive HTML email templates with professional sty
 #### 2. Backjob Dispute Emails
 - **Customer Notification**: Red-themed dispute alert with admin review process
 
-#### 3. Backjob Reschedule Emails
+#### 3. Backjob Cancellation Emails
+- **Customer Confirmation**: Grey-themed cancellation confirmation with warranty resumption details
+- **Provider Notification**: Informational notification about customer cancellation
+
+#### 4. Backjob Reschedule Emails
 - **Customer Confirmation**: Green-themed new appointment details
 - **Provider Confirmation**: Blue-themed service expectations
 
@@ -432,6 +597,28 @@ The backjob system uses comprehensive HTML email templates with professional sty
 
 ---
 
+## Automatic System Features
+
+### Warranty Auto-Expiration
+- When an appointment status changes to `completed`, the warranty expires immediately
+- This prevents customers from filing backjobs after they've marked the work as satisfactory
+- Applies to both provider-initiated completion and customer-initiated completion
+
+### Auto-Completion on Warranty Expiry
+- System automatically completes jobs every 6 hours when warranty period expires
+- Appointments with status `in-warranty` or `backjob` are checked for expiry
+- Expired appointments are automatically marked as `completed`
+- Any active backjob applications are cancelled with status `cancelled-by-admin`
+
+### Evidence File Requirements
+- All backjob applications **must** include evidence (photos/videos or detailed description)
+- Files are uploaded separately using the evidence upload endpoint
+- Supported formats: JPG, PNG, GIF, WEBP (images), MP4, MPEG, MOV, AVI, WEBM (videos)
+- Maximum 5 files per upload, 10MB per file limit
+- Files stored securely on Cloudinary with CDN delivery
+
+---
+
 ## Status Definitions
 
 ### Backjob Application Statuses
@@ -440,7 +627,8 @@ The backjob system uses comprehensive HTML email templates with professional sty
 | `approved` | Auto-approved upon submission | Provider can reschedule or dispute |
 | `disputed` | Provider has disputed the claim | Admin review required |
 | `cancelled-by-admin` | Admin cancelled after review | Case closed, appointment completed |
-| `cancelled-by-user` | User/customer cancelled | Appointment returns to warranty |
+| `cancelled-by-user` | Admin cancelled on behalf of user | Appointment returns to warranty |
+| `cancelled-by-customer` | Customer cancelled their own backjob | Appointment returns to warranty, emails sent |
 
 ### Appointment Status Changes
 | Original Status | After Backjob Applied | After Resolution |
@@ -455,20 +643,42 @@ The backjob system uses comprehensive HTML email templates with professional sty
 
 ### Complete Backjob Flow
 
-1. **Customer applies for backjob:**
+1. **Upload evidence files first:**
+```bash
+curl -X POST http://localhost:3000/api/appointments/123/backjob-evidence \
+  -H "Authorization: Bearer CUSTOMER_JWT_TOKEN" \
+  -F "evidence_files=@leak_photo1.jpg" \
+  -F "evidence_files=@leak_video.mp4"
+```
+
+2. **Customer applies for backjob with evidence:**
 ```bash
 curl -X POST http://localhost:3000/api/appointments/123/apply-backjob \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer CUSTOMER_JWT_TOKEN" \
   -d '{
     "reason": "The sink is still dripping after the repair",
-    "evidence": "Video showing continued dripping"
+    "evidence": {
+      "description": "The leak started again 2 days after repair, water damage visible",
+      "files": [
+        {
+          "url": "https://res.cloudinary.com/.../evidence_123_456_1234567890.jpg",
+          "originalName": "leak_photo1.jpg",
+          "mimetype": "image/jpeg"
+        },
+        {
+          "url": "https://res.cloudinary.com/.../evidence_123_456_1234567891.mp4",
+          "originalName": "leak_video.mp4", 
+          "mimetype": "video/mp4"
+        }
+      ]
+    }
   }'
 ```
 
-2. **Provider reschedules the appointment:**
+3. **Provider reschedules the appointment:**
 ```bash
-curl -X POST http://localhost:3000/api/appointments/123/reschedule-backjob \
+curl -X PATCH http://localhost:3000/api/appointments/123/reschedule-backjob \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer PROVIDER_JWT_TOKEN" \
   -d '{
@@ -477,9 +687,9 @@ curl -X POST http://localhost:3000/api/appointments/123/reschedule-backjob \
   }'
 ```
 
-3. **OR Provider disputes the claim:**
+4. **OR Provider disputes the claim:**
 ```bash
-curl -X POST http://localhost:3000/api/backjobs/1/dispute \
+curl -X POST http://localhost:3000/api/appointments/backjobs/1/dispute \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer PROVIDER_JWT_TOKEN" \
   -d '{
@@ -488,15 +698,15 @@ curl -X POST http://localhost:3000/api/backjobs/1/dispute \
   }'
 ```
 
-4. **Admin reviews disputes:**
+5. **Admin reviews disputes:**
 ```bash
 curl -X GET http://localhost:3000/api/backjobs?status=disputed \
   -H "Authorization: Bearer ADMIN_JWT_TOKEN"
 ```
 
-5. **Admin resolves dispute:**
+6. **Admin resolves dispute:**
 ```bash
-curl -X PATCH http://localhost:3000/api/backjobs/1/status \
+curl -X PATCH http://localhost:3000/api/appointments/backjobs/1 \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ADMIN_JWT_TOKEN" \
   -d '{
@@ -589,7 +799,7 @@ This comprehensive system ensures fair and efficient handling of warranty claims
 
 ### 5) Reschedule From Backjob (Provider)
 - Method: PATCH
-- Path: `/api/appointments/:appointmentId/backjob/reschedule`
+- Path: `/api/appointments/:appointmentId/reschedule-backjob`
 - Auth: `provider` (must match appointment provider)
 - Body:
   - `new_scheduled_date` (ISO string, required)

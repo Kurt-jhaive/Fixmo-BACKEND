@@ -185,6 +185,34 @@ const uploadMultipleServicePhotos = multer({
     }
 });
 
+// Backjob evidence storage configuration - Use memory storage for Cloudinary
+const backjobEvidenceStorage = multer.memoryStorage();
+
+// Backjob evidence file filter (images and videos)
+const backjobEvidenceFilter = (req, file, cb) => {
+    // Allow images and videos for backjob evidence
+    const allowedTypes = [
+        'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+        'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/webm'
+    ];
+    
+    if (allowedTypes.includes(file.mimetype)) {
+        cb(null, true);
+    } else {
+        cb(new Error('Only image and video files are allowed for backjob evidence!'), false);
+    }
+};
+
+// Multer upload configuration for backjob evidence
+const uploadBackjobEvidence = multer({
+    storage: backjobEvidenceStorage,
+    fileFilter: backjobEvidenceFilter,
+    limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB limit for evidence files
+        files: 5 // Maximum 5 evidence files
+    }
+});
+
 const upload = multer({ dest: 'uploads/' }); // existing upload configuration
 
 export { 
@@ -193,5 +221,6 @@ export {
     uploadServiceImageSimple, 
     processServiceImage, 
     uploadRatingPhoto,
-    uploadMultipleServicePhotos 
+    uploadMultipleServicePhotos,
+    uploadBackjobEvidence
 };

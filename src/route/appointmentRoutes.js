@@ -54,13 +54,20 @@ router.get('/:appointmentId/ratings', authMiddleware, getAppointmentRatings);  /
 router.get('/:appointmentId/can-rate', authMiddleware, canRateAppointment);    // GET /api/appointments/:id/can-rate - Check if user can rate appointment
 
 // Backjob routes
-import { applyBackjob, disputeBackjob, listBackjobs, updateBackjobStatus, rescheduleFromBackjob } from '../controller/appointmentController.js';
+import { applyBackjob, disputeBackjob, cancelBackjobByCustomer, listBackjobs, updateBackjobStatus, rescheduleFromBackjob, uploadBackjobEvidence } from '../controller/appointmentController.js';
+import { uploadBackjobEvidence as uploadBackjobEvidenceMiddleware } from '../middleware/multer.js';
+
+// Upload evidence files for backjob (customer or provider)
+router.post('/:appointmentId/backjob-evidence', authMiddleware, uploadBackjobEvidenceMiddleware.array('evidence_files', 5), uploadBackjobEvidence);
 
 // Customer applies for backjob (must be in-warranty)
-router.post('/:appointmentId/backjob/apply', authMiddleware, applyBackjob);
+router.post('/:appointmentId/apply-backjob', authMiddleware, applyBackjob);
 
 // Provider disputes a backjob
-router.post('/backjob/:backjobId/dispute', authMiddleware, disputeBackjob);
+router.post('/backjobs/:backjobId/dispute', authMiddleware, disputeBackjob);
+
+// Customer cancels their own backjob
+router.post('/backjobs/:backjobId/cancel', authMiddleware, cancelBackjobByCustomer);
 
 // Admin lists backjobs
 router.get('/backjobs', adminAuthMiddleware, listBackjobs);
@@ -69,6 +76,6 @@ router.get('/backjobs', adminAuthMiddleware, listBackjobs);
 router.patch('/backjobs/:backjobId', adminAuthMiddleware, updateBackjobStatus);
 
 // Provider reschedules an approved backjob
-router.patch('/:appointmentId/backjob/reschedule', authMiddleware, rescheduleFromBackjob);
+router.patch('/:appointmentId/reschedule-backjob', authMiddleware, rescheduleFromBackjob);
 
 export default router;

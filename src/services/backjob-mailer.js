@@ -400,3 +400,165 @@ export const sendBackjobRescheduleToProvider = async (providerEmail, backjobDeta
     
     await transporter.sendMail(mailOptions);
 };
+
+// 7. BACKJOB CANCELLATION - Send to Customer (Confirmation)
+export const sendBackjobCancellationToCustomer = async (customerEmail, cancellationDetails) => {
+    const { 
+        customerName, 
+        serviceTitle, 
+        providerName,
+        providerPhone,
+        appointmentId,
+        backjobId,
+        cancellationReason,
+        originalReason
+    } = cancellationDetails;
+
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: customerEmail,
+        subject: `Warranty Service Request Cancelled - Booking #${appointmentId}`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
+                <div style="background-color: #6c757d; padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 24px;">🚫 Warranty Service Cancelled</h1>
+                </div>
+                
+                <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <p style="color: #333; font-size: 16px; margin-bottom: 20px;">Dear <strong>${customerName}</strong>,</p>
+                    
+                    <p style="color: #333; font-size: 16px; line-height: 1.6;">
+                        You have successfully cancelled your warranty service request for <strong>${serviceTitle}</strong>.
+                        Your warranty period has been resumed from where it was paused.
+                    </p>
+
+                    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #6c757d;">
+                        <h3 style="color: #333; margin-top: 0; margin-bottom: 15px;">📋 Cancellation Details</h3>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057; width: 40%;">Appointment ID:</td>
+                                <td style="padding: 8px 0; color: #333;">#${appointmentId}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Backjob ID:</td>
+                                <td style="padding: 8px 0; color: #333;">#${backjobId}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Service Provider:</td>
+                                <td style="padding: 8px 0; color: #333;">${providerName}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Original Reason:</td>
+                                <td style="padding: 8px 0; color: #333;">${originalReason}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Cancellation Reason:</td>
+                                <td style="padding: 8px 0; color: #333;">${cancellationReason}</td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <div style="background-color: #d1ecf1; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #17a2b8;">
+                        <h3 style="color: #333; margin-top: 0; margin-bottom: 15px;">ℹ️ What Happens Next</h3>
+                        <ul style="color: #333; line-height: 1.6; padding-left: 20px;">
+                            <li>Your warranty period has been resumed</li>
+                            <li>You can still file another warranty claim if needed</li>
+                            <li>Your appointment status is back to "In Warranty"</li>
+                            <li>No further action needed from you</li>
+                        </ul>
+                    </div>
+
+                    <p style="color: #666; font-size: 14px; text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                        If you have any questions, please contact our support team.<br>
+                        <strong>Fixmo Team</strong>
+                    </p>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// 8. BACKJOB CANCELLATION - Send to Provider (Notification)
+export const sendBackjobCancellationToProvider = async (providerEmail, cancellationDetails) => {
+    const { 
+        customerName, 
+        customerPhone,
+        serviceTitle, 
+        providerName,
+        appointmentId,
+        backjobId,
+        cancellationReason,
+        originalReason
+    } = cancellationDetails;
+
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: providerEmail,
+        subject: `Customer Cancelled Warranty Request - Booking #${appointmentId}`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
+                <div style="background-color: #6c757d; padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 24px;">🚫 Warranty Request Cancelled</h1>
+                </div>
+                
+                <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <p style="color: #333; font-size: 16px; margin-bottom: 20px;">Dear <strong>${providerName}</strong>,</p>
+                    
+                    <p style="color: #333; font-size: 16px; line-height: 1.6;">
+                        The customer <strong>${customerName}</strong> has cancelled their warranty service request for <strong>${serviceTitle}</strong>.
+                        No action is required from you.
+                    </p>
+
+                    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #6c757d;">
+                        <h3 style="color: #333; margin-top: 0; margin-bottom: 15px;">📋 Cancellation Details</h3>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057; width: 40%;">Appointment ID:</td>
+                                <td style="padding: 8px 0; color: #333;">#${appointmentId}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Backjob ID:</td>
+                                <td style="padding: 8px 0; color: #333;">#${backjobId}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Customer:</td>
+                                <td style="padding: 8px 0; color: #333;">${customerName}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Customer Phone:</td>
+                                <td style="padding: 8px 0; color: #333;">${customerPhone}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Original Issue:</td>
+                                <td style="padding: 8px 0; color: #333;">${originalReason}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Cancellation Reason:</td>
+                                <td style="padding: 8px 0; color: #333;">${cancellationReason}</td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <div style="background-color: #d1ecf1; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #17a2b8;">
+                        <h3 style="color: #333; margin-top: 0; margin-bottom: 15px;">ℹ️ Status Update</h3>
+                        <ul style="color: #333; line-height: 1.6; padding-left: 20px;">
+                            <li>The warranty service request has been cancelled</li>
+                            <li>Customer's warranty period has been resumed</li>
+                            <li>No rescheduling action needed from you</li>
+                            <li>Customer may submit another warranty claim if needed</li>
+                        </ul>
+                    </div>
+
+                    <p style="color: #666; font-size: 14px; text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                        Thank you for your attention to this matter.<br>
+                        <strong>Fixmo Team</strong>
+                    </p>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};

@@ -210,13 +210,15 @@ const AUTO_COMPLETE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 setInterval(async () => {
   try {
     const now = new Date();
-    // Find appointments that are in-warranty, have warranty_expires_at in the past, and are not completed/backjob/cancelled
+    // Find appointments that are in-warranty or backjob, have warranty_expires_at in the past, and are not completed/cancelled
+    // Exclude appointments with paused warranties (backjobs)
     const expired = await prisma.appointment.findMany({
       where: {
-        appointment_status: 'in-warranty',
+        appointment_status: { in: ['in-warranty', 'backjob'] },
         warranty_expires_at: { lte: now },
+        warranty_paused_at: null, // Only expire non-paused warranties
       },
-      select: { appointment_id: true }
+      select: { appointment_id: true, appointment_status: true }
     });
 
     if (expired.length > 0) {
@@ -225,7 +227,20 @@ setInterval(async () => {
         where: { appointment_id: { in: ids } },
         data: { appointment_status: 'completed', completed_at: now }
       });
-      console.log(`✅ Auto-completed ${ids.length} appointment(s) after warranty expiration.`);
+      
+      // Also expire any active backjob applications for these appointments
+      await prisma.backjobApplication.updateMany({
+        where: { 
+          appointment_id: { in: ids },
+          status: { in: ['approved', 'pending'] }
+        },
+        data: { 
+          status: 'cancelled-by-admin',
+          admin_notes: 'Cancelled due to warranty expiration'
+        }
+      });
+      
+      console.log(`✅ Auto-completed ${ids.length} appointment(s) after warranty expiration and cancelled related backjobs.`);
     }
   } catch (err) {
     console.error('Auto-complete job error:', err);
