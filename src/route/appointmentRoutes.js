@@ -16,7 +16,9 @@ import {
     submitRating,
     getAppointmentRatings,
     canRateAppointment,
-    completeAppointmentByCustomer
+    completeAppointmentByCustomer,
+    getAppointmentsNeedingRatings,
+    checkAppointmentRatingStatus
 } from '../controller/appointmentController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { adminAuthMiddleware } from '../middleware/adminAuthMiddleware.js';
@@ -29,6 +31,10 @@ router.use(authMiddleware);
 // General appointment routes
 router.get('/', getAllAppointments);                           // GET /api/appointments - Get all appointments with filtering
 router.get('/stats', getAppointmentStats);                     // GET /api/appointments/stats - Get appointment statistics
+
+// Rating-specific routes (must be before /:appointmentId routes)
+router.get('/can-rate', authMiddleware, getAppointmentsNeedingRatings); // GET /api/appointments/can-rate - Get appointments that can be rated
+
 router.get('/:appointmentId', getAppointmentById);             // GET /api/appointments/:id - Get appointment by ID
 router.post('/', createAppointment);                           // POST /api/appointments - Create new appointment
 router.put('/:appointmentId', updateAppointment);              // PUT /api/appointments/:id - Update appointment
@@ -77,5 +83,8 @@ router.patch('/backjobs/:backjobId', adminAuthMiddleware, updateBackjobStatus);
 
 // Provider reschedules an approved backjob
 router.patch('/:appointmentId/reschedule-backjob', authMiddleware, rescheduleFromBackjob);
+
+// Check specific appointment rating status
+router.get('/:appointmentId/rating-status', authMiddleware, checkAppointmentRatingStatus);
 
 export default router;

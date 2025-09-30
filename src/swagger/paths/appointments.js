@@ -104,6 +104,21 @@
  *                             type: array
  *                             items:
  *                               $ref: '#/components/schemas/Rating'
+ *                           days_left:
+ *                             type: integer
+ *                             nullable: true
+ *                             description: Days left in warranty period
+ *                             example: 25
+ *                           is_rated:
+ *                             type: boolean
+ *                             description: Simple boolean indicating if appointment is rated by customer
+ *                             example: true
+ *                           needs_rating:
+ *                             type: boolean
+ *                             description: Boolean indicating if appointment needs customer rating
+ *                             example: false
+ *                           rating_status:
+ *                             $ref: '#/components/schemas/RatingStatus'
  *                 pagination:
  *                   $ref: '#/components/schemas/PaginationResponse'
  *   post:
@@ -889,4 +904,118 @@
  *         description: Forbidden (not the assigned provider)
  *       409:
  *         description: Conflict with existing appointment
+ */
+
+/**
+ * @swagger
+ * /api/appointments/can-rate:
+ *   get:
+ *     tags: [Appointments, Ratings]
+ *     summary: Get appointments that can be rated
+ *     description: Automatically retrieve all appointments that can be rated by the authenticated user (no input needed)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number for pagination
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Number of items per page
+ *     responses:
+ *       200:
+ *         description: Appointments that can be rated retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: "Appointments that can be rated retrieved successfully" }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     allOf:
+ *                       - $ref: '#/components/schemas/Appointment'
+ *                       - type: object
+ *                         properties:
+ *                           is_rated: { type: boolean, example: false }
+ *                           needs_rating: { type: boolean, example: true }
+ *                           rating_status: { $ref: '#/components/schemas/RatingStatus' }
+ *                 pagination: { $ref: '#/components/schemas/Pagination' }
+ *       401:
+ *         description: Unauthorized - Invalid or missing token
+ *       500:
+ *         description: Internal server error
+ */
+
+/**
+ * @swagger
+ * /api/appointments/{appointmentId}/rating-status:
+ *   get:
+ *     tags: [Appointments, Ratings]
+ *     summary: Check appointment rating status
+ *     description: Get detailed rating status for a specific appointment
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: appointmentId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: The appointment ID
+ *     responses:
+ *       200:
+ *         description: Rating status retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     appointment_id: { type: integer, example: 123 }
+ *                     appointment_status: 
+ *                       type: string
+ *                       enum: [scheduled, on-the-way, in-progress, in-warranty, finished, completed, cancelled, backjob]
+ *                       example: "completed"
+ *                     is_rated: { type: boolean, example: true }
+ *                     is_rated_by_customer: { type: boolean, example: true }
+ *                     is_rated_by_provider: { type: boolean, example: false }
+ *                     can_rate: { type: boolean, example: false }
+ *                     needs_rating: { type: boolean, example: false }
+ *                     rating_status:
+ *                       type: object
+ *                       properties:
+ *                         customer_rating:
+ *                           type: object
+ *                           nullable: true
+ *                           properties:
+ *                             rating_id: { type: integer, example: 456 }
+ *                             rating_value: { type: integer, minimum: 1, maximum: 5, example: 5 }
+ *                             created_at: { type: string, format: date-time, example: "2025-09-25T17:00:00.000Z" }
+ *                         provider_rating:
+ *                           type: object
+ *                           nullable: true
+ *                           properties:
+ *                             rating_id: { type: integer, example: 789 }
+ *                             rating_value: { type: integer, minimum: 1, maximum: 5, example: 4 }
+ *                             created_at: { type: string, format: date-time, example: "2025-09-25T17:30:00.000Z" }
+ *       401:
+ *         description: Unauthorized - Invalid or missing token
+ *       403:
+ *         description: Forbidden - Access denied (not customer or provider of this appointment)
+ *       404:
+ *         description: Appointment not found
+ *       500:
+ *         description: Internal server error
  */

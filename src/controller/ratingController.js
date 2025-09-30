@@ -1,7 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import path from 'path';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
-import fs from 'fs';
 
 const prisma = new PrismaClient();
 
@@ -484,10 +482,8 @@ export const deleteRating = async (req, res) => {
             });
         }
 
-        // Delete the photo if it exists
-        if (existingRating.rating_photo && fs.existsSync(existingRating.rating_photo)) {
-            fs.unlinkSync(existingRating.rating_photo);
-        }
+        // Note: Cloudinary photos are managed automatically - no manual deletion needed
+        // The photo URL stored in rating_photo is just a reference to Cloudinary
 
         // Delete the rating
         await prisma.rating.delete({
