@@ -2770,98 +2770,90 @@ export const getAppointmentsNeedingRatings = async (req, res) => {
             whereClause.provider_id = userId;
         }
 
-        const [appointmentsRaw, totalCount] = await Promise.all([
-            prisma.appointment.findMany({
-                where: whereClause,
-                include: {
-                    customer: {
-                        select: {
-                            user_id: true,
-                            first_name: true,
-                            last_name: true,
-                            email: true,
-                            profile_photo: true
-                        }
-                    },
-                    serviceProvider: {
-                        select: {
-                            provider_id: true,
-                            provider_first_name: true,
-                            provider_last_name: true,
-                            provider_email: true,
-                            provider_profile_photo: true,
-                            provider_rating: true
-                        }
-                    },
-                    service: {
-                        select: {
-                            service_id: true,
-                            service_title: true,
-                            service_startingprice: true
-                        }
-                    },
-                    appointment_rating: {
-                        select: {
-                            id: true,
-                            rating_value: true,
-                            rating_comment: true,
-                            rated_by: true,
-                            created_at: true
-                        }
+        // Get all completed appointments for the user to filter unrated ones
+        const appointmentsRaw = await prisma.appointment.findMany({
+            where: whereClause,
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        profile_photo: true
                     }
                 },
-                orderBy: {
-                    completed_at: 'desc'
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_profile_photo: true,
+                        provider_rating: true
+                    }
                 },
-                skip,
-                take
-            }),
-            prisma.appointment.count({ where: whereClause })
-        ]);
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
+                },
+                appointment_rating: {
+                    select: {
+                        id: true,
+                        rating_value: true,
+                        rating_comment: true,
+                        rated_by: true,
+                        created_at: true
+                    }
+                }
+            },
+            orderBy: {
+                completed_at: 'desc'
+            }
+        });
 
-        // Filter appointments that actually need ratings
-        const needRatingAppointments = appointmentsRaw.filter(a => {
+        // Filter appointments that haven't been rated by the current user
+        const unratedAppointments = appointmentsRaw.filter(a => {
             const customer_rating = a.appointment_rating?.find(r => r.rated_by === 'customer');
             const provider_rating = a.appointment_rating?.find(r => r.rated_by === 'provider');
 
             if (req.userType === 'customer') {
-                return !customer_rating; // Customer hasn't rated yet
+                return !customer_rating; // Show only if customer hasn't rated
             } else if (req.userType === 'provider') {
-                return !provider_rating; // Provider hasn't rated yet
+                return !provider_rating; // Show only if provider hasn't rated
             }
-            return true;
-        }).map(a => {
-            const customer_rating = a.appointment_rating?.find(r => r.rated_by === 'customer');
-            const provider_rating = a.appointment_rating?.find(r => r.rated_by === 'provider');
-            
-            const is_rated_by_customer = !!customer_rating;
-            const is_rated_by_provider = !!provider_rating;
-            
-            return {
-                ...a,
-                is_rated: is_rated_by_customer,
-                needs_rating: true, // All appointments in this response need rating
-                rating_status: {
-                    is_rated: is_rated_by_customer,
-                    is_rated_by_customer,
-                    is_rated_by_provider,
-                    needs_rating: true,
-                    customer_rating_value: customer_rating?.rating_value || null,
-                    provider_rating_value: provider_rating?.rating_value || null
-                }
-            };
+            return false;
         });
 
-        const totalPages = Math.ceil(needRatingAppointments.length / take);
+        // Apply pagination to filtered results
+        const totalCount = unratedAppointments.length;
+        const paginatedAppointments = unratedAppointments.slice(skip, skip + take);
+
+        // Map to clean response format (no extra rating status since these are all unrated)
+        const responseAppointments = paginatedAppointments.map(a => ({
+            appointment_id: a.appointment_id,
+            appointment_status: a.appointment_status,
+            scheduled_date: a.scheduled_date,
+            completed_at: a.completed_at,
+            customer: a.customer,
+            serviceProvider: a.serviceProvider,
+            service: a.service,
+            needs_rating: true // All these appointments need rating
+        }));
+
+        const totalPages = Math.ceil(totalCount / take);
 
         res.status(200).json({
             success: true,
-            message: 'Appointments that can be rated retrieved successfully',
-            data: needRatingAppointments,
+            message: 'Unrated appointments retrieved successfully',
+            data: responseAppointments,
             pagination: {
                 current_page: parseInt(page),
                 total_pages: totalPages,
-                total_count: needRatingAppointments.length,
+                total_count: totalCount,
                 limit: take,
                 has_next: parseInt(page) < totalPages,
                 has_prev: parseInt(page) > 1

@@ -27,20 +27,43 @@ export const calculateWarrantyExpiry = (baseDate, warrantyDays) => {
  */
 export const findOrCreateConversation = async (customerId, providerId, warrantyExpires = null) => {
     try {
-        // First, try to find an existing active conversation
+        // First, try to find an existing conversation (including closed ones)
         let conversation = await prisma.conversation.findFirst({
             where: {
                 customer_id: customerId,
-                provider_id: providerId,
-                status: 'active'
+                provider_id: providerId
             }
         });
 
         if (conversation) {
+            // If conversation exists but is closed, reactivate it
+            if (conversation.status !== 'active') {
+                conversation = await prisma.conversation.update({
+                    where: { conversation_id: conversation.conversation_id },
+                    data: {
+                        status: 'active',
+                        warranty_expires: warrantyExpires,
+                        updated_at: new Date()
+                    }
+                });
+                console.log(`🔄 Reactivated conversation ${conversation.conversation_id}`);
+            } else {
+                // Update warranty expiry if provided and later than current
+                if (warrantyExpires && 
+                    (!conversation.warranty_expires || warrantyExpires > conversation.warranty_expires)) {
+                    conversation = await prisma.conversation.update({
+                        where: { conversation_id: conversation.conversation_id },
+                        data: {
+                            warranty_expires: warrantyExpires,
+                            updated_at: new Date()
+                        }
+                    });
+                }
+            }
             return conversation;
         }
 
-        // If no active conversation exists, create a new one
+        // If no conversation exists, create a new one
         conversation = await prisma.conversation.create({
             data: {
                 customer_id: customerId,
@@ -227,6 +250,7 @@ export const closeExpiredConversations = async () => {
  */
 export const getActiveWarrantyExpiry = async (customerId, providerId) => {
     try {
+        // First check if there's an existing conversation
         const conversation = await prisma.conversation.findFirst({
             where: {
                 customer_id: customerId,
@@ -238,7 +262,46 @@ export const getActiveWarrantyExpiry = async (customerId, providerId) => {
             }
         });
 
-        return conversation?.warranty_expires || null;
+        if (conversation?.warranty_expires) {
+            return conversation.warranty_expires;
+        }
+
+        // If no conversation or no warranty expiry, check the latest appointment
+        const appointment = await prisma.appointment.findFirst({
+            where: {
+                customer_id: customerId,
+                provider_id: providerId,
+                appointment_status: { not: 'cancelled' }
+            },
+            include: {
+                service: {
+                    select: { warranty: true }
+                }
+            },
+            orderBy: { created_at: 'desc' }
+        });
+
+        if (!appointment) {
+            return null;
+        }
+
+        // Calculate potential warranty expiry
+        const warrantyDays = appointment.warranty_days || appointment.service?.warranty || 0;
+        
+        if (warrantyDays > 0) {
+            // If appointment is finished/completed, use completion date
+            if (appointment.finished_at || appointment.completed_at) {
+                const baseDate = appointment.finished_at || appointment.completed_at;
+                return calculateWarrantyExpiry(baseDate, warrantyDays);
+            }
+            // For pre-completion appointments, return a future date based on scheduled date
+            else {
+                const baseDate = appointment.scheduled_date || appointment.created_at;
+                return calculateWarrantyExpiry(baseDate, warrantyDays);
+            }
+        }
+
+        return null;
     } catch (error) {
         console.error('Error getting active warranty expiry:', error);
         return null;
@@ -258,7 +321,9 @@ export const checkAppointmentStatus = async (customerId, providerId) => {
             where: {
                 customer_id: customerId,
                 provider_id: providerId,
-                appointment_status: { in: ['in-warranty', 'completed', 'finished'] }
+                appointment_status: { 
+                    not: 'cancelled' // Allow any status except cancelled
+                }
             },
             orderBy: { created_at: 'desc' },
             select: {
@@ -272,12 +337,20 @@ export const checkAppointmentStatus = async (customerId, providerId) => {
         });
 
         if (!appointment) {
-            return { hasAppointment: false, isCompleted: true, isExpired: true };
+            return { 
+                hasAppointment: false, 
+                isCompleted: true, 
+                isExpired: true,
+                canMessage: false
+            };
         }
 
         const now = new Date();
         let isExpired = false;
         let needsUpdate = false;
+        
+        // Allow messaging for non-cancelled and non-completed appointments
+        const canMessage = !['cancelled', 'completed'].includes(appointment.appointment_status);
 
         // Check if warranty has expired for in-warranty appointments
         if (appointment.appointment_status === 'in-warranty') {
@@ -330,31 +403,38 @@ export const checkAppointmentStatus = async (customerId, providerId) => {
             isCompleted: appointment.appointment_status === 'completed',
             isInWarranty: appointment.appointment_status === 'in-warranty' && !isExpired,
             isExpired: isExpired || appointment.appointment_status === 'completed',
-            warrantyExpiresAt: appointment.warranty_expires_at
+            warrantyExpiresAt: appointment.warranty_expires_at,
+            canMessage: canMessage // New field to indicate messaging availability
         };
     } catch (error) {
         console.error('Error checking appointment status:', error);
-        return { hasAppointment: false, isCompleted: true, isExpired: true };
+        return { 
+            hasAppointment: false, 
+            isCompleted: true, 
+            isExpired: true, 
+            canMessage: false 
+        };
     }
 };
 
 /**
- * Check if messaging is allowed based on warranty status
+ * Check if messaging is allowed based on appointment status
  * @param {number} customerId - Customer ID
  * @param {number} providerId - Provider ID
  * @returns {boolean} - True if messaging is allowed
  */
 export const isMessagingAllowed = async (customerId, providerId) => {
     try {
-        // First check appointment status
+        // Check appointment status
         const appointmentStatus = await checkAppointmentStatus(customerId, providerId);
         
         if (!appointmentStatus.hasAppointment) {
             return false;
         }
 
-        // Only allow messaging if appointment is in-warranty (not expired/completed)
-        return appointmentStatus.isInWarranty;
+        // Allow messaging for any appointment that is not cancelled or completed
+        // This includes: scheduled, on-the-way, in-progress, in-warranty, finished
+        return appointmentStatus.canMessage;
     } catch (error) {
         console.error('Error checking messaging allowance:', error);
         return false;

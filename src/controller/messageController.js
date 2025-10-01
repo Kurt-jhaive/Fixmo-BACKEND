@@ -129,14 +129,15 @@ class MessageController {
                     // Check the appointment status for this conversation
                     const appointmentStatus = await checkAppointmentStatus(conv.customer_id, conv.provider_id);
                     
-                    // If appointment is completed (not in warranty), close the conversation
-                    if (appointmentStatus.hasAppointment && appointmentStatus.isCompleted && !appointmentStatus.isInWarranty) {
+                    // If appointment is completed or cancelled, close the conversation
+                    if (appointmentStatus.hasAppointment && !appointmentStatus.canMessage) {
                         conversationsToClose.push(conv.conversation_id);
                     } else {
                         activeConversations.push({
                             ...conv,
                             appointment_status: appointmentStatus.appointmentStatus || 'unknown',
-                            is_warranty_active: appointmentStatus.isInWarranty || false
+                            is_warranty_active: appointmentStatus.isInWarranty || false,
+                            can_message: appointmentStatus.canMessage || false
                         });
                     }
                 } catch (error) {
@@ -145,7 +146,8 @@ class MessageController {
                     activeConversations.push({
                         ...conv,
                         appointment_status: 'unknown',
-                        is_warranty_active: conv.warranty_expires ? new Date() < new Date(conv.warranty_expires) : false
+                        is_warranty_active: conv.warranty_expires ? new Date() < new Date(conv.warranty_expires) : false,
+                        can_message: true // Default to true if we can't check status
                     });
                 }
             }
@@ -299,8 +301,9 @@ class MessageController {
                 });
             }
 
-            // If appointment is completed (not in warranty), close the conversation
-            if (appointmentStatus.isCompleted && !appointmentStatus.isInWarranty) {
+            // Check if messaging is allowed (any non-cancelled, non-completed appointment)
+            if (!appointmentStatus.canMessage) {
+                // If appointment is completed or cancelled, close the conversation
                 await prisma.conversation.update({
                     where: { conversation_id: parseInt(conversationId) },
                     data: { 
@@ -311,15 +314,7 @@ class MessageController {
 
                 return res.status(403).json({
                     success: false,
-                    message: 'This conversation has been closed - appointment is completed and warranty period has expired'
-                });
-            }
-
-            // Check if messaging is allowed based on warranty (in-warranty appointments only)
-            if (!appointmentStatus.isInWarranty) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'Messaging not available - appointment warranty period has expired or appointment is completed'
+                    message: 'This conversation has been closed - appointment is cancelled or completed'
                 });
             }
 
@@ -461,12 +456,12 @@ class MessageController {
                 });
             }
 
-            // Check if messaging is allowed (must have active warranty)
+            // Check if messaging is allowed (any non-cancelled, non-completed appointment)
             const messagingAllowed = await isMessagingAllowed(requestedCustomerId, requestedProviderId);
             if (!messagingAllowed) {
                 return res.status(403).json({
                     success: false,
-                    message: 'Cannot create conversation - no active warranty period found'
+                    message: 'Cannot create conversation - no valid appointment found or appointment is cancelled/completed'
                 });
             }
 
@@ -776,12 +771,12 @@ class MessageController {
                 });
             }
 
-            // Check if messaging is allowed based on warranty
+            // Check if messaging is allowed (any non-cancelled, non-completed appointment)
             const messagingAllowed = await isMessagingAllowed(conversation.customer_id, conversation.provider_id);
             if (!messagingAllowed) {
                 return res.status(403).json({
                     success: false,
-                    message: 'File upload not available - warranty period has expired'
+                    message: 'File upload not available - appointment is cancelled or completed'
                 });
             }
 
