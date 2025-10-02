@@ -1405,3 +1405,22 @@ export const sendAdminPasswordResetEmail = async (adminEmail, resetDetails) => {
     
     await transporter.sendMail(mailOptions);
 };
+
+/**
+ * Generic email sending function for custom use cases
+ * @param {Object} options - Email options
+ * @param {string} options.to - Recipient email address
+ * @param {string} options.subject - Email subject
+ * @param {string} options.html - HTML content of the email
+ * @param {string} [options.from] - Sender email (defaults to MAILER_USER)
+ */
+export const sendEmail = async ({ to, subject, html, from = process.env.MAILER_USER }) => {
+    const mailOptions = {
+        from: from,
+        to: to,
+        subject: subject,
+        html: html
+    };
+    
+    await transporter.sendMail(mailOptions);
+};

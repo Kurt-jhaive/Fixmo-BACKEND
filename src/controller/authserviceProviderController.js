@@ -280,9 +280,24 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
         // Send registration success email
         await sendRegistrationSuccessEmail(provider_email, provider_first_name, provider_userName);
         
+        // Generate JWT token for immediate login after registration
+        const token = jwt.sign(
+            { 
+                userId: newProvider.provider_id,
+                id: newProvider.provider_id,
+                providerId: newProvider.provider_id,
+                userType: 'provider',
+                email: newProvider.provider_email
+            }, 
+            process.env.JWT_SECRET || 'your-secret-key', 
+            { expiresIn: '30d' } // 30 days for mobile app
+        );
+        
         res.status(201).json({ 
-            message: 'Service provider registered successfully', 
+            message: 'Service provider registered successfully',
+            token,
             providerId: newProvider.provider_id,
+            providerUserName: newProvider.provider_userName,
             provider_profile_photo: provider_profile_photo,
             provider_valid_id: provider_valid_id,
             certificates: createdCertificates,
@@ -317,7 +332,7 @@ export const providerLogin = async (req, res) => {
                 email: provider.provider_email
             }, 
             process.env.JWT_SECRET || 'your-secret-key', 
-            { expiresIn: '24h' }
+            { expiresIn: '30d' } // 30 days for mobile app
         );
 
         // Create session

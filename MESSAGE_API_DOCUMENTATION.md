@@ -67,7 +67,7 @@ Authorization: Bearer <your_jwt_token>
 Retrieve all conversations for the authenticated user with automatic warranty status checking.
 
 ```http
-GET /api/messages/conversations?page=1&limit=20&userType=customer
+GET /api/messages/conversations?page=1&limit=20&userType=customer&includeCompleted=false
 Authorization: Bearer <token>
 ```
 
@@ -75,6 +75,9 @@ Authorization: Bearer <token>
 - `page` (optional): Page number (default: 1)
 - `limit` (optional): Items per page (default: 20)
 - `userType` (optional): 'customer' or 'provider' (usually detected from JWT)
+- `includeCompleted` (optional): Include closed/archived conversations (default: false)
+  - Set to `true` to include all conversations regardless of status
+  - Set to `false` or omit to only show active conversations
 
 **Response:**
 ```json
@@ -783,6 +786,67 @@ interface ProviderProfile {
 
 ## Frontend Integration Examples
 
+### Fetching Active vs All Conversations
+
+The `includeCompleted` parameter allows you to control whether to show only active conversations or include closed/archived ones:
+
+```javascript
+// Get only active conversations (default behavior)
+const activeConversations = await fetch(
+  '/api/messages/conversations?userType=customer',
+  { headers: { 'Authorization': `Bearer ${token}` } }
+);
+
+// Get ALL conversations including closed/archived ones
+const allConversations = await fetch(
+  '/api/messages/conversations?userType=customer&includeCompleted=true',
+  { headers: { 'Authorization': `Bearer ${token}` } }
+);
+```
+
+**React Native Example:**
+```jsx
+const ConversationsScreen = () => {
+  const [conversations, setConversations] = useState([]);
+  const [showCompleted, setShowCompleted] = useState(false);
+
+  const fetchConversations = async () => {
+    try {
+      const response = await fetch(
+        `${API_URL}/api/messages/conversations?userType=customer&includeCompleted=${showCompleted}`,
+        {
+          headers: { 'Authorization': `Bearer ${userToken}` }
+        }
+      );
+      const data = await response.json();
+      if (data.success) {
+        setConversations(data.conversations);
+      }
+    } catch (error) {
+      console.error('Error fetching conversations:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchConversations();
+  }, [showCompleted]);
+
+  return (
+    <View>
+      <Switch
+        label="Show Completed Conversations"
+        value={showCompleted}
+        onValueChange={setShowCompleted}
+      />
+      <FlatList
+        data={conversations}
+        renderItem={({ item }) => <ConversationItem conversation={item} />}
+      />
+    </View>
+  );
+};
+```
+
 ### React Chat Component
 ```jsx
 import React, { useState, useEffect, useRef } from 'react';
@@ -1338,9 +1402,9 @@ class MessageAPI {
     this.wsUrl = wsUrl;
   }
 
-  async getConversations(userType, page = 1, limit = 20) {
+  async getConversations(userType, page = 1, limit = 20, includeCompleted = false) {
     const response = await fetch(
-      `${this.baseUrl}/messages/conversations?userType=${userType}&page=${page}&limit=${limit}`,
+      `${this.baseUrl}/messages/conversations?userType=${userType}&page=${page}&limit=${limit}&includeCompleted=${includeCompleted}`,
       {
         headers: { 'Authorization': `Bearer ${this.token}` }
       }

@@ -65,8 +65,15 @@ class MessageWebSocketServer {
                     await this.joinConversation(socket, data);
                 } catch (error) {
                     console.error('Join conversation error:', error);
+                    
+                    // Determine error type for better frontend handling
+                    const isClosed = error.message.includes('closed');
+                    const isExpired = error.message.includes('expired');
+                    
                     socket.emit('join_conversation_failed', { 
-                        error: error.message 
+                        error: error.message,
+                        conversationId: data.conversationId,
+                        reason: isClosed ? 'closed' : (isExpired ? 'expired' : 'unknown')
                     });
                 }
             });
@@ -265,9 +272,13 @@ class MessageWebSocketServer {
                 throw new Error('Conversation not found or access denied');
             }
 
-            // Check if conversation is within warranty period (using warranty-based access)
+            // Check if conversation is closed or not active
+            if (conversation.status === 'closed') {
+                throw new Error('This conversation has been closed and is no longer available for messaging');
+            }
+
             if (conversation.status !== 'active') {
-                throw new Error('Conversation is not active');
+                throw new Error(`Conversation is ${conversation.status} and not available for messaging`);
             }
 
             // Check if warranty has expired

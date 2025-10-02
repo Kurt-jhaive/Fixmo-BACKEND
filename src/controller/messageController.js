@@ -52,7 +52,7 @@ class MessageController {
         try {
             const userId = req.userId;
             const userType = req.userType || (req.body.userType || req.query.userType); // 'customer' or 'provider'
-            const { page = 1, limit = 20 } = req.query;
+            const { page = 1, limit = 20, includeCompleted } = req.query;
 
             if (!userType) {
                 return res.status(400).json({ 
@@ -66,15 +66,18 @@ class MessageController {
                 });
             }
 
+            // Build where clause based on user type
             const whereClause = userType === 'customer' 
                 ? { customer_id: userId }
                 : { provider_id: userId };
 
+            // Only filter out closed/archived conversations if includeCompleted is not true
+            if (includeCompleted !== 'true' && includeCompleted !== true) {
+                whereClause.status = { not: 'closed' };
+            }
+
             const conversations = await prisma.conversation.findMany({
-                where: {
-                    ...whereClause,
-                    status: { not: 'closed' }
-                },
+                where: whereClause,
                 include: {
                     customer: {
                         select: {
@@ -122,18 +125,26 @@ class MessageController {
 
             // Check and update conversation statuses based on appointment status
             const conversationsToClose = [];
-            const activeConversations = [];
+            const allConversations = [];
 
             for (const conv of conversations) {
                 try {
                     // Check the appointment status for this conversation
                     const appointmentStatus = await checkAppointmentStatus(conv.customer_id, conv.provider_id);
                     
-                    // If appointment is completed or cancelled, close the conversation
+                    // If appointment is completed or cancelled, mark for closing
                     if (appointmentStatus.hasAppointment && !appointmentStatus.canMessage) {
                         conversationsToClose.push(conv.conversation_id);
+                        
+                        // Include in results if includeCompleted is true
+                        allConversations.push({
+                            ...conv,
+                            appointment_status: appointmentStatus.appointmentStatus || 'completed',
+                            is_warranty_active: appointmentStatus.isInWarranty || false,
+                            can_message: appointmentStatus.canMessage || false
+                        });
                     } else {
-                        activeConversations.push({
+                        allConversations.push({
                             ...conv,
                             appointment_status: appointmentStatus.appointmentStatus || 'unknown',
                             is_warranty_active: appointmentStatus.isInWarranty || false,
@@ -142,8 +153,8 @@ class MessageController {
                     }
                 } catch (error) {
                     console.error(`Error checking appointment status for conversation ${conv.conversation_id}:`, error);
-                    // If we can't check the status, keep the conversation active for safety
-                    activeConversations.push({
+                    // If we can't check the status, keep the conversation
+                    allConversations.push({
                         ...conv,
                         appointment_status: 'unknown',
                         is_warranty_active: conv.warranty_expires ? new Date() < new Date(conv.warranty_expires) : false,
@@ -166,8 +177,17 @@ class MessageController {
                 console.log(`🔒 Auto-closed ${conversationsToClose.length} conversations for completed appointments`);
             }
 
-            // Format active conversations
-            const formattedConversations = activeConversations.map(conv => ({
+            // Filter conversations based on includeCompleted parameter
+            let finalConversations = allConversations;
+            if (includeCompleted !== 'true' && includeCompleted !== true) {
+                // Only show conversations that weren't marked to close
+                finalConversations = allConversations.filter(conv => 
+                    !conversationsToClose.includes(conv.conversation_id)
+                );
+            }
+
+            // Format conversations
+            const formattedConversations = finalConversations.map(conv => ({
                 conversation_id: conv.conversation_id,
                 participant: userType === 'customer' ? conv.provider : conv.customer,
                 last_message: conv.messages[0] || null,

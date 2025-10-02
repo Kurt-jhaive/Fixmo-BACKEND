@@ -58,7 +58,7 @@ export const login = async (req, res) => {
             userId: user.user_id,
             userType: 'customer',
             email: user.email
-        }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        }, process.env.JWT_SECRET, { expiresIn: '30d' }); // 30 days for mobile app
         
         res.status(200).json({
             message: 'Login successful',
@@ -216,9 +216,18 @@ export const verifyOTPAndRegister = async (req, res) => {
     // Delete the used OTP
     await cleanupOTP(email);
 
+    // Generate JWT token for immediate login after registration
+    const token = jwt.sign({ 
+      userId: newUser.user_id,
+      userType: 'customer',
+      email: newUser.email
+    }, process.env.JWT_SECRET, { expiresIn: '30d' }); // 30 days for mobile app
+
     res.status(201).json({
       message: 'User registered successfully',
+      token,
       userId: newUser.user_id,
+      userName: newUser.userName,
       profile_photo: profilePhotoUrl,
       valid_id: validIdUrl
     });
