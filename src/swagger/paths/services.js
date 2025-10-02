@@ -63,11 +63,23 @@
  *                       service_description:
  *                         type: string
  *                         example: Professional kitchen plumbing repair services
- *                       service_picture:
- *                         type: string
- *                         nullable: true
- *                         example: /uploads/service-images/service-123.jpg
- *                         description: Validated path or null for fallback
+ *                       service_photos:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             id:
+ *                               type: integer
+ *                               example: 1
+ *                             imageUrl:
+ *                               type: string
+ *                               example: "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/service-photos/service_123_0.jpg"
+ *                             uploadedAt:
+ *                               type: string
+ *                               format: date-time
+ *                               example: "2025-01-15T10:30:00.000Z"
+ *                         example: []
+ *                         description: Array of service photos (empty array if no photos)
  *                       price:
  *                         type: number
  *                         format: float
@@ -141,7 +153,8 @@
  *               - service_title
  *               - service_description
  *               - service_startingprice
- *               - category_id
+ *               - service_photos
+ *               - certificate_id
  *             properties:
  *               service_title:
  *                 type: string
@@ -160,10 +173,18 @@
  *                 type: integer
  *                 example: 1
  *                 description: Service category ID
- *               service_picture:
- *                 type: string
- *                 format: binary
- *                 description: Service image (JPG, PNG - processed by middleware)
+ *               service_photos:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *                 maxItems: 5
+ *                 description: Service images (up to 5 photos, JPG/PNG format)
+ *               certificate_id:
+ *                 type: integer
+ *                 example: 1
+ *                 description: Certificate ID associated with the service
+ *
  *     responses:
  *       201:
  *         description: Service created successfully

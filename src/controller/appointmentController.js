@@ -1,4 +1,6 @@
 import { PrismaClient } from '@prisma/client';
+import { handleAppointmentWarranty } from '../services/conversationWarrantyService.js';
+import { uploadToCloudinary } from '../services/cloudinaryService.js';
 
 const prisma = new PrismaClient();
 
@@ -46,7 +48,7 @@ export const getAllAppointments = async (req, res) => {
         }
 
         // Get appointments with pagination
-        const [appointments, totalCount] = await Promise.all([
+        const [appointmentsRaw, totalCount] = await Promise.all([
             prisma.appointment.findMany({
                 where: whereClause,
                 include: {
@@ -75,12 +77,19 @@ export const getAllAppointments = async (req, res) => {
                         select: {
                             rating_value: true,
                             rating_comment: true,
+                            rated_by: true,
                             user: {
                                 select: {
                                     first_name: true,
                                     last_name: true
                                 }
                             }
+                        }
+                    },
+                    service: {
+                        select: {
+                            service_title: true,
+                            service_startingprice: true
                         }
                     }
                 },
@@ -92,6 +101,36 @@ export const getAllAppointments = async (req, res) => {
             }),
             prisma.appointment.count({ where: whereClause })
         ]);
+
+        const now = new Date();
+        const appointments = appointmentsRaw.map(a => {
+            let days_left = null;
+            if (a.warranty_expires_at) {
+                const diffMs = a.warranty_expires_at.getTime() - now.getTime();
+                days_left = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+            }
+            
+            // Enhanced rating detection
+            const customer_rating = a.appointment_rating?.find(r => r.rated_by === 'customer');
+            const provider_rating = a.appointment_rating?.find(r => r.rated_by === 'provider');
+            
+            const is_rated_by_customer = !!customer_rating;
+            const is_rated_by_provider = !!provider_rating;
+            const is_rated = is_rated_by_customer; // Main flag for customer rating (required)
+            const needs_rating = a.appointment_status === 'completed' && !is_rated_by_customer;
+            
+            // Rating status object for detailed frontend control
+            const rating_status = {
+                is_rated,
+                is_rated_by_customer,
+                is_rated_by_provider,
+                needs_rating,
+                customer_rating_value: customer_rating?.rating_value || null,
+                provider_rating_value: provider_rating?.rating_value || null
+            };
+            
+            return { ...a, days_left, needs_rating, is_rated, rating_status };
+        });
 
         const totalPages = Math.ceil(totalCount / take);
 
@@ -123,9 +162,25 @@ export const getAppointmentById = async (req, res) => {
     try {
         const { appointmentId } = req.params;
 
+        // Validate appointmentId parameter
+        if (!appointmentId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Appointment ID is required'
+            });
+        }
+
+        const parsedAppointmentId = parseInt(appointmentId);
+        if (isNaN(parsedAppointmentId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid appointment ID format'
+            });
+        }
+
         const appointment = await prisma.appointment.findUnique({
             where: {
-                appointment_id: parseInt(appointmentId)
+                appointment_id: parsedAppointmentId
             },
             include: {
                 customer: {
@@ -160,6 +215,12 @@ export const getAppointmentById = async (req, res) => {
                             }
                         }
                     }
+                },
+                service: {
+                    select: {
+                        service_title: true,
+                        service_startingprice: true
+                    }
                 }
             }
         });
@@ -171,9 +232,35 @@ export const getAppointmentById = async (req, res) => {
             });
         }
 
+        const now2 = new Date();
+        let days_left = null;
+        if (appointment.warranty_expires_at) {
+            const diffMs = appointment.warranty_expires_at.getTime() - now2.getTime();
+            days_left = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+        }
+        
+        // Enhanced rating detection for single appointment
+        const customer_rating = appointment.appointment_rating?.find(r => r.rated_by === 'customer');
+        const provider_rating = appointment.appointment_rating?.find(r => r.rated_by === 'provider');
+        
+        const is_rated_by_customer = !!customer_rating;
+        const is_rated_by_provider = !!provider_rating;
+        const is_rated = is_rated_by_customer; // Main flag for customer rating (required)
+        const needs_rating = appointment.appointment_status === 'completed' && !is_rated_by_customer;
+        
+        // Rating status object for detailed frontend control
+        const rating_status = {
+            is_rated,
+            is_rated_by_customer,
+            is_rated_by_provider,
+            needs_rating,
+            customer_rating_value: customer_rating?.rating_value || null,
+            provider_rating_value: provider_rating?.rating_value || null
+        };
+
         res.status(200).json({
             success: true,
-            data: appointment
+            data: { ...appointment, days_left, needs_rating, is_rated, rating_status }
         });
 
     } catch (error) {
@@ -193,16 +280,18 @@ export const createAppointment = async (req, res) => {
             customer_id,
             provider_id,
             scheduled_date,
-            appointment_status = 'pending',
+            appointment_status = 'scheduled',
             final_price,
-            repairDescription
+            repairDescription,
+            availability_id,
+            service_id
         } = req.body;
 
         // Validate required fields
-        if (!customer_id || !provider_id || !scheduled_date) {
+        if (!customer_id || !provider_id || !scheduled_date || !availability_id || !service_id) {
             return res.status(400).json({
                 success: false,
-                message: 'Customer ID, Provider ID, and scheduled date are required'
+                message: 'Customer ID, Provider ID, scheduled date, availability ID, and service ID are required'
             });
         }
 
@@ -245,7 +334,7 @@ export const createAppointment = async (req, res) => {
                 provider_id: parseInt(provider_id),
                 scheduled_date: scheduledDateTime,
                 appointment_status: {
-                    in: ['pending', 'confirmed', 'in-progress']
+                    in: ['scheduled', 'on-the-way', 'in-progress']
                 }
             }
         });
@@ -257,6 +346,16 @@ export const createAppointment = async (req, res) => {
             });
         }
 
+        // Load service to capture warranty_days
+        const service = await prisma.serviceListing.findUnique({
+            where: { service_id: parseInt(service_id) },
+            select: { service_id: true, service_title: true, service_startingprice: true, warranty: true }
+        });
+
+        if (!service) {
+            return res.status(404).json({ success: false, message: 'Service listing not found' });
+        }
+
         // Create appointment
         const appointment = await prisma.appointment.create({
             data: {
@@ -265,7 +364,10 @@ export const createAppointment = async (req, res) => {
                 scheduled_date: scheduledDateTime,
                 appointment_status,
                 final_price: final_price ? parseFloat(final_price) : null,
-                repairDescription: repairDescription || null
+                repairDescription: repairDescription || null,
+                availability_id: parseInt(availability_id),
+                service_id: parseInt(service_id),
+                warranty_days: service.warranty ?? null
             },
             include: {
                 customer: {
@@ -285,9 +387,54 @@ export const createAppointment = async (req, res) => {
                         provider_email: true,
                         provider_phone_number: true
                     }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true,
+                        warranty: true
+                    }
                 }
             }
         });
+
+        // Handle warranty-based conversation creation/extension
+        try {
+            await handleAppointmentWarranty(appointment, 'booked');
+            console.log('✅ Conversation warranty handling completed for booking');
+        } catch (warrantyError) {
+            console.error('❌ Error handling appointment warranty:', warrantyError);
+            // Don't fail the appointment creation if warranty handling fails
+        }
+
+        // Send email notification for scheduled appointment
+        try {
+            const { sendBookingConfirmationToCustomer, sendBookingConfirmationToProvider } = await import('../services/mailer.js');
+            
+            // Format booking details for email
+            const bookingDetails = {
+                customerName: `${appointment.customer.first_name} ${appointment.customer.last_name}`,
+                customerPhone: appointment.customer.phone_number,
+                customerEmail: appointment.customer.email,
+                serviceTitle: appointment.service?.service_title || 'Service',
+                providerName: `${appointment.serviceProvider.provider_first_name} ${appointment.serviceProvider.provider_last_name}`,
+                providerPhone: appointment.serviceProvider.provider_phone_number,
+                providerEmail: appointment.serviceProvider.provider_email,
+                scheduledDate: appointment.scheduled_date,
+                appointmentId: appointment.appointment_id,
+                startingPrice: appointment.service?.service_startingprice || 0,
+                repairDescription: appointment.repairDescription
+            };
+            console.log('📧 BookingDetails (createAppointment):', bookingDetails);
+            
+            await sendBookingConfirmationToCustomer(appointment.customer.email, bookingDetails);
+            await sendBookingConfirmationToProvider(appointment.serviceProvider.provider_email, bookingDetails);
+            console.log('✅ Booking confirmation emails sent successfully');
+        } catch (emailError) {
+            console.error('❌ Error sending booking confirmation emails:', emailError);
+            // Don't fail the appointment creation if email fails
+        }
 
         res.status(201).json({
             success: true,
@@ -347,7 +494,7 @@ export const updateAppointment = async (req, res) => {
                         provider_id: existingAppointment.provider_id,
                         scheduled_date: scheduledDateTime,
                         appointment_status: {
-                            in: ['pending', 'confirmed', 'in-progress']
+                            in: ['scheduled', 'on-the-way', 'in-progress']
                         },
                         appointment_id: {
                             not: parseInt(appointmentId)
@@ -399,6 +546,13 @@ export const updateAppointment = async (req, res) => {
                         provider_last_name: true,
                         provider_email: true,
                         provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
                     }
                 }
             }
@@ -481,8 +635,8 @@ export const updateAppointmentStatus = async (req, res) => {
         }
 
         // Validate status values
-        const validStatuses = ['pending', 'approved', 'confirmed', 'in-progress', 'finished', 'completed', 'cancelled', 'no-show'];
-        if (!validStatuses.includes(status)) {
+    const validStatuses = ['scheduled', 'on-the-way', 'in-progress', 'in-warranty', 'finished', 'completed', 'cancelled'];
+        if (!validStatuses.includes(status.toLowerCase())) {
             return res.status(400).json({
                 success: false,
                 message: `Invalid status. Valid statuses are: ${validStatuses.join(', ')}`
@@ -501,25 +655,148 @@ export const updateAppointmentStatus = async (req, res) => {
             });
         }
 
-        // Update appointment status
+        // Compute additional fields for certain transitions
+        const dataUpdate = { appointment_status: status };
+
+        if (status === 'finished') {
+            dataUpdate.finished_at = new Date();
+            // When work is finished, start the warranty window (enters in-warranty)
+            dataUpdate.appointment_status = 'in-warranty';
+            
+            // Handle warranty resumption from paused state (backjob scenario)
+            if (existingAppointment.warranty_paused_at && existingAppointment.warranty_remaining_days !== null) {
+                // Resume warranty from paused state - use remaining days from when it was paused
+                const expires = new Date();
+                expires.setDate(expires.getDate() + existingAppointment.warranty_remaining_days);
+                dataUpdate.warranty_expires_at = expires;
+                // Clear pause fields
+                dataUpdate.warranty_paused_at = null;
+                dataUpdate.warranty_remaining_days = null;
+            } else {
+                // Normal warranty calculation for first-time completion
+                const warrantyDays = existingAppointment.warranty_days;
+                if (warrantyDays && Number.isInteger(warrantyDays)) {
+                    const expires = new Date();
+                    expires.setDate(expires.getDate() + warrantyDays);
+                    dataUpdate.warranty_expires_at = expires;
+                }
+            }
+        }
+
+        if (status === 'completed') {
+            dataUpdate.completed_at = new Date();
+            // Expire warranty immediately when appointment is marked completed
+            dataUpdate.warranty_expires_at = new Date();
+        }
+
+        if (status === 'in-warranty') {
+            if (!existingAppointment.finished_at) {
+                dataUpdate.finished_at = new Date();
+            }
+            
+            // Handle warranty resumption from paused state (backjob scenario)
+            if (existingAppointment.warranty_paused_at && existingAppointment.warranty_remaining_days !== null) {
+                // Resume warranty from paused state - use remaining days from when it was paused
+                const base = dataUpdate.finished_at ? new Date(dataUpdate.finished_at) : new Date();
+                const expires = new Date(base);
+                expires.setDate(expires.getDate() + existingAppointment.warranty_remaining_days);
+                dataUpdate.warranty_expires_at = expires;
+                // Clear pause fields
+                dataUpdate.warranty_paused_at = null;
+                dataUpdate.warranty_remaining_days = null;
+            } else {
+                // Normal warranty calculation for first-time completion
+                const warrantyDays = existingAppointment.warranty_days;
+                if (warrantyDays && Number.isInteger(warrantyDays)) {
+                    const base = dataUpdate.finished_at ? new Date(dataUpdate.finished_at) : (existingAppointment.finished_at ? new Date(existingAppointment.finished_at) : new Date());
+                    const expires = new Date(base);
+                    expires.setDate(expires.getDate() + warrantyDays);
+                    dataUpdate.warranty_expires_at = expires;
+                }
+            }
+        }
+
+        // Update appointment status and timing fields
         const updatedAppointment = await prisma.appointment.update({
             where: { appointment_id: parseInt(appointmentId) },
-            data: { appointment_status: status },
+            data: dataUpdate,
             include: {
                 customer: {
                     select: {
+                        user_id: true,
                         first_name: true,
-                        last_name: true
+                        last_name: true,
+                        email: true,
+                        phone_number: true
                     }
                 },
                 serviceProvider: {
                     select: {
+                        provider_id: true,
                         provider_first_name: true,
-                        provider_last_name: true
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
                     }
                 }
             }
         });
+
+        // Handle warranty-based conversation updates for finished/completed status
+        try {
+            if (status === 'finished' || status === 'completed' || status === 'in-warranty') {
+                const eventType = status === 'completed' ? 'completed' : 'finished';
+                await handleAppointmentWarranty(updatedAppointment, eventType);
+                console.log(`✅ Conversation warranty handling completed for ${status}`);
+            }
+        } catch (warrantyError) {
+            console.error('❌ Error handling appointment warranty:', warrantyError);
+            // Don't fail the status update if warranty handling fails
+        }
+
+        // Send completion email notifications when status is set to completed
+        if (status === 'completed') {
+            try {
+                const { sendBookingCompletionToCustomer, sendBookingCompletionToProvider } = await import('../services/mailer.js');
+                
+                // Format completion details for email
+                const completionDetails = {
+                    customerName: `${updatedAppointment.customer.first_name} ${updatedAppointment.customer.last_name}`,
+                    customerPhone: updatedAppointment.customer.phone_number,
+                    customerEmail: updatedAppointment.customer.email,
+                    serviceTitle: updatedAppointment.service?.service_title || 'Service',
+                    providerName: `${updatedAppointment.serviceProvider.provider_first_name} ${updatedAppointment.serviceProvider.provider_last_name}`,
+                    providerPhone: updatedAppointment.serviceProvider.provider_phone_number,
+                    providerEmail: updatedAppointment.serviceProvider.provider_email,
+                    scheduledDate: updatedAppointment.scheduled_date,
+                    completedDate: updatedAppointment.completed_at || new Date(),
+                    appointmentId: updatedAppointment.appointment_id,
+                    startingPrice: updatedAppointment.service?.service_startingprice || 0,
+                    repairDescription: updatedAppointment.repairDescription
+                };
+
+                console.log('📧 Sending completion emails for appointment:', updatedAppointment.appointment_id);
+                
+                // Send email to customer
+                await sendBookingCompletionToCustomer(updatedAppointment.customer.email, completionDetails);
+                console.log('✅ Completion email sent to customer:', updatedAppointment.customer.email);
+                
+                // Send email to provider
+                await sendBookingCompletionToProvider(updatedAppointment.serviceProvider.provider_email, completionDetails);
+                console.log('✅ Completion email sent to provider:', updatedAppointment.serviceProvider.provider_email);
+                
+            } catch (emailError) {
+                console.error('❌ Error sending completion emails:', emailError);
+                // Don't fail the status update if email fails
+            }
+        }
 
         res.status(200).json({
             success: true,
@@ -537,7 +814,7 @@ export const updateAppointmentStatus = async (req, res) => {
     }
 };
 
-// Cancel appointment with reason
+// Cancel appointment with reason (User cancellation with email notifications)
 export const cancelAppointment = async (req, res) => {
     try {
         const { appointmentId } = req.params;
@@ -552,7 +829,34 @@ export const cancelAppointment = async (req, res) => {
 
         // Check if appointment exists
         const existingAppointment = await prisma.appointment.findUnique({
-            where: { appointment_id: parseInt(appointmentId) }
+            where: { appointment_id: parseInt(appointmentId) },
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        phone_number: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
+                }
+            }
         });
 
         if (!existingAppointment) {
@@ -572,23 +876,71 @@ export const cancelAppointment = async (req, res) => {
             include: {
                 customer: {
                     select: {
+                        user_id: true,
                         first_name: true,
                         last_name: true,
-                        email: true
+                        email: true,
+                        phone_number: true
                     }
                 },
                 serviceProvider: {
                     select: {
+                        provider_id: true,
                         provider_first_name: true,
-                        provider_last_name: true
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
                     }
                 }
             }
         });
 
+        // Send cancellation email notifications
+        try {
+            const { sendBookingCancellationToCustomer, sendBookingCancellationEmail } = await import('../services/mailer.js');
+            
+            // Format cancellation details for email
+            const cancellationDetails = {
+                customerName: `${updatedAppointment.customer.first_name} ${updatedAppointment.customer.last_name}`,
+                customerPhone: updatedAppointment.customer.phone_number,
+                customerEmail: updatedAppointment.customer.email,
+                serviceTitle: updatedAppointment.service?.service_title || 'Service',
+                providerName: `${updatedAppointment.serviceProvider.provider_first_name} ${updatedAppointment.serviceProvider.provider_last_name}`,
+                providerPhone: updatedAppointment.serviceProvider.provider_phone_number,
+                providerEmail: updatedAppointment.serviceProvider.provider_email,
+                scheduledDate: updatedAppointment.scheduled_date,
+                appointmentId: updatedAppointment.appointment_id,
+                startingPrice: updatedAppointment.service?.service_startingprice || 0,
+                repairDescription: updatedAppointment.repairDescription,
+                cancellationReason: cancellation_reason,
+                cancelledBy: 'customer' // or determine based on user type
+            };
+
+            console.log('📧 Sending cancellation emails for appointment:', updatedAppointment.appointment_id);
+            
+            // Send email to customer
+            await sendBookingCancellationToCustomer(updatedAppointment.customer.email, cancellationDetails);
+            console.log('✅ Cancellation email sent to customer:', updatedAppointment.customer.email);
+            
+            // Send email to provider
+            await sendBookingCancellationEmail(updatedAppointment.serviceProvider.provider_email, cancellationDetails);
+            console.log('✅ Cancellation email sent to provider:', updatedAppointment.serviceProvider.provider_email);
+            
+        } catch (emailError) {
+            console.error('❌ Error sending cancellation emails:', emailError);
+            // Don't fail the cancellation if email fails
+        }
+
         res.status(200).json({
             success: true,
-            message: 'Appointment cancelled successfully',
+            message: 'Appointment cancelled successfully and notifications sent',
             data: updatedAppointment
         });
 
@@ -597,6 +949,158 @@ export const cancelAppointment = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error cancelling appointment',
+            error: error.message
+        });
+    }
+};
+
+// Admin cancel appointment with enhanced email notifications
+export const adminCancelAppointment = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        const { cancellation_reason, admin_notes } = req.body;
+
+        if (!cancellation_reason) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cancellation reason is required'
+            });
+        }
+
+        // Check if appointment exists
+        const existingAppointment = await prisma.appointment.findUnique({
+            where: { appointment_id: parseInt(appointmentId) },
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        phone_number: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
+                }
+            }
+        });
+
+        if (!existingAppointment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Appointment not found'
+            });
+        }
+
+        // Prevent cancelling already cancelled appointments
+        if (existingAppointment.appointment_status === 'cancelled') {
+            return res.status(400).json({
+                success: false,
+                message: 'Appointment is already cancelled'
+            });
+        }
+
+        // Update appointment status to cancelled with admin details
+        const updatedAppointment = await prisma.appointment.update({
+            where: { appointment_id: parseInt(appointmentId) },
+            data: { 
+                appointment_status: 'cancelled',
+                cancellation_reason: cancellation_reason
+            },
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        phone_number: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
+                }
+            }
+        });
+
+        // Send enhanced cancellation email notifications for admin cancellations
+        try {
+            const { sendBookingCancellationToCustomer, sendBookingCancellationEmail } = await import('../services/mailer.js');
+            
+            // Format cancellation details for email with admin context
+            const cancellationDetails = {
+                customerName: `${updatedAppointment.customer.first_name} ${updatedAppointment.customer.last_name}`,
+                customerPhone: updatedAppointment.customer.phone_number,
+                customerEmail: updatedAppointment.customer.email,
+                serviceTitle: updatedAppointment.service?.service_title || 'Service',
+                providerName: `${updatedAppointment.serviceProvider.provider_first_name} ${updatedAppointment.serviceProvider.provider_last_name}`,
+                providerPhone: updatedAppointment.serviceProvider.provider_phone_number,
+                providerEmail: updatedAppointment.serviceProvider.provider_email,
+                scheduledDate: updatedAppointment.scheduled_date,
+                appointmentId: updatedAppointment.appointment_id,
+                startingPrice: updatedAppointment.service?.service_startingprice || 0,
+                repairDescription: updatedAppointment.repairDescription,
+                cancellationReason: `${cancellation_reason}${admin_notes ? ` | Admin Notes: ${admin_notes}` : ''}`,
+                cancelledBy: 'admin'
+            };
+
+            console.log('📧 Sending admin cancellation emails for appointment:', updatedAppointment.appointment_id);
+            
+            // Send email to customer with admin cancellation context
+            await sendBookingCancellationToCustomer(updatedAppointment.customer.email, cancellationDetails);
+            console.log('✅ Admin cancellation email sent to customer:', updatedAppointment.customer.email);
+            
+            // Send email to provider with admin cancellation context
+            await sendBookingCancellationEmail(updatedAppointment.serviceProvider.provider_email, cancellationDetails);
+            console.log('✅ Admin cancellation email sent to provider:', updatedAppointment.serviceProvider.provider_email);
+            
+        } catch (emailError) {
+            console.error('❌ Error sending admin cancellation emails:', emailError);
+            // Don't fail the cancellation if email fails
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Appointment cancelled by admin successfully and notifications sent',
+            data: {
+                ...updatedAppointment,
+                cancellation_type: 'admin',
+                admin_notes: admin_notes
+            }
+        });
+
+    } catch (error) {
+        console.error('Error in admin appointment cancellation:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error cancelling appointment by admin',
             error: error.message
         });
     }
@@ -716,7 +1220,7 @@ export const rescheduleAppointment = async (req, res) => {
                 provider_id: existingAppointment.provider_id,
                 scheduled_date: newScheduledDateTime,
                 appointment_status: {
-                    in: ['pending', 'confirmed', 'in-progress']
+                    in: ['scheduled', 'on-the-way', 'in-progress']
                 },
                 appointment_id: {
                     not: parseInt(appointmentId)
@@ -736,7 +1240,7 @@ export const rescheduleAppointment = async (req, res) => {
             where: { appointment_id: parseInt(appointmentId) },
             data: {
                 scheduled_date: newScheduledDateTime,
-                appointment_status: 'pending' // Reset to pending when rescheduled
+                appointment_status: 'scheduled' // Reset to scheduled when rescheduled
             },
             include: {
                 customer: {
@@ -755,6 +1259,13 @@ export const rescheduleAppointment = async (req, res) => {
                         provider_last_name: true,
                         provider_email: true,
                         provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
                     }
                 }
             }
@@ -810,7 +1321,7 @@ export const getProviderAppointments = async (req, res) => {
             }
         }
 
-        const [appointments, totalCount] = await Promise.all([
+        const [appointmentsRaw, totalCount] = await Promise.all([
             prisma.appointment.findMany({
                 where: whereClause,
                 include: {
@@ -825,11 +1336,37 @@ export const getProviderAppointments = async (req, res) => {
                             profile_photo: true
                         }
                     },
+                    service: {
+                        select: {
+                            service_id: true,
+                            service_title: true,
+                            service_startingprice: true
+                        }
+                    },
                     appointment_rating: {
                         select: {
                             rating_value: true,
-                            rating_comment: true
+                            rating_comment: true,
+                            rated_by: true
                         }
+                    },
+                    backjob_applications: {
+                        where: {
+                            status: {
+                                notIn: ['cancelled-by-admin', 'cancelled-by-user', 'cancelled-by-customer']
+                            }
+                        },
+                        select: {
+                            backjob_id: true,
+                            reason: true,
+                            status: true,
+                            created_at: true,
+                            customer_cancellation_reason: true
+                        },
+                        orderBy: {
+                            created_at: 'desc'
+                        },
+                        take: 1
                     }
                 },
                 orderBy: {
@@ -840,6 +1377,53 @@ export const getProviderAppointments = async (req, res) => {
             }),
             prisma.appointment.count({ where: whereClause })
         ]);
+
+        const now3 = new Date();
+        const appointments = appointmentsRaw.map(a => {
+            let days_left = null;
+            if (a.warranty_expires_at) {
+                const diffMs = a.warranty_expires_at.getTime() - now3.getTime();
+                days_left = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+            }
+            
+            // Enhanced rating detection for provider appointments
+            const customer_rating = a.appointment_rating?.find(r => r.rated_by === 'customer');
+            const provider_rating = a.appointment_rating?.find(r => r.rated_by === 'provider');
+            
+            const is_rated_by_customer = !!customer_rating;
+            const is_rated_by_provider = !!provider_rating;
+            const is_rated = is_rated_by_customer; // Main flag for customer rating (required)
+            const needs_rating = a.appointment_status === 'completed' && !is_rated_by_customer;
+            
+            // Provider-specific: whether they can rate the customer
+            const provider_can_rate_customer = a.appointment_status === 'completed' && !is_rated_by_provider;
+            
+            // Rating status object
+            const rating_status = {
+                is_rated,
+                is_rated_by_customer,
+                is_rated_by_provider,
+                needs_rating,
+                provider_can_rate_customer,
+                customer_rating_value: customer_rating?.rating_value || null,
+                provider_rating_value: provider_rating?.rating_value || null
+            };
+            
+            // Include current backjob if exists
+            const current_backjob = a.backjob_applications && a.backjob_applications.length > 0 
+                ? a.backjob_applications[0] 
+                : null;
+            
+            return { 
+                ...a, 
+                days_left, 
+                needs_rating,
+                is_rated,
+                rating_status,
+                current_backjob,
+                backjob_applications: undefined // Remove the array to avoid duplication
+            };
+        });
 
         const totalPages = Math.ceil(totalCount / take);
 
@@ -900,7 +1484,7 @@ export const getCustomerAppointments = async (req, res) => {
             }
         }
 
-        const [appointments, totalCount] = await Promise.all([
+        const [appointmentsRaw2, totalCount] = await Promise.all([
             prisma.appointment.findMany({
                 where: whereClause,
                 include: {
@@ -916,11 +1500,37 @@ export const getCustomerAppointments = async (req, res) => {
                             provider_rating: true
                         }
                     },
+                    service: {
+                        select: {
+                            service_id: true,
+                            service_title: true,
+                            service_startingprice: true
+                        }
+                    },
                     appointment_rating: {
                         select: {
                             rating_value: true,
-                            rating_comment: true
+                            rating_comment: true,
+                            rated_by: true
                         }
+                    },
+                    backjob_applications: {
+                        where: {
+                            status: {
+                                notIn: ['cancelled-by-admin', 'cancelled-by-user', 'cancelled-by-customer']
+                            }
+                        },
+                        select: {
+                            backjob_id: true,
+                            reason: true,
+                            status: true,
+                            created_at: true,
+                            customer_cancellation_reason: true
+                        },
+                        orderBy: {
+                            created_at: 'desc'
+                        },
+                        take: 1
                     }
                 },
                 orderBy: {
@@ -931,6 +1541,51 @@ export const getCustomerAppointments = async (req, res) => {
             }),
             prisma.appointment.count({ where: whereClause })
         ]);
+
+        const now4 = new Date();
+        const appointments = appointmentsRaw2.map(a => {
+            let days_left = null;
+            if (a.warranty_expires_at) {
+                const diffMs = a.warranty_expires_at.getTime() - now4.getTime();
+                days_left = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+            }
+            
+            // Enhanced rating detection for customer appointments
+            const customer_rating = a.appointment_rating?.find(r => r.rated_by === 'customer');
+            const provider_rating = a.appointment_rating?.find(r => r.rated_by === 'provider');
+            
+            const is_rated_by_customer = !!customer_rating;
+            const is_rated_by_provider = !!provider_rating;
+            const is_rated = is_rated_by_customer; // Main flag for customer rating (required)
+            const needs_rating = a.appointment_status === 'completed' && !is_rated_by_customer;
+            
+            // Rating status object
+            const rating_status = {
+                is_rated,
+                is_rated_by_customer,
+                is_rated_by_provider,
+                needs_rating,
+                customer_rating_value: customer_rating?.rating_value || null,
+                provider_rating_value: provider_rating?.rating_value || null,
+                // Additional info for customer view
+                provider_rated_me: is_rated_by_provider
+            };
+            
+            // Include current backjob if exists
+            const current_backjob = a.backjob_applications && a.backjob_applications.length > 0 
+                ? a.backjob_applications[0] 
+                : null;
+            
+            return { 
+                ...a, 
+                days_left, 
+                needs_rating,
+                is_rated,
+                rating_status,
+                current_backjob,
+                backjob_applications: undefined // Remove the array to avoid duplication
+            };
+        });
 
         const totalPages = Math.ceil(totalCount / take);
 
@@ -1183,6 +1838,717 @@ export const submitRating = async (req, res) => {
     }
 };
 
+// BACKJOB WORKFLOW
+// Upload evidence files for backjob applications
+export const uploadBackjobEvidence = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'No evidence files provided'
+            });
+        }
+
+        // Verify appointment exists and user has access
+        const appointment = await prisma.appointment.findUnique({
+            where: { appointment_id: parseInt(appointmentId) }
+        });
+
+        if (!appointment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Appointment not found'
+            });
+        }
+
+        // Only the customer or provider can upload evidence
+        if (req.userType === 'customer' && appointment.customer_id !== req.userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only the appointment customer can upload evidence'
+            });
+        }
+
+        if (req.userType === 'provider' && appointment.provider_id !== req.userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only the appointment provider can upload evidence'
+            });
+        }
+
+        const uploadedFiles = [];
+        
+        // Upload each file to Cloudinary
+        for (const file of req.files) {
+            try {
+                const fileUrl = await uploadToCloudinary(
+                    file.buffer,
+                    'fixmo/backjob-evidence',
+                    `evidence_${appointmentId}_${req.userId}_${Date.now()}`
+                );
+                
+                uploadedFiles.push({
+                    url: fileUrl,
+                    originalName: file.originalname,
+                    mimetype: file.mimetype,
+                    size: file.size
+                });
+            } catch (uploadError) {
+                console.error('Error uploading evidence file to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Error uploading evidence files'
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            message: 'Evidence files uploaded successfully',
+            data: {
+                files: uploadedFiles,
+                total_files: uploadedFiles.length
+            }
+        });
+
+    } catch (error) {
+        console.error('Error uploading backjob evidence:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error uploading evidence',
+            error: error.message
+        });
+    }
+};
+
+// Apply for backjob (customer) when appointment is in-warranty
+export const applyBackjob = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        const { reason, evidence } = req.body;
+
+        if (!reason) {
+            return res.status(400).json({ success: false, message: 'Reason is required' });
+        }
+
+        if (!evidence || (!evidence.files && !evidence.description)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Evidence is required. Please upload photos/videos or provide detailed description.' 
+            });
+        }
+
+        const appointment = await prisma.appointment.findUnique({
+            where: { appointment_id: parseInt(appointmentId) },
+        });
+
+        if (!appointment) {
+            return res.status(404).json({ success: false, message: 'Appointment not found' });
+        }
+
+        // Only the owning customer can apply
+        if (req.userType !== 'customer' || (req.userId && req.userId !== appointment.customer_id)) {
+            return res.status(403).json({ success: false, message: 'Only the appointment customer can apply for a backjob' });
+        }
+
+        if (appointment.appointment_status !== 'in-warranty') {
+            return res.status(400).json({ success: false, message: 'Backjob can only be applied during warranty' });
+        }
+
+        // Prevent duplicate active backjob applications for the same appointment
+        // Allow new application if existing one was disputed or cancelled
+        const existingActive = await prisma.backjobApplication.findFirst({
+            where: {
+                appointment_id: appointment.appointment_id,
+                status: { in: ['approved'] } // Only block if there's already an approved, non-disputed backjob
+            }
+        });
+        if (existingActive) {
+            return res.status(409).json({ 
+                success: false, 
+                message: 'An active approved backjob already exists for this appointment. Provider can reschedule or dispute it.' 
+            });
+        }
+
+        // Get appointment details with customer, provider, and service info for emails
+        const appointmentWithDetails = await prisma.appointment.findUnique({
+            where: { appointment_id: appointment.appointment_id },
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        phone_number: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
+                }
+            }
+        });
+
+        // Create backjob application with auto-approval
+        const backjob = await prisma.backjobApplication.create({
+            data: {
+                appointment_id: appointment.appointment_id,
+                customer_id: appointment.customer_id,
+                provider_id: appointment.provider_id,
+                reason,
+                evidence: evidence || null,
+                status: 'approved' // Auto-approve the backjob application
+            },
+        });
+
+        // WARRANTY PAUSE LOGIC: When a backjob is applied, pause the warranty countdown
+        // Calculate remaining warranty days before pausing
+        let warrantyRemainingDays = null;
+        if (appointment.warranty_expires_at) {
+            const now = new Date();
+            const remainingMs = appointment.warranty_expires_at.getTime() - now.getTime();
+            warrantyRemainingDays = Math.max(0, Math.ceil(remainingMs / (1000 * 60 * 60 * 24)));
+        }
+
+        // Update appointment status to backjob and pause warranty
+        // The warranty will resume from this point when the backjob is resolved
+        const updatedAppointment = await prisma.appointment.update({
+            where: { appointment_id: appointment.appointment_id },
+            data: { 
+                appointment_status: 'backjob',
+                warranty_paused_at: new Date(), // Mark when warranty was paused
+                warranty_remaining_days: warrantyRemainingDays // Store remaining days to resume later
+            },
+        });
+
+        // Send email notifications for backjob application
+        try {
+            const { sendBackjobApplicationToCustomer, sendBackjobApplicationToProvider } = await import('../services/backjob-mailer.js');
+            
+            // Prepare email details
+            const emailDetails = {
+                customerName: `${appointmentWithDetails.customer.first_name} ${appointmentWithDetails.customer.last_name}`,
+                customerPhone: appointmentWithDetails.customer.phone_number,
+                serviceTitle: appointmentWithDetails.service?.service_title || 'Service',
+                providerName: `${appointmentWithDetails.serviceProvider.provider_first_name} ${appointmentWithDetails.serviceProvider.provider_last_name}`,
+                providerPhone: appointmentWithDetails.serviceProvider.provider_phone_number,
+                appointmentId: appointment.appointment_id,
+                backjobId: backjob.backjob_id,
+                reason: reason,
+                scheduledDate: appointment.scheduled_date
+            };
+
+            console.log('📧 Sending backjob application emails...');
+            await sendBackjobApplicationToCustomer(appointmentWithDetails.customer.email, emailDetails);
+            await sendBackjobApplicationToProvider(appointmentWithDetails.serviceProvider.provider_email, emailDetails);
+            console.log('✅ Backjob application emails sent successfully');
+        } catch (emailError) {
+            console.error('❌ Error sending backjob application emails:', emailError);
+            // Don't fail the backjob creation if email fails
+        }
+
+        return res.status(201).json({ 
+            success: true, 
+            message: 'Backjob application automatically approved - provider can now reschedule or dispute', 
+            data: { backjob, appointment: updatedAppointment } 
+        });
+    } catch (error) {
+        console.error('Error applying backjob:', error);
+        return res.status(500).json({ success: false, message: 'Error applying backjob', error: error.message });
+    }
+};
+
+// Provider disputes backjob (cannot cancel)
+export const disputeBackjob = async (req, res) => {
+    try {
+        const { backjobId } = req.params;
+        const { dispute_reason, dispute_evidence } = req.body;
+
+        const backjob = await prisma.backjobApplication.findUnique({ where: { backjob_id: parseInt(backjobId) } });
+        if (!backjob) {
+            return res.status(404).json({ success: false, message: 'Backjob application not found' });
+        }
+
+        // Only the assigned provider can dispute
+        if (req.userType !== 'provider' || (req.userId && req.userId !== backjob.provider_id)) {
+            return res.status(403).json({ success: false, message: 'Only the appointment provider can dispute a backjob' });
+        }
+
+        // Check if backjob is in a disputable state (approved or pending)
+        if (!['approved', 'pending'].includes(backjob.status)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `Cannot dispute a backjob with status: ${backjob.status}` 
+            });
+        }
+
+        // Get backjob details with appointment, customer, provider, and service info
+        const backjobWithDetails = await prisma.backjobApplication.findUnique({
+            where: { backjob_id: backjob.backjob_id },
+            include: {
+                appointment: {
+                    include: {
+                        customer: {
+                            select: {
+                                user_id: true,
+                                first_name: true,
+                                last_name: true,
+                                email: true,
+                                phone_number: true
+                            }
+                        },
+                        serviceProvider: {
+                            select: {
+                                provider_id: true,
+                                provider_first_name: true,
+                                provider_last_name: true,
+                                provider_email: true,
+                                provider_phone_number: true
+                            }
+                        },
+                        service: {
+                            select: {
+                                service_id: true,
+                                service_title: true,
+                                service_startingprice: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        const updated = await prisma.backjobApplication.update({
+            where: { backjob_id: backjob.backjob_id },
+            data: {
+                status: 'disputed',
+                provider_dispute_reason: dispute_reason || null,
+                provider_dispute_evidence: dispute_evidence || null,
+            },
+        });
+
+        // Resume warranty from paused state when backjob is disputed
+        const appointment = await prisma.appointment.findUnique({
+            where: { appointment_id: backjob.appointment_id }
+        });
+
+        if (appointment && appointment.warranty_paused_at && appointment.warranty_remaining_days !== null) {
+            // Resume warranty from where it was paused
+            const now = new Date();
+            const newExpiryDate = new Date(now);
+            newExpiryDate.setDate(newExpiryDate.getDate() + appointment.warranty_remaining_days);
+
+            await prisma.appointment.update({
+                where: { appointment_id: backjob.appointment_id },
+                data: {
+                    appointment_status: 'in-warranty', // Resume warranty period
+                    warranty_expires_at: newExpiryDate,
+                    warranty_paused_at: null, // Clear pause
+                    warranty_remaining_days: null
+                }
+            });
+        }
+
+        // Send email notification to customer about dispute
+        try {
+            const { sendBackjobDisputeToCustomer } = await import('../services/backjob-mailer.js');
+            
+            // Prepare email details
+            const emailDetails = {
+                customerName: `${backjobWithDetails.appointment.customer.first_name} ${backjobWithDetails.appointment.customer.last_name}`,
+                serviceTitle: backjobWithDetails.appointment.service?.service_title || 'Service',
+                providerName: `${backjobWithDetails.appointment.serviceProvider.provider_first_name} ${backjobWithDetails.appointment.serviceProvider.provider_last_name}`,
+                appointmentId: backjobWithDetails.appointment_id,
+                backjobId: backjob.backjob_id,
+                disputeReason: dispute_reason || 'No reason provided',
+                originalReason: backjobWithDetails.reason
+            };
+
+            console.log('📧 Sending backjob dispute email to customer...');
+            await sendBackjobDisputeToCustomer(backjobWithDetails.appointment.customer.email, emailDetails);
+            console.log('✅ Backjob dispute email sent successfully');
+        } catch (emailError) {
+            console.error('❌ Error sending backjob dispute email:', emailError);
+            // Don't fail the dispute if email fails
+        }
+
+        return res.status(200).json({ success: true, message: 'Backjob disputed', data: updated });
+    } catch (error) {
+        console.error('Error disputing backjob:', error);
+        return res.status(500).json({ success: false, message: 'Error disputing backjob', error: error.message });
+    }
+};
+
+// Customer cancels their own backjob application with reason
+export const cancelBackjobByCustomer = async (req, res) => {
+    try {
+        const { backjobId } = req.params;
+        const { cancellation_reason } = req.body;
+
+        if (!cancellation_reason) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cancellation reason is required'
+            });
+        }
+
+        const backjob = await prisma.backjobApplication.findUnique({
+            where: { backjob_id: parseInt(backjobId) }
+        });
+
+        if (!backjob) {
+            return res.status(404).json({
+                success: false,
+                message: 'Backjob application not found'
+            });
+        }
+
+        // Only the customer who created the backjob can cancel it
+        if (req.userType !== 'customer' || (req.userId && req.userId !== backjob.customer_id)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only the customer who created the backjob can cancel it'
+            });
+        }
+
+        // Check if backjob is in a cancellable state (approved, pending, or disputed)
+        if (!['approved', 'pending', 'disputed'].includes(backjob.status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot cancel a backjob with status: ${backjob.status}`
+            });
+        }
+
+        // Get backjob details with appointment, customer, provider, and service info for emails
+        const backjobWithDetails = await prisma.backjobApplication.findUnique({
+            where: { backjob_id: backjob.backjob_id },
+            include: {
+                appointment: {
+                    include: {
+                        customer: {
+                            select: {
+                                user_id: true,
+                                first_name: true,
+                                last_name: true,
+                                email: true,
+                                phone_number: true
+                            }
+                        },
+                        serviceProvider: {
+                            select: {
+                                provider_id: true,
+                                provider_first_name: true,
+                                provider_last_name: true,
+                                provider_email: true,
+                                provider_phone_number: true
+                            }
+                        },
+                        service: {
+                            select: {
+                                service_id: true,
+                                service_title: true,
+                                service_startingprice: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Update backjob status to cancelled-by-customer
+        const updated = await prisma.backjobApplication.update({
+            where: { backjob_id: backjob.backjob_id },
+            data: {
+                status: 'cancelled-by-customer',
+                customer_cancellation_reason: cancellation_reason,
+            },
+        });
+
+        // Resume warranty from paused state when customer cancels backjob
+        const appointment = await prisma.appointment.findUnique({
+            where: { appointment_id: backjob.appointment_id }
+        });
+
+        if (appointment) {
+            // Prepare appointment update data
+            const appointmentUpdateData = {
+                appointment_status: 'in-warranty' // Always return to in-warranty when backjob is cancelled
+            };
+
+            // If warranty was paused, resume it from where it was paused
+            if (appointment.warranty_paused_at && appointment.warranty_remaining_days !== null) {
+                // Resume warranty from where it was paused
+                const now = new Date();
+                const newExpiryDate = new Date(now);
+                newExpiryDate.setDate(newExpiryDate.getDate() + appointment.warranty_remaining_days);
+
+                appointmentUpdateData.warranty_expires_at = newExpiryDate;
+                appointmentUpdateData.warranty_paused_at = null; // Clear pause
+                appointmentUpdateData.warranty_remaining_days = null;
+            }
+            // If no warranty pause data, just ensure the status is updated
+            // (this handles cases where warranty pause logic might have failed)
+
+            await prisma.appointment.update({
+                where: { appointment_id: backjob.appointment_id },
+                data: appointmentUpdateData
+            });
+        }
+
+        // Send email notifications for backjob cancellation
+        try {
+            const { sendBackjobCancellationToCustomer, sendBackjobCancellationToProvider } = await import('../services/backjob-mailer.js');
+            
+            // Prepare email details
+            const emailDetails = {
+                customerName: `${backjobWithDetails.appointment.customer.first_name} ${backjobWithDetails.appointment.customer.last_name}`,
+                customerPhone: backjobWithDetails.appointment.customer.phone_number,
+                serviceTitle: backjobWithDetails.appointment.service?.service_title || 'Service',
+                providerName: `${backjobWithDetails.appointment.serviceProvider.provider_first_name} ${backjobWithDetails.appointment.serviceProvider.provider_last_name}`,
+                providerPhone: backjobWithDetails.appointment.serviceProvider.provider_phone_number,
+                appointmentId: backjobWithDetails.appointment_id,
+                backjobId: backjob.backjob_id,
+                cancellationReason: cancellation_reason,
+                originalReason: backjobWithDetails.reason,
+                cancelledBy: 'customer'
+            };
+
+            console.log('📧 Sending backjob cancellation emails...');
+            await sendBackjobCancellationToCustomer(backjobWithDetails.appointment.customer.email, emailDetails);
+            await sendBackjobCancellationToProvider(backjobWithDetails.appointment.serviceProvider.provider_email, emailDetails);
+            console.log('✅ Backjob cancellation emails sent successfully');
+        } catch (emailError) {
+            console.error('❌ Error sending backjob cancellation emails:', emailError);
+            // Don't fail the cancellation if email fails
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Backjob cancelled successfully by customer and warranty resumed',
+            data: updated
+        });
+
+    } catch (error) {
+        console.error('Error cancelling backjob by customer:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error cancelling backjob',
+            error: error.message
+        });
+    }
+};
+
+// Admin: list backjob applications with filters
+export const listBackjobs = async (req, res) => {
+    try {
+        const { status, page = 1, limit = 10 } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const take = parseInt(limit);
+
+        const where = status ? { status } : {};
+        const [items, total] = await Promise.all([
+            prisma.backjobApplication.findMany({
+                where,
+                include: {
+                    appointment: true,
+                    customer: { select: { user_id: true, first_name: true, last_name: true, email: true } },
+                    provider: { select: { provider_id: true, provider_first_name: true, provider_last_name: true, provider_email: true } },
+                },
+                orderBy: { created_at: 'desc' },
+                skip, take,
+            }),
+            prisma.backjobApplication.count({ where }),
+        ]);
+
+        return res.status(200).json({ success: true, data: items, pagination: { current_page: parseInt(page), total_pages: Math.ceil(total / take), total_count: total, limit: take } });
+    } catch (error) {
+        console.error('Error listing backjobs:', error);
+        return res.status(500).json({ success: false, message: 'Error listing backjobs', error: error.message });
+    }
+};
+
+// Admin: update backjob status (approve -> provider reschedules; cancel-by-admin -> appointment completed)
+export const updateBackjobStatus = async (req, res) => {
+    try {
+        const { backjobId } = req.params;
+        const { action, admin_notes } = req.body; // action: approve | cancel-by-admin | cancel-by-user
+
+        const backjob = await prisma.backjobApplication.findUnique({ where: { backjob_id: parseInt(backjobId) } });
+        if (!backjob) {
+            return res.status(404).json({ success: false, message: 'Backjob application not found' });
+        }
+
+    let newStatus = backjob.status;
+    let appointmentUpdate = null;
+
+        // Get appointment for warranty handling
+        const appointment = await prisma.appointment.findUnique({
+            where: { appointment_id: backjob.appointment_id }
+        });
+
+        if (action === 'approve') {
+            newStatus = 'approved';
+            // Appointment remains in 'backjob' until provider reschedules
+        } else if (action === 'cancel-by-admin') {
+            newStatus = 'cancelled-by-admin';
+            appointmentUpdate = { appointment_status: 'completed' };
+            // Clear warranty pause when admin cancels (ends warranty)
+            if (appointment && appointment.warranty_paused_at) {
+                appointmentUpdate.warranty_paused_at = null;
+                appointmentUpdate.warranty_remaining_days = null;
+                appointmentUpdate.warranty_expires_at = new Date(); // Expire immediately
+            }
+        } else if (action === 'cancel-by-user') {
+            newStatus = 'cancelled-by-user';
+            // Resume warranty from paused state when cancelled by user
+            if (appointment && appointment.warranty_paused_at && appointment.warranty_remaining_days !== null) {
+                const now = new Date();
+                const resumeExpiryDate = new Date(now);
+                resumeExpiryDate.setDate(resumeExpiryDate.getDate() + appointment.warranty_remaining_days);
+                
+                appointmentUpdate = { 
+                    appointment_status: 'in-warranty',
+                    warranty_expires_at: resumeExpiryDate,
+                    warranty_paused_at: null,
+                    warranty_remaining_days: null
+                };
+            } else {
+                appointmentUpdate = { appointment_status: 'in-warranty' };
+            }
+        } else {
+            return res.status(400).json({ success: false, message: 'Invalid action' });
+        }
+
+        const updatedBackjob = await prisma.backjobApplication.update({
+            where: { backjob_id: backjob.backjob_id },
+            data: { status: newStatus, admin_notes: admin_notes || null },
+        });
+
+        if (appointmentUpdate) {
+            await prisma.appointment.update({ where: { appointment_id: backjob.appointment_id }, data: appointmentUpdate });
+        }
+
+        return res.status(200).json({ success: true, message: 'Backjob updated', data: updatedBackjob });
+    } catch (error) {
+        console.error('Error updating backjob:', error);
+        return res.status(500).json({ success: false, message: 'Error updating backjob', error: error.message });
+    }
+};
+
+// Provider reschedules an approved backjob: choose available date; appointment becomes scheduled (same ID)
+export const rescheduleFromBackjob = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        const { new_scheduled_date, availability_id } = req.body;
+
+        if (!new_scheduled_date || !availability_id) {
+            return res.status(400).json({ success: false, message: 'New scheduled date and availability_id are required' });
+        }
+
+        const appointment = await prisma.appointment.findUnique({ where: { appointment_id: parseInt(appointmentId) } });
+        if (!appointment) {
+            return res.status(404).json({ success: false, message: 'Appointment not found' });
+        }
+
+        if (appointment.appointment_status !== 'backjob') {
+            return res.status(400).json({ success: false, message: 'Appointment is not in backjob status' });
+        }
+
+        // Only the assigned provider can reschedule
+        if (req.userType !== 'provider' || (req.userId && req.userId !== appointment.provider_id)) {
+            return res.status(403).json({ success: false, message: 'Only the appointment provider can reschedule a backjob' });
+        }
+
+        // Ensure there is an approved backjob for this appointment
+        const approvedBackjob = await prisma.backjobApplication.findFirst({
+            where: { appointment_id: appointment.appointment_id, status: 'approved' }
+        });
+        if (!approvedBackjob) {
+            return res.status(400).json({ success: false, message: 'No approved backjob found for this appointment' });
+        }
+
+        const newDate = new Date(new_scheduled_date);
+        if (isNaN(newDate.getTime())) {
+            return res.status(400).json({ success: false, message: 'Invalid date format' });
+        }
+
+        // Conflict check
+        const conflict = await prisma.appointment.findFirst({
+            where: {
+                provider_id: appointment.provider_id,
+                scheduled_date: newDate,
+                appointment_status: { in: ['scheduled', 'on-the-way', 'in-progress'] },
+                appointment_id: { not: appointment.appointment_id },
+            },
+        });
+        if (conflict) {
+            return res.status(409).json({ success: false, message: 'Provider already has an appointment at this time' });
+        }
+
+        // Clear warranty pause when rescheduling - warranty will resume from paused state after completion
+        const updated = await prisma.appointment.update({
+            where: { appointment_id: appointment.appointment_id },
+            data: { 
+                scheduled_date: newDate, 
+                availability_id: parseInt(availability_id), 
+                appointment_status: 'scheduled',
+                // Keep warranty_paused_at and warranty_remaining_days until work is completed again
+            },
+            include: {
+                customer: { select: { user_id: true, first_name: true, last_name: true, email: true, phone_number: true } },
+                serviceProvider: { select: { provider_id: true, provider_first_name: true, provider_last_name: true, provider_email: true, provider_phone_number: true } },
+                service: { select: { service_id: true, service_title: true, service_startingprice: true } }
+            }
+        });
+
+        // Send email notifications for backjob reschedule
+        try {
+            const { sendBackjobRescheduleToCustomer, sendBackjobRescheduleToProvider } = await import('../services/backjob-mailer.js');
+            
+            // Prepare email details
+            const emailDetails = {
+                customerName: `${updated.customer.first_name} ${updated.customer.last_name}`,
+                customerPhone: updated.customer.phone_number,
+                serviceTitle: updated.service?.service_title || 'Service',
+                providerName: `${updated.serviceProvider.provider_first_name} ${updated.serviceProvider.provider_last_name}`,
+                providerPhone: updated.serviceProvider.provider_phone_number,
+                appointmentId: updated.appointment_id,
+                backjobId: approvedBackjob.backjob_id,
+                newScheduledDate: newDate,
+                originalReason: approvedBackjob.reason
+            };
+
+            console.log('📧 Sending backjob reschedule emails...');
+            await sendBackjobRescheduleToCustomer(updated.customer.email, emailDetails);
+            await sendBackjobRescheduleToProvider(updated.serviceProvider.provider_email, emailDetails);
+            console.log('✅ Backjob reschedule emails sent successfully');
+        } catch (emailError) {
+            console.error('❌ Error sending backjob reschedule emails:', emailError);
+            // Don't fail the reschedule if email fails
+        }
+
+        return res.status(200).json({ success: true, message: 'Backjob appointment rescheduled', data: updated });
+    } catch (error) {
+        console.error('Error rescheduling backjob appointment:', error);
+        return res.status(500).json({ success: false, message: 'Error rescheduling backjob appointment', error: error.message });
+    }
+};
+
 // Get ratings for an appointment
 export const getAppointmentRatings = async (req, res) => {
     try {
@@ -1268,6 +2634,334 @@ export const canRateAppointment = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error checking rating eligibility',
+            error: error.message
+        });
+    }
+};
+
+// Customer marks appointment completed (manual completion inside warranty window)
+export const completeAppointmentByCustomer = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+
+        const appointment = await prisma.appointment.findUnique({ where: { appointment_id: parseInt(appointmentId) } });
+        if (!appointment) {
+            return res.status(404).json({ success: false, message: 'Appointment not found' });
+        }
+
+        // Only owning customer can complete
+        if (req.userType !== 'customer' || (req.userId && req.userId !== appointment.customer_id)) {
+            return res.status(403).json({ success: false, message: 'Only the appointment customer can mark as completed' });
+        }
+
+        // Only allow if finished (in-warranty) or in-warranty
+        if (!['in-warranty', 'finished', 'completed'].includes(appointment.appointment_status)) {
+            return res.status(400).json({ success: false, message: 'Appointment is not eligible for completion' });
+        }
+
+        if (appointment.appointment_status === 'completed') {
+            return res.status(200).json({ success: true, message: 'Already completed', data: appointment });
+        }
+
+        const dataUpdate = { appointment_status: 'completed', completed_at: new Date() };
+
+        // Expire warranty immediately when customer completes the appointment
+        dataUpdate.warranty_expires_at = new Date();
+
+        const updated = await prisma.appointment.update({
+            where: { appointment_id: appointment.appointment_id },
+            data: dataUpdate,
+            include: {
+                customer: { 
+                    select: { 
+                        user_id: true, 
+                        first_name: true, 
+                        last_name: true,
+                        email: true,
+                        phone_number: true
+                    } 
+                },
+                serviceProvider: { 
+                    select: { 
+                        provider_id: true, 
+                        provider_first_name: true, 
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    } 
+                },
+                service: { 
+                    select: { 
+                        service_id: true, 
+                        service_title: true, 
+                        service_startingprice: true 
+                    } 
+                }
+            }
+        });
+
+        // Handle warranty-based conversation updates
+        try {
+            await handleAppointmentWarranty(updated, 'completed');
+            console.log('✅ Conversation warranty handling completed for customer completion');
+        } catch (warrantyError) {
+            console.error('❌ Error handling appointment warranty:', warrantyError);
+            // Don't fail the completion if warranty handling fails
+        }
+
+        // Send completion email notifications when customer manually completes appointment
+        try {
+            const { sendBookingCompletionToCustomer, sendBookingCompletionToProvider } = await import('../services/mailer.js');
+            
+            // Format completion details for email
+            const completionDetails = {
+                customerName: `${updated.customer.first_name} ${updated.customer.last_name}`,
+                customerPhone: updated.customer.phone_number,
+                customerEmail: updated.customer.email,
+                serviceTitle: updated.service?.service_title || 'Service',
+                providerName: `${updated.serviceProvider.provider_first_name} ${updated.serviceProvider.provider_last_name}`,
+                providerPhone: updated.serviceProvider.provider_phone_number,
+                providerEmail: updated.serviceProvider.provider_email,
+                scheduledDate: updated.scheduled_date,
+                completedDate: updated.completed_at || new Date(),
+                appointmentId: updated.appointment_id,
+                startingPrice: updated.service?.service_startingprice || 0,
+                repairDescription: updated.repairDescription
+            };
+
+            console.log('📧 Sending customer completion emails for appointment:', updated.appointment_id);
+            
+            // Send email to customer
+            await sendBookingCompletionToCustomer(updated.customer.email, completionDetails);
+            console.log('✅ Customer completion email sent to customer:', updated.customer.email);
+            
+            // Send email to provider
+            await sendBookingCompletionToProvider(updated.serviceProvider.provider_email, completionDetails);
+            console.log('✅ Customer completion email sent to provider:', updated.serviceProvider.provider_email);
+            
+        } catch (emailError) {
+            console.error('❌ Error sending customer completion emails:', emailError);
+            // Don't fail the completion if email fails
+        }
+
+        return res.status(200).json({ success: true, message: 'Appointment marked as completed', data: updated });
+    } catch (error) {
+        console.error('Error completing appointment:', error);
+        return res.status(500).json({ success: false, message: 'Error completing appointment', error: error.message });
+    }
+};
+
+// Get appointments that need ratings (for frontend rating prompts)
+export const getAppointmentsNeedingRatings = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const userId = req.userId;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const take = parseInt(limit);
+
+        let whereClause = {
+            appointment_status: 'completed'
+        };
+
+        // Automatically filter based on authenticated user's type
+        if (req.userType === 'customer') {
+            whereClause.customer_id = userId;
+        } else if (req.userType === 'provider') {
+            whereClause.provider_id = userId;
+        }
+
+        // Get all completed appointments for the user to filter unrated ones
+        const appointmentsRaw = await prisma.appointment.findMany({
+            where: whereClause,
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        profile_photo: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_profile_photo: true,
+                        provider_rating: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
+                },
+                appointment_rating: {
+                    select: {
+                        id: true,
+                        rating_value: true,
+                        rating_comment: true,
+                        rated_by: true,
+                        created_at: true
+                    }
+                }
+            },
+            orderBy: {
+                completed_at: 'desc'
+            }
+        });
+
+        // Filter appointments that haven't been rated by the current user
+        const unratedAppointments = appointmentsRaw.filter(a => {
+            const customer_rating = a.appointment_rating?.find(r => r.rated_by === 'customer');
+            const provider_rating = a.appointment_rating?.find(r => r.rated_by === 'provider');
+
+            if (req.userType === 'customer') {
+                return !customer_rating; // Show only if customer hasn't rated
+            } else if (req.userType === 'provider') {
+                return !provider_rating; // Show only if provider hasn't rated
+            }
+            return false;
+        });
+
+        // Apply pagination to filtered results
+        const totalCount = unratedAppointments.length;
+        const paginatedAppointments = unratedAppointments.slice(skip, skip + take);
+
+        // Map to clean response format (no extra rating status since these are all unrated)
+        const responseAppointments = paginatedAppointments.map(a => ({
+            appointment_id: a.appointment_id,
+            appointment_status: a.appointment_status,
+            scheduled_date: a.scheduled_date,
+            completed_at: a.completed_at,
+            customer: a.customer,
+            serviceProvider: a.serviceProvider,
+            service: a.service,
+            needs_rating: true // All these appointments need rating
+        }));
+
+        const totalPages = Math.ceil(totalCount / take);
+
+        res.status(200).json({
+            success: true,
+            message: 'Unrated appointments retrieved successfully',
+            data: responseAppointments,
+            pagination: {
+                current_page: parseInt(page),
+                total_pages: totalPages,
+                total_count: totalCount,
+                limit: take,
+                has_next: parseInt(page) < totalPages,
+                has_prev: parseInt(page) > 1
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching appointments that can be rated:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching appointments that can be rated',
+            error: error.message
+        });
+    }
+};
+
+// Check if specific appointment needs rating
+export const checkAppointmentRatingStatus = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        const userId = req.userId;
+
+        const appointment = await prisma.appointment.findUnique({
+            where: { appointment_id: parseInt(appointmentId) },
+            include: {
+                appointment_rating: {
+                    select: {
+                        id: true,
+                        rating_value: true,
+                        rated_by: true,
+                        created_at: true
+                    }
+                }
+            }
+        });
+
+        if (!appointment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Appointment not found'
+            });
+        }
+
+        // Check if user has access to this appointment
+        if (req.userType === 'customer' && appointment.customer_id !== userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied'
+            });
+        }
+
+        if (req.userType === 'provider' && appointment.provider_id !== userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied'
+            });
+        }
+
+        const customer_rating = appointment.appointment_rating?.find(r => r.rated_by === 'customer');
+        const provider_rating = appointment.appointment_rating?.find(r => r.rated_by === 'provider');
+
+        const is_rated_by_customer = !!customer_rating;
+        const is_rated_by_provider = !!provider_rating;
+        const is_rated = is_rated_by_customer; // Main flag
+
+        let can_rate = false;
+        let needs_rating = false;
+
+        if (appointment.appointment_status === 'completed') {
+            if (req.userType === 'customer') {
+                can_rate = !is_rated_by_customer;
+                needs_rating = !is_rated_by_customer;
+            } else if (req.userType === 'provider') {
+                can_rate = !is_rated_by_provider;
+                needs_rating = !is_rated_by_provider;
+            }
+        }
+
+        res.status(200).json({
+            success: true,
+            data: {
+                appointment_id: appointment.appointment_id,
+                appointment_status: appointment.appointment_status,
+                is_rated,
+                is_rated_by_customer,
+                is_rated_by_provider,
+                can_rate,
+                needs_rating,
+                rating_status: {
+                    customer_rating: customer_rating ? {
+                        rating_id: customer_rating.id,
+                        rating_value: customer_rating.rating_value,
+                        created_at: customer_rating.created_at
+                    } : null,
+                    provider_rating: provider_rating ? {
+                        rating_id: provider_rating.id,
+                        rating_value: provider_rating.rating_value,
+                        created_at: provider_rating.created_at
+                    } : null
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Error checking appointment rating status:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error checking appointment rating status',
             error: error.message
         });
     }

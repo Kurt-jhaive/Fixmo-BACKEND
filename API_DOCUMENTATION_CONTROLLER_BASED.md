@@ -507,7 +507,23 @@ The Fixmo Backend API is a comprehensive service management platform that connec
 - **Error Responses:**
   - `500`: Internal server error while fetching service listings
 
-#### 12. Create New Service
+
+```
+- **Use Cases:**
+  - Button-triggered service lookups in mobile apps
+  - Exact service title searches
+  - Quick service provider finding for specific services
+- **Features:**
+  - Case-insensitive exact title matching
+  - Only returns active services
+  - Includes full provider details
+  - Results sorted by provider rating then price
+  - No pagination (returns all matches)
+- **Error Responses:**
+  - `400`: Service title is required
+  - `500`: Internal server error
+
+#### 13. Create New Service
 - **Endpoint:** `POST /api/services/services`
 - **Headers:** `Authorization: Bearer <token>` (Provider auth required)
 - **Content-Type:** `multipart/form-data`
@@ -522,17 +538,17 @@ The Fixmo Backend API is a comprehensive service management platform that connec
 }
 ```
 
-#### 13. Update Service
+#### 14. Update Service
 - **Endpoint:** `PUT /api/services/services/:serviceId`
 - **Headers:** `Authorization: Bearer <token>`
 - **Parameters:** `serviceId` (number)
 
-#### 14. Delete Service
+#### 15. Delete Service
 - **Endpoint:** `DELETE /api/services/services/:serviceId`
 - **Headers:** `Authorization: Bearer <token>`
 - **Parameters:** `serviceId` (number)
 
-#### 15. Toggle Service Availability
+#### 16. Toggle Service Availability
 - **Endpoint:** `PATCH /api/services/services/:serviceId/toggle`
 - **Headers:** `Authorization: Bearer <token>`
 - **Parameters:** `serviceId` (number)
@@ -542,7 +558,7 @@ The Fixmo Backend API is a comprehensive service management platform that connec
 
 ## Appointment Management (`/api/appointments`)
 
-#### 16. Get All Appointments (with Advanced Filtering)
+#### 17. Get All Appointments (with Advanced Filtering)
 - **Endpoint:** `GET /api/appointments/`
 - **Query Parameters:**
 ```javascript

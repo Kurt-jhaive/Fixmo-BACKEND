@@ -353,6 +353,18 @@
  *                   type: string
  *                   format: date
  *                 example: ["2025-12-31", "2024-06-30"]
+ *               professions:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 example: ["Electrician", "Plumber"]
+ *                 description: List of professions the provider specializes in
+ *               experiences:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 example: ["5 years", "3 years"]
+ *                 description: Experience level for each profession (corresponding to professions array)
  *     responses:
  *       201:
  *         description: Provider registered successfully
@@ -360,4 +372,244 @@
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/SuccessResponse'
+ * 
+ * /auth/service-listings:
+ *   get:
+ *     tags: [Customer Services]
+ *     summary: Get service listings with optional date-based availability filtering
+ *     description: |
+ *       Retrieve service listings from verified and active providers with advanced filtering options.
+ *       
+ *       **🗓️ NEW: Date-Based Availability Filtering**
+ *       - When `date` parameter is provided, only providers available on that specific date are returned
+ *       - Checks provider's weekly availability schedule for the day of week
+ *       - Excludes providers with existing appointments on the requested date
+ *       - Handles past dates and times appropriately
+ *       
+ *       **Features:**
+ *       - Pagination support
+ *       - Search by service title, description, or provider name
+ *       - Filter by category and location
+ *       - Sort by rating, price, or newest
+ *       - **NEW: Filter by availability on specific date**
+ *       - **NEW: Includes availability details in response**
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number for pagination
+ *         example: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 12
+ *         description: Number of results per page
+ *         example: 10
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Search term for service title, description, or provider name
+ *         example: "home repair"
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *         description: Filter by service category
+ *         example: "Home Repair"
+ *       - in: query
+ *         name: location
+ *         schema:
+ *           type: string
+ *         description: Filter by provider location
+ *         example: "manila"
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           enum: [rating, price-low, price-high, newest]
+ *           default: rating
+ *         description: Sort order for results
+ *         example: "rating"
+ *       - in: query
+ *         name: date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: |
+ *           **NEW FEATURE** - Filter providers by availability on specific date (YYYY-MM-DD format).
+ *           Only providers who are available and not booked on this date will be returned.
+ *         example: "2025-09-25"
+ *     responses:
+ *       200:
+ *         description: Service listings retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Service listings for 2025-09-25 (Thursday) retrieved successfully"
+ *                 listings:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1
+ *                       title:
+ *                         type: string
+ *                         example: "Professional Home Repair Service"
+ *                       description:
+ *                         type: string
+ *                         example: "Expert home repair and maintenance services"
+ *                       startingPrice:
+ *                         type: number
+ *                         example: 500
+ *                       service_photos:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             id:
+ *                               type: integer
+ *                               example: 1
+ *                             imageUrl:
+ *                               type: string
+ *                               example: "https://res.cloudinary.com/dgbtmbdla/image/upload/v1673123456/fixmo/service-photos/service_1_0.jpg"
+ *                             uploadedAt:
+ *                               type: string
+ *                               format: date-time
+ *                               example: "2025-01-15T10:30:00.000Z"
+ *                       provider:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 1
+ *                           name:
+ *                             type: string
+ *                             example: "John Doe"
+ *                           userName:
+ *                             type: string
+ *                             example: "johndoe_repair"
+ *                           rating:
+ *                             type: number
+ *                             format: float
+ *                             example: 4.5
+ *                           location:
+ *                             type: string
+ *                             example: "Manila, Philippines"
+ *                           profilePhoto:
+ *                             type: string
+ *                             example: "https://cloudinary.com/profile.jpg"
+ *                       categories:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                         example: ["Home Repair", "Maintenance"]
+ *                       specificServices:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             id:
+ *                               type: integer
+ *                               example: 1
+ *                             title:
+ *                               type: string
+ *                               example: "Plumbing Repair"
+ *                             description:
+ *                               type: string
+ *                               example: "Fix leaks and install fixtures"
+ *                       availability:
+ *                         type: object
+ *                         description: "Only present when date parameter is provided"
+ *                         properties:
+ *                           date:
+ *                             type: string
+ *                             format: date
+ *                             example: "2025-09-25"
+ *                           dayOfWeek:
+ *                             type: string
+ *                             example: "Thursday"
+ *                           hasAvailability:
+ *                             type: boolean
+ *                             example: true
+ *                           totalSlots:
+ *                             type: integer
+ *                             example: 3
+ *                           availableSlots:
+ *                             type: integer
+ *                             example: 2
+ *                           bookedSlots:
+ *                             type: integer
+ *                             example: 1
+ *                           reason:
+ *                             type: string
+ *                             nullable: true
+ *                             example: null
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     currentPage:
+ *                       type: integer
+ *                       example: 1
+ *                     totalPages:
+ *                       type: integer
+ *                       example: 5
+ *                     totalCount:
+ *                       type: integer
+ *                       example: 15
+ *                     hasNext:
+ *                       type: boolean
+ *                       example: true
+ *                     hasPrev:
+ *                       type: boolean
+ *                       example: false
+ *                 dateFilter:
+ *                   type: object
+ *                   description: "Only present when date parameter is provided"
+ *                   properties:
+ *                     requestedDate:
+ *                       type: string
+ *                       format: date
+ *                       example: "2025-09-25"
+ *                     dayOfWeek:
+ *                       type: string
+ *                       example: "Thursday"
+ *                     totalProvidersBeforeFiltering:
+ *                       type: integer
+ *                       example: 50
+ *                     availableProvidersAfterFiltering:
+ *                       type: integer
+ *                       example: 15
+ *                     filteringApplied:
+ *                       type: boolean
+ *                       example: true
+ *       400:
+ *         description: Invalid parameters or date format
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid date format. Please use YYYY-MM-DD format."
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Server error retrieving service listings"
  */

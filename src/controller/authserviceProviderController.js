@@ -72,7 +72,9 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             otp,
             certificateNames,
             certificateNumbers,
-            expiryDates
+            expiryDates,
+            professions, // New field for professions
+            experiences  // New field for experiences
         } = req.body;
 
         console.log('Provider registration data:', {
@@ -87,7 +89,9 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             otp,
             certificateNames,
             certificateNumbers,
-            expiryDates
+            expiryDates,
+            professions,
+            experiences
         });
 
         // Check if provider already exists (prevent duplicate registration)
@@ -107,17 +111,32 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
 
 
         // Parse certificate data if it's JSON
-
         let parsedCertificateNames, parsedCertificateNumbers, parsedExpiryDates;
+        let parsedProfessions, parsedExperiences;
+        
+        console.log('Raw professions received:', professions);
+        console.log('Raw experiences received:', experiences);
+        console.log('Type of professions:', typeof professions);
+        console.log('Type of experiences:', typeof experiences);
+        
         try {
             parsedCertificateNames = typeof certificateNames === 'string' ? JSON.parse(certificateNames) : certificateNames;
             parsedCertificateNumbers = typeof certificateNumbers === 'string' ? JSON.parse(certificateNumbers) : certificateNumbers;
             parsedExpiryDates = typeof expiryDates === 'string' ? JSON.parse(expiryDates) : expiryDates;
+            parsedProfessions = typeof professions === 'string' ? JSON.parse(professions) : professions;
+            parsedExperiences = typeof experiences === 'string' ? JSON.parse(experiences) : experiences;
         } catch (e) {
+            console.log('Error parsing JSON, using raw values:', e.message);
             parsedCertificateNames = certificateNames;
             parsedCertificateNumbers = certificateNumbers;
             parsedExpiryDates = expiryDates;
+            parsedProfessions = professions;
+            parsedExperiences = experiences;
         }
+        
+        console.log('Parsed professions:', parsedProfessions);
+        console.log('Parsed experiences:', parsedExperiences);
+        console.log('Is parsedProfessions an array?', Array.isArray(parsedProfessions));
 
         // Since email is already verified in step 1, we skip OTP verification here
         // Only verify OTP if it's not a dummy value (for backward compatibility)
@@ -214,18 +233,75 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
                     }
                 }
             }
-        }// Delete the used OTP
+        }
+
+        // Create provider professions if provided
+        const createdProfessions = [];
+        console.log('Starting profession creation...');
+        console.log('parsedProfessions:', parsedProfessions);
+        console.log('Is array?', Array.isArray(parsedProfessions));
+        
+        if (parsedProfessions && Array.isArray(parsedProfessions)) {
+            console.log('Processing', parsedProfessions.length, 'professions');
+            for (let i = 0; i < parsedProfessions.length; i++) {
+                const profession = parsedProfessions[i];
+                const experience = Array.isArray(parsedExperiences) ? parsedExperiences[i] : parsedExperiences;
+                
+                console.log(`Processing profession ${i}:`, profession);
+                console.log(`Processing experience ${i}:`, experience);
+                
+                if (profession && profession.trim()) {
+                    try {
+                        console.log('Creating profession in database...');
+                        const providerProfession = await prisma.providerProfession.create({
+                            data: {
+                                provider_id: newProvider.provider_id,
+                                profession: profession.trim(),
+                                experience: experience ? experience.trim() : '0 years'
+                            }
+                        });
+                        console.log('Profession created successfully:', providerProfession);
+                        createdProfessions.push(providerProfession);
+                    } catch (professionError) {
+                        console.error('Error creating profession:', professionError);
+                        // Continue with other professions but log the error
+                    }
+                } else {
+                    console.log('Skipping empty profession at index', i);
+                }
+            }
+        } else {
+            console.log('No professions to process or not an array');
+        }
+        
+        console.log('Final createdProfessions:', createdProfessions);// Delete the used OTP
         await cleanupOTP(provider_email);
 
         // Send registration success email
         await sendRegistrationSuccessEmail(provider_email, provider_first_name, provider_userName);
         
+        // Generate JWT token for immediate login after registration
+        const token = jwt.sign(
+            { 
+                userId: newProvider.provider_id,
+                id: newProvider.provider_id,
+                providerId: newProvider.provider_id,
+                userType: 'provider',
+                email: newProvider.provider_email
+            }, 
+            process.env.JWT_SECRET || 'your-secret-key', 
+            { expiresIn: '30d' } // 30 days for mobile app
+        );
+        
         res.status(201).json({ 
-            message: 'Service provider registered successfully', 
+            message: 'Service provider registered successfully',
+            token,
             providerId: newProvider.provider_id,
+            providerUserName: newProvider.provider_userName,
             provider_profile_photo: provider_profile_photo,
             provider_valid_id: provider_valid_id,
-            certificates: createdCertificates
+            certificates: createdCertificates,
+            professions: createdProfessions
         });
 
     } catch (err) {
@@ -256,7 +332,7 @@ export const providerLogin = async (req, res) => {
                 email: provider.provider_email
             }, 
             process.env.JWT_SECRET || 'your-secret-key', 
-            { expiresIn: '24h' }
+            { expiresIn: '30d' } // 30 days for mobile app
         );
 
         // Create session
@@ -2175,6 +2251,444 @@ export const getAllServiceListings = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Internal server error while fetching service listings',
+            error: error.message
+        });
+    }
+};
+
+// Get service listings by exact title match
+export const getServiceListingsByTitle = async (req, res) => {
+    try {
+        const { title } = req.query;
+        
+        if (!title) {
+            return res.status(400).json({
+                success: false,
+                message: 'Service title is required'
+            });
+        }
+
+        const serviceListings = await prisma.serviceListing.findMany({
+            where: {
+                service_title: { equals: title, mode: 'insensitive' },
+                servicelisting_isActive: true
+            },
+            include: {
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true,
+                        provider_location: true,
+                        provider_exact_location: true,
+                        provider_rating: true,
+                        provider_isVerified: true,
+                        provider_profile_photo: true,
+                        created_at: true
+                    }
+                },
+                specific_services: {
+                    include: {
+                        category: {
+                            select: {
+                                category_id: true,
+                                category_name: true
+                            }
+                        }
+                    }
+                }
+            },
+            orderBy: [
+                { serviceProvider: { provider_rating: 'desc' } },  // Order by provider rating
+                { service_startingprice: 'asc' }  // Then by price
+            ]
+        });
+
+        // Format the response
+        const formattedListings = serviceListings.map(listing => ({
+            service_id: listing.service_id,
+            service_title: listing.service_title,
+            service_description: listing.service_description,
+            service_startingprice: listing.service_startingprice,
+            provider_id: listing.provider_id,
+            servicelisting_isActive: listing.servicelisting_isActive,
+            service_picture: listing.service_picture,
+            provider: {
+                provider_id: listing.serviceProvider.provider_id,
+                provider_name: `${listing.serviceProvider.provider_first_name} ${listing.serviceProvider.provider_last_name}`,
+                provider_first_name: listing.serviceProvider.provider_first_name,
+                provider_last_name: listing.serviceProvider.provider_last_name,
+                provider_email: listing.serviceProvider.provider_email,
+                provider_phone_number: listing.serviceProvider.provider_phone_number,
+                provider_location: listing.serviceProvider.provider_location,
+                provider_exact_location: listing.serviceProvider.provider_exact_location,
+                provider_rating: listing.serviceProvider.provider_rating,
+                provider_isVerified: listing.serviceProvider.provider_isVerified,
+                provider_profile_photo: listing.serviceProvider.provider_profile_photo,
+                provider_member_since: listing.serviceProvider.created_at
+            },
+            categories: listing.specific_services.map(service => ({
+                category_id: service.category.category_id,
+                category_name: service.category.category_name
+            })),
+            specific_services: listing.specific_services.map(service => ({
+                specific_service_id: service.specific_service_id,
+                specific_service_title: service.specific_service_title,
+                specific_service_description: service.specific_service_description
+            }))
+        }));
+
+        res.status(200).json({
+            success: true,
+            message: `Found ${formattedListings.length} service listing(s) for "${title}"`,
+            data: formattedListings,
+            count: formattedListings.length,
+            search_title: title
+        });
+
+    } catch (error) {
+        console.error('Error fetching services by title:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while fetching services by title',
+            error: error.message
+        });
+    }
+};
+
+// Get provider professions and experience
+export const getProviderProfessions = async (req, res) => {
+    try {
+        const { providerId } = req.params;
+        
+        console.log('Getting professions for provider ID:', providerId);
+        
+        // Get provider details with professions
+        const provider = await prisma.serviceProviderDetails.findUnique({
+            where: { provider_id: parseInt(providerId) },
+            include: {
+                provider_professions: {
+                    orderBy: {
+                        id: 'asc'
+                    }
+                }
+            }
+        });
+
+        if (!provider) {
+            return res.status(404).json({
+                success: false,
+                message: 'Provider not found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Provider professions retrieved successfully',
+            data: {
+                provider_id: provider.provider_id,
+                provider_name: `${provider.provider_first_name} ${provider.provider_last_name}`,
+                provider_email: provider.provider_email,
+                provider_phone_number: provider.provider_phone_number,
+                provider_location: provider.provider_location,
+                provider_rating: provider.provider_rating,
+                provider_isVerified: provider.provider_isVerified,
+                provider_profile_photo: provider.provider_profile_photo,
+                provider_member_since: provider.created_at,
+                total_professions: provider.provider_professions.length,
+                professions: provider.provider_professions.map(prof => ({
+                    id: prof.id,
+                    profession: prof.profession,
+                    experience: prof.experience,
+                    created_at: prof.created_at
+                }))
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching provider professions:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while fetching provider professions',
+            error: error.message
+        });
+    }
+};
+
+// Get provider details (for the authenticated provider)
+export const getProviderDetails = async (req, res) => {
+    try {
+        const providerId = req.userId; // From JWT token
+        
+        console.log('Getting details for provider ID:', providerId);
+        
+        // Get provider details with all related information
+        const provider = await prisma.serviceProviderDetails.findUnique({
+            where: { provider_id: providerId },
+            include: {
+                provider_professions: {
+                    orderBy: {
+                        id: 'asc'
+                    }
+                },
+                certificates: {
+                    select: {
+                        certificate_id: true,
+                        certificate_name: true,
+                        certificate_number: true,
+                        certificate_file_path: true,
+                        expiry_date: true,
+                        status: true,
+                        created_at: true
+                    }
+                },
+                provider_services: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_description: true,
+                        service_startingprice: true,
+                        servicelisting_isActive: true,
+                        created_at: true
+                    },
+                    orderBy: {
+                        created_at: 'desc'
+                    },
+                    take: 5 // Get latest 5 services
+                }
+            }
+        });
+
+        if (!provider) {
+            return res.status(404).json({
+                success: false,
+                message: 'Provider not found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Provider details retrieved successfully',
+            data: {
+                // Basic Information
+                provider_id: provider.provider_id,
+                provider_first_name: provider.provider_first_name,
+                provider_last_name: provider.provider_last_name,
+                provider_full_name: `${provider.provider_first_name} ${provider.provider_last_name}`,
+                provider_email: provider.provider_email,
+                provider_phone_number: provider.provider_phone_number,
+                provider_userName: provider.provider_userName,
+                provider_birthday: provider.provider_birthday,
+                provider_location: provider.provider_location,
+                provider_exact_location: provider.provider_exact_location,
+                provider_uli: provider.provider_uli,
+                
+                // Status and Ratings
+                provider_rating: provider.provider_rating,
+                provider_isVerified: provider.provider_isVerified,
+                provider_isActivated: provider.provider_isActivated,
+                provider_rejection_reason: provider.provider_rejection_reason,
+                
+                // Media
+                provider_profile_photo: provider.provider_profile_photo,
+                provider_valid_id: provider.provider_valid_id,
+                
+                // Timestamps
+                created_at: provider.created_at,
+                provider_member_since: provider.created_at,
+                
+                // Related Data
+                professions: provider.provider_professions.map(prof => ({
+                    id: prof.id,
+                    profession: prof.profession,
+                    experience: prof.experience,
+                    created_at: prof.created_at
+                })),
+                certificates: provider.certificates.map(cert => ({
+                    certificate_id: cert.certificate_id,
+                    certificate_name: cert.certificate_name,
+                    certificate_number: cert.certificate_number,
+                    certificate_file_path: cert.certificate_file_path,
+                    expiry_date: cert.expiry_date,
+                    status: cert.status,
+                    created_at: cert.created_at
+                })),
+                recent_services: provider.provider_services.map(service => ({
+                    service_id: service.service_id,
+                    service_title: service.service_title,
+                    service_description: service.service_description,
+                    service_startingprice: service.service_startingprice,
+                    is_active: service.servicelisting_isActive,
+                    created_at: service.created_at
+                })),
+                
+                // Summary Statistics
+                total_professions: provider.provider_professions.length,
+                total_certificates: provider.certificates.length,
+                total_services: provider.provider_services.length
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching provider details:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while fetching provider details',
+            error: error.message
+        });
+    }
+};
+
+// Update provider details (for the authenticated provider)
+export const updateProviderDetails = async (req, res) => {
+    try {
+        const providerId = req.userId; // From JWT token
+        const {
+            provider_first_name,
+            provider_last_name,
+            provider_phone_number,
+            provider_birthday,
+            provider_location,
+            provider_exact_location,
+            professions, // Array of profession objects: [{ profession: "...", experience: "..." }]
+        } = req.body;
+
+        console.log('Updating details for provider ID:', providerId);
+        console.log('Update data received:', req.body);
+
+        // Check if provider exists
+        const existingProvider = await prisma.serviceProviderDetails.findUnique({
+            where: { provider_id: providerId }
+        });
+
+        if (!existingProvider) {
+            return res.status(404).json({
+                success: false,
+                message: 'Provider not found'
+            });
+        }
+
+        // Handle file uploads if provided
+        let updateData = {};
+        
+        // Handle profile photo update
+        if (req.files && req.files['provider_profile_photo']) {
+            try {
+                const profilePhotoFile = req.files['provider_profile_photo'][0];
+                const profilePhotoUrl = await uploadToCloudinary(
+                    profilePhotoFile.buffer, 
+                    'fixmo/provider-profiles',
+                    `provider_profile_${providerId}_${Date.now()}`
+                );
+                updateData.provider_profile_photo = profilePhotoUrl;
+            } catch (uploadError) {
+                console.error('Error uploading profile photo:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Error uploading profile photo. Please try again.'
+                });
+            }
+        }
+
+        // Handle valid ID update
+        if (req.files && req.files['provider_valid_id']) {
+            try {
+                const validIdFile = req.files['provider_valid_id'][0];
+                const validIdUrl = await uploadToCloudinary(
+                    validIdFile.buffer, 
+                    'fixmo/provider-ids',
+                    `provider_id_${providerId}_${Date.now()}`
+                );
+                updateData.provider_valid_id = validIdUrl;
+            } catch (uploadError) {
+                console.error('Error uploading valid ID:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Error uploading valid ID. Please try again.'
+                });
+            }
+        }
+
+        // Update basic provider information
+        if (provider_first_name !== undefined) updateData.provider_first_name = provider_first_name;
+        if (provider_last_name !== undefined) updateData.provider_last_name = provider_last_name;
+        if (provider_phone_number !== undefined) updateData.provider_phone_number = provider_phone_number;
+        if (provider_birthday !== undefined) updateData.provider_birthday = new Date(provider_birthday);
+        if (provider_location !== undefined) updateData.provider_location = provider_location;
+        if (provider_exact_location !== undefined) updateData.provider_exact_location = provider_exact_location;
+
+        // Use transaction to update provider and professions
+        const updatedProvider = await prisma.$transaction(async (prisma) => {
+            // Update provider details
+            const provider = await prisma.serviceProviderDetails.update({
+                where: { provider_id: providerId },
+                data: updateData
+            });
+
+            // Handle professions update if provided
+            if (professions && Array.isArray(professions)) {
+                // Delete existing professions
+                await prisma.providerProfession.deleteMany({
+                    where: { provider_id: providerId }
+                });
+
+                // Create new professions
+                if (professions.length > 0) {
+                    await prisma.providerProfession.createMany({
+                        data: professions.map(prof => ({
+                            provider_id: providerId,
+                            profession: prof.profession,
+                            experience: prof.experience || '0 years'
+                        }))
+                    });
+                }
+            }
+
+            // Return updated provider with professions
+            return await prisma.serviceProviderDetails.findUnique({
+                where: { provider_id: providerId },
+                include: {
+                    provider_professions: {
+                        orderBy: { id: 'asc' }
+                    }
+                }
+            });
+        });
+
+        res.status(200).json({
+            success: true,
+            message: 'Provider details updated successfully',
+            data: {
+                provider_id: updatedProvider.provider_id,
+                provider_first_name: updatedProvider.provider_first_name,
+                provider_last_name: updatedProvider.provider_last_name,
+                provider_full_name: `${updatedProvider.provider_first_name} ${updatedProvider.provider_last_name}`,
+                provider_email: updatedProvider.provider_email,
+                provider_phone_number: updatedProvider.provider_phone_number,
+                provider_userName: updatedProvider.provider_userName,
+                provider_birthday: updatedProvider.provider_birthday,
+                provider_location: updatedProvider.provider_location,
+                provider_exact_location: updatedProvider.provider_exact_location,
+                provider_rating: updatedProvider.provider_rating,
+                provider_isVerified: updatedProvider.provider_isVerified,
+                provider_profile_photo: updatedProvider.provider_profile_photo,
+                provider_valid_id: updatedProvider.provider_valid_id,
+                professions: updatedProvider.provider_professions.map(prof => ({
+                    id: prof.id,
+                    profession: prof.profession,
+                    experience: prof.experience
+                })),
+                updated_at: new Date().toISOString()
+            }
+        });
+
+    } catch (error) {
+        console.error('Error updating provider details:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error while updating provider details',
             error: error.message
         });
     }

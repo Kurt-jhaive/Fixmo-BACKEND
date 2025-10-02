@@ -25,24 +25,56 @@ class MessageWebSocketServer {
     setupSocketHandlers() {
         this.io.on('connection', (socket) => {
             console.log(`🔌 Client connected: ${socket.id}`);
+            
+            // Set initial authentication state
+            socket.isAuthenticated = false;
+            socket.userId = null;
+            socket.userType = null;
 
             // Handle user authentication
             socket.on('authenticate', async (data) => {
                 try {
+                    console.log('🔐 Authentication attempt for socket:', socket.id);
                     await this.authenticateUser(socket, data);
                 } catch (error) {
-                    console.error('Authentication error:', error);
-                    socket.emit('error', { message: 'Authentication failed' });
+                    console.error('Authentication error:', error.message);
+                    socket.emit('authentication_failed', { 
+                        error: 'Authentication failed',
+                        details: error.message 
+                    });
                 }
             });
 
-            // Handle joining conversation
+            // Handle joining conversation - check authentication first
             socket.on('join_conversation', async (data) => {
+                console.log('Join conversation data:', data);
+                
+                // Check authentication status first
+                if (!socket.isAuthenticated || !socket.userId) {
+                    console.log('Socket not authenticated:', { 
+                        isAuthenticated: socket.isAuthenticated, 
+                        userId: socket.userId 
+                    });
+                    socket.emit('join_conversation_failed', { 
+                        error: 'User not authenticated. Please authenticate first.' 
+                    });
+                    return;
+                }
+
                 try {
                     await this.joinConversation(socket, data);
                 } catch (error) {
                     console.error('Join conversation error:', error);
-                    socket.emit('error', { message: 'Failed to join conversation' });
+                    
+                    // Determine error type for better frontend handling
+                    const isClosed = error.message.includes('closed');
+                    const isExpired = error.message.includes('expired');
+                    
+                    socket.emit('join_conversation_failed', { 
+                        error: error.message,
+                        conversationId: data.conversationId,
+                        reason: isClosed ? 'closed' : (isExpired ? 'expired' : 'unknown')
+                    });
                 }
             });
 
@@ -146,6 +178,7 @@ class MessageWebSocketServer {
             socket.userId = userId;
             socket.userType = userType;
             socket.userInfo = user;
+            socket.isAuthenticated = true; // Set authentication flag
 
             // Add to active users
             this.activeUsers.set(userId, socket.id);
@@ -156,11 +189,13 @@ class MessageWebSocketServer {
 
             socket.emit('authenticated', {
                 success: true,
+                userId: userId,
+                userType: userType,
                 user: user,
-                userType: userType
+                socketId: socket.id
             });
 
-            console.log(`✅ User authenticated: ${userId} (${userType})`);
+            console.log(`✅ User authenticated: ${userId} (${userType}) - Socket: ${socket.id}`);
 
         } catch (error) {
             throw new Error('Invalid token');
@@ -195,19 +230,15 @@ class MessageWebSocketServer {
     }
 
     async joinConversation(socket, data) {
-        console.log('Join conversation data:', data); // Debug log
-        
         const { conversationId } = data;
-
-        if (!socket.userId) {
-            console.error('Socket userId missing:', socket.userId);
-            throw new Error('User not authenticated');
-        }
+        const userId = socket.userId; // Use authenticated user ID
+        const userType = socket.userType;
 
         if (!conversationId) {
-            console.error('ConversationId missing:', conversationId);
             throw new Error('Conversation ID is required');
         }
+
+        console.log(`👥 User ${userId} (${userType}) attempting to join conversation ${conversationId}`);
 
         try {
             // Verify user has access to this conversation
@@ -220,10 +251,18 @@ class MessageWebSocketServer {
                     ]
                 },
                 include: {
-                    appointment: {
+                    customer: {
                         select: {
-                            appointment_status: true,
-                            scheduled_date: true
+                            user_id: true,
+                            first_name: true,
+                            last_name: true
+                        }
+                    },
+                    provider: {
+                        select: {
+                            provider_id: true,
+                            provider_first_name: true,
+                            provider_last_name: true
                         }
                     }
                 }
@@ -233,23 +272,31 @@ class MessageWebSocketServer {
                 throw new Error('Conversation not found or access denied');
             }
 
-            // Check if appointment allows messaging
-            const allowedStatuses = ['confirmed', 'in-progress', 'completed'];
-            if (!allowedStatuses.includes(conversation.appointment.appointment_status)) {
-                throw new Error('Messaging not available for this appointment status');
+            // Check if conversation is closed or not active
+            if (conversation.status === 'closed') {
+                throw new Error('This conversation has been closed and is no longer available for messaging');
+            }
+
+            if (conversation.status !== 'active') {
+                throw new Error(`Conversation is ${conversation.status} and not available for messaging`);
+            }
+
+            // Check if warranty has expired
+            if (conversation.warranty_expires && new Date() > conversation.warranty_expires) {
+                throw new Error('Conversation warranty period has expired');
             }
 
             const roomName = `conversation_${conversationId}`;
             socket.join(roomName);
             this.userRooms.get(socket.userId).add(conversationId);
+            socket.currentConversation = conversationId;
 
-            // Get conversation messages
-            const messages = await this.getConversationMessages(conversationId);
-
-            socket.emit('conversation_joined', {
-                conversationId,
-                messages,
-                conversation
+            // Send success response
+            socket.emit('joined_conversation', {
+                success: true,
+                conversationId: parseInt(conversationId),
+                roomName: roomName,
+                message: 'Successfully joined conversation'
             });
 
             // Notify other participants that user joined
@@ -259,7 +306,7 @@ class MessageWebSocketServer {
                 userInfo: socket.userInfo
             });
 
-            console.log(`👥 User ${socket.userId} joined conversation ${conversationId}`);
+            console.log(`✅ User ${socket.userId} (${socket.userType}) successfully joined conversation ${conversationId}`);
 
         } catch (error) {
             console.error('Error in joinConversation:', error);

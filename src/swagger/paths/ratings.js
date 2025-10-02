@@ -1,4 +1,12 @@
 /**
+ * Rating API Documentation
+ * 
+ * This file contains comprehensive Swagger documentation for all rating-related endpoints.
+ * The rating system allows customers and providers to rate each other after completed appointments.
+ * Features include photo uploads, rating statistics, and comprehensive filtering.
+ */
+
+/**
  * @swagger
  * /api/ratings/rateable-appointments:
  *   get:

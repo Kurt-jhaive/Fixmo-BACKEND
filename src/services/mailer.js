@@ -48,9 +48,7 @@ export const sendBookingConfirmationToCustomer = async (customerEmail, bookingDe
         weekday: 'long',
         year: 'numeric',
         month: 'long',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
+        day: 'numeric'
     });
 
     const mailOptions = {
@@ -129,9 +127,7 @@ export const sendBookingConfirmationToProvider = async (providerEmail, bookingDe
         weekday: 'long',
         year: 'numeric',
         month: 'long',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
+        day: 'numeric'
     });
 
     const mailOptions = {
@@ -474,6 +470,956 @@ export const sendBookingCompletionToProvider = async (providerEmail, bookingDeta
                 </div>
             </div>
         `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+// =======================
+// ADMIN NOTIFICATION EMAILS
+// =======================
+
+// 1. USER APPROVAL EMAIL
+export const sendUserApprovalEmail = async (userEmail, userDetails) => {
+    const { firstName, lastName, userName } = userDetails;
+    
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: userEmail,
+        subject: '🎉 Account Approved - Welcome to Fixmo!',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #28a745; margin-bottom: 10px;">🎉 Account Approved!</h1>
+                        <p style="color: #666; font-size: 16px;">Congratulations! Your Fixmo account has been verified and approved</p>
+                    </div>
+                    
+                    <div style="background-color: #d4f6d4; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #28a745;">
+                        <h3 style="margin-top: 0; color: #155724; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">✅</span>
+                            Account Details
+                        </h3>
+                        <p style="margin: 10px 0;"><strong>Name:</strong> ${firstName} ${lastName}</p>
+                        <p style="margin: 10px 0;"><strong>Username:</strong> ${userName}</p>
+                        <p style="margin: 10px 0;"><strong>Email:</strong> ${userEmail}</p>
+                        <p style="margin: 10px 0;"><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">✓ Verified & Active</span></p>
+                    </div>
+
+                    <div style="background-color: #e3f2fd; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #1976d2; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">🚀</span>
+                            What's Next?
+                        </h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #1976d2;">
+                            <li>Browse and book services from verified providers</li>
+                            <li>Track your appointments in real-time</li>
+                            <li>Rate and review service providers</li>
+                            <li>Manage your profile and preferences</li>
+                        </ul>
+                    </div>
+
+                    <div style="background-color: #fff3e0; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #ef6c00;">📱 Download the Fixmo App</h3>
+                        <p style="color: #ef6c00; margin: 0;">Get the best experience with our mobile app - book services, chat with providers, and track your appointments on the go!</p>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="#" style="background-color: #28a745; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">
+                            Start Booking Services
+                        </a>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-top: 30px;">
+                        <p style="color: #666; margin-bottom: 10px;">Need assistance? We're here to help!</p>
+                        <p style="color: #007bff; margin: 5px 0;">📧 support@fixmo.com</p>
+                        <p style="color: #007bff; margin: 5px 0;">📞 1-800-FIXMO</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            Welcome to the Fixmo family!<br>
+                            This is an automated notification from Fixmo.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// 2. SERVICE PROVIDER APPROVAL EMAIL  
+export const sendProviderApprovalEmail = async (providerEmail, providerDetails) => {
+    const { firstName, lastName, userName, location } = providerDetails;
+    
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: providerEmail,
+        subject: '🏆 Provider Account Approved - Start Earning with Fixmo!',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #007bff; margin-bottom: 10px;">🏆 Provider Account Approved!</h1>
+                        <p style="color: #666; font-size: 16px;">Congratulations! You're now a verified Fixmo service provider</p>
+                    </div>
+                    
+                    <div style="background-color: #e3f2fd; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #007bff;">
+                        <h3 style="margin-top: 0; color: #0d47a1; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">👨‍🔧</span>
+                            Provider Details
+                        </h3>
+                        <p style="margin: 10px 0;"><strong>Name:</strong> ${firstName} ${lastName}</p>
+                        <p style="margin: 10px 0;"><strong>Username:</strong> ${userName}</p>
+                        <p style="margin: 10px 0;"><strong>Email:</strong> ${providerEmail}</p>
+                        <p style="margin: 10px 0;"><strong>Service Area:</strong> ${location || 'Not specified'}</p>
+                        <p style="margin: 10px 0;"><strong>Status:</strong> <span style="color: #007bff; font-weight: bold;">✓ Verified Provider</span></p>
+                    </div>
+
+                    <div style="background-color: #e8f5e8; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #2e7d32; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">💰</span>
+                            Start Earning Today!
+                        </h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #2e7d32;">
+                            <li>Create your service listings and set your rates</li>
+                            <li>Upload certificates to boost credibility</li>
+                            <li>Set your availability schedule</li>
+                            <li>Accept bookings and grow your business</li>
+                        </ul>
+                    </div>
+
+                    <div style="background-color: #fff8e1; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #f57f17; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">⭐</span>
+                            Pro Tips for Success
+                        </h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #f57f17;">
+                            <li>Complete your profile with professional photos</li>
+                            <li>Respond quickly to customer inquiries</li>
+                            <li>Maintain high service quality for better ratings</li>
+                            <li>Keep your availability updated</li>
+                        </ul>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="#" style="background-color: #007bff; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block; margin-right: 10px;">
+                            Access Provider Dashboard
+                        </a>
+                        <a href="#" style="background-color: #28a745; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">
+                            Create Service Listings
+                        </a>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-top: 30px;">
+                        <p style="color: #666; margin-bottom: 10px;">Provider Support & Resources</p>
+                        <p style="color: #007bff; margin: 5px 0;">📧 providers@fixmo.com</p>
+                        <p style="color: #007bff; margin: 5px 0;">📚 Provider Handbook</p>
+                        <p style="color: #007bff; margin: 5px 0;">💬 Provider Community</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            Welcome to the Fixmo provider network!<br>
+                            This is an automated notification from Fixmo.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// 3. CERTIFICATE APPROVAL EMAIL
+export const sendCertificateApprovalEmail = async (providerEmail, certificateDetails) => {
+    const { certificateName, providerName, certificateNumber } = certificateDetails;
+    
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: providerEmail,
+        subject: '📜 Certificate Approved - Enhanced Credibility on Fixmo!',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #6f42c1; margin-bottom: 10px;">📜 Certificate Approved!</h1>
+                        <p style="color: #666; font-size: 16px;">Your professional certificate has been verified and approved</p>
+                    </div>
+                    
+                    <div style="background-color: #f3e5f5; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #6f42c1;">
+                        <h3 style="margin-top: 0; color: #4a148c; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">🎖️</span>
+                            Certificate Details
+                        </h3>
+                        <p style="margin: 10px 0;"><strong>Provider:</strong> ${providerName}</p>
+                        <p style="margin: 10px 0;"><strong>Certificate:</strong> ${certificateName}</p>
+                        <p style="margin: 10px 0;"><strong>Certificate Number:</strong> ${certificateNumber}</p>
+                        <p style="margin: 10px 0;"><strong>Status:</strong> <span style="color: #6f42c1; font-weight: bold;">✓ Approved & Verified</span></p>
+                    </div>
+
+                    <div style="background-color: #e8f5e8; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #2e7d32; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">🚀</span>
+                            Benefits of Verified Certificates
+                        </h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #2e7d32;">
+                            <li>Enhanced credibility and trust with customers</li>
+                            <li>Higher visibility in search results</li>
+                            <li>Ability to offer specialized services</li>
+                            <li>Increased booking potential</li>
+                        </ul>
+                    </div>
+
+                    <div style="background-color: #fff3e0; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #ef6c00; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">💡</span>
+                            Next Steps
+                        </h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #ef6c00;">
+                            <li>Update your service listings to highlight your certification</li>
+                            <li>Add this certificate to your professional portfolio</li>
+                            <li>Consider earning additional certifications</li>
+                            <li>Share your verified status with potential customers</li>
+                        </ul>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="#" style="background-color: #6f42c1; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">
+                            View My Certificates
+                        </a>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-top: 30px;">
+                        <p style="color: #666; margin-bottom: 10px;">Questions about your certification?</p>
+                        <p style="color: #007bff; margin: 5px 0;">📧 certifications@fixmo.com</p>
+                        <p style="color: #007bff; margin: 5px 0;">📋 Certification Guidelines</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            Congratulations on your verified certification!<br>
+                            This is an automated notification from Fixmo.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// 4. USER DEACTIVATION EMAIL
+export const sendUserDeactivationEmail = async (userEmail, userDetails, reason) => {
+    const { firstName, lastName, userName } = userDetails;
+    
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: userEmail,
+        subject: '⚠️ Account Deactivated - Fixmo Support Required',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #dc3545; margin-bottom: 10px;">⚠️ Account Deactivated</h1>
+                        <p style="color: #666; font-size: 16px;">Your Fixmo account has been temporarily deactivated</p>
+                    </div>
+                    
+                    <div style="background-color: #f8d7da; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #dc3545;">
+                        <h3 style="margin-top: 0; color: #721c24; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">👤</span>
+                            Account Information
+                        </h3>
+                        <p style="margin: 10px 0;"><strong>Name:</strong> ${firstName} ${lastName}</p>
+                        <p style="margin: 10px 0;"><strong>Username:</strong> ${userName}</p>
+                        <p style="margin: 10px 0;"><strong>Email:</strong> ${userEmail}</p>
+                        <p style="margin: 10px 0;"><strong>Status:</strong> <span style="color: #dc3545; font-weight: bold;">⏸️ Deactivated</span></p>
+                    </div>
+
+                    <div style="background-color: #fff3cd; padding: 20px; border-radius: 8px; margin-bottom: 25px; border-left: 4px solid #ffc107;">
+                        <h3 style="margin-top: 0; color: #856404; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">📋</span>
+                            Reason for Deactivation
+                        </h3>
+                        <div style="background-color: #fff; padding: 15px; border-radius: 5px; border: 1px solid #ffeaa7;">
+                            <p style="margin: 0; color: #856404; font-weight: bold;">${reason}</p>
+                        </div>
+                    </div>
+
+                    <div style="background-color: #cce5ff; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #004085; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">🔄</span>
+                            How to Reactivate Your Account
+                        </h3>
+                        <ol style="margin: 0; padding-left: 20px; color: #004085;">
+                            <li>Review and address the reason for deactivation</li>
+                            <li>Contact our support team for assistance</li>
+                            <li>Provide any required documentation</li>
+                            <li>Wait for account review and reactivation</li>
+                        </ol>
+                    </div>
+
+                    <div style="background-color: #d1ecf1; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #0c5460;">🛡️ Account Security Notice</h3>
+                        <p style="color: #0c5460; margin: 0;">While your account is deactivated, you will not be able to access Fixmo services. Your data remains secure and will be restored upon reactivation.</p>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="#" style="background-color: #007bff; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">
+                            Contact Support
+                        </a>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-top: 30px;">
+                        <p style="color: #666; margin-bottom: 10px;">Need immediate assistance?</p>
+                        <p style="color: #007bff; margin: 5px 0;">📧 support@fixmo.com</p>
+                        <p style="color: #007bff; margin: 5px 0;">📞 1-800-FIXMO</p>
+                        <p style="color: #007bff; margin: 5px 0;">💬 Live Chat Support</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            We're here to help resolve this matter quickly.<br>
+                            This is an automated notification from Fixmo.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// 5. PROVIDER DEACTIVATION EMAIL
+export const sendProviderDeactivationEmail = async (providerEmail, providerDetails, reason) => {
+    const { firstName, lastName, userName, location } = providerDetails;
+    
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: providerEmail,
+        subject: '⚠️ Provider Account Deactivated - Action Required',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #dc3545; margin-bottom: 10px;">⚠️ Provider Account Deactivated</h1>
+                        <p style="color: #666; font-size: 16px;">Your service provider account has been temporarily deactivated</p>
+                    </div>
+                    
+                    <div style="background-color: #f8d7da; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #dc3545;">
+                        <h3 style="margin-top: 0; color: #721c24; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">👨‍🔧</span>
+                            Provider Information
+                        </h3>
+                        <p style="margin: 10px 0;"><strong>Name:</strong> ${firstName} ${lastName}</p>
+                        <p style="margin: 10px 0;"><strong>Username:</strong> ${userName}</p>
+                        <p style="margin: 10px 0;"><strong>Email:</strong> ${providerEmail}</p>
+                        <p style="margin: 10px 0;"><strong>Service Area:</strong> ${location || 'Not specified'}</p>
+                        <p style="margin: 10px 0;"><strong>Status:</strong> <span style="color: #dc3545; font-weight: bold;">⏸️ Deactivated</span></p>
+                    </div>
+
+                    <div style="background-color: #fff3cd; padding: 20px; border-radius: 8px; margin-bottom: 25px; border-left: 4px solid #ffc107;">
+                        <h3 style="margin-top: 0; color: #856404; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">📋</span>
+                            Reason for Deactivation
+                        </h3>
+                        <div style="background-color: #fff; padding: 15px; border-radius: 5px; border: 1px solid #ffeaa7;">
+                            <p style="margin: 0; color: #856404; font-weight: bold;">${reason}</p>
+                        </div>
+                    </div>
+
+                    <div style="background-color: #ffe6e6; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #d63031; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">🚫</span>
+                            Service Impact
+                        </h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #d63031;">
+                            <li>Your services are no longer visible to customers</li>
+                            <li>You cannot accept new bookings</li>
+                            <li>Existing appointments may be affected</li>
+                            <li>Earnings and payments are temporarily on hold</li>
+                        </ul>
+                    </div>
+
+                    <div style="background-color: #cce5ff; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #004085; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">🔄</span>
+                            Steps to Reactivation
+                        </h3>
+                        <ol style="margin: 0; padding-left: 20px; color: #004085;">
+                            <li>Address the specific issue mentioned in the reason</li>
+                            <li>Contact our provider support team</li>
+                            <li>Submit any required documentation or evidence</li>
+                            <li>Complete additional verification if needed</li>
+                            <li>Wait for account review and approval</li>
+                        </ol>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="#" style="background-color: #007bff; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block; margin-right: 10px;">
+                            Contact Provider Support
+                        </a>
+                        <a href="#" style="background-color: #28a745; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">
+                            Submit Appeal
+                        </a>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-top: 30px;">
+                        <p style="color: #666; margin-bottom: 10px;">Provider Support & Appeals</p>
+                        <p style="color: #007bff; margin: 5px 0;">📧 providers@fixmo.com</p>
+                        <p style="color: #007bff; margin: 5px 0;">📞 1-800-PROVIDER</p>
+                        <p style="color: #007bff; margin: 5px 0;">📋 Provider Guidelines</p>
+                        <p style="color: #007bff; margin: 5px 0;">⚖️ Appeals Process</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            We value your partnership and want to resolve this quickly.<br>
+                            This is an automated notification from Fixmo.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// 6. USER VERIFICATION REJECTION EMAIL
+export const sendUserRejectionEmail = async (userEmail, userDetails, reason) => {
+    const { firstName, lastName, userName } = userDetails;
+    
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: userEmail,
+        subject: '❌ Account Verification Declined - Additional Information Needed',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #e74c3c; margin-bottom: 10px;">❌ Verification Declined</h1>
+                        <p style="color: #666; font-size: 16px;">Your account verification requires additional attention</p>
+                    </div>
+                    
+                    <div style="background-color: #ffeaa7; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #fdcb6e;">
+                        <h3 style="margin-top: 0; color: #e17055; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">👤</span>
+                            Account Information
+                        </h3>
+                        <p style="margin: 10px 0;"><strong>Name:</strong> ${firstName} ${lastName}</p>
+                        <p style="margin: 10px 0;"><strong>Username:</strong> ${userName}</p>
+                        <p style="margin: 10px 0;"><strong>Email:</strong> ${userEmail}</p>
+                        <p style="margin: 10px 0;"><strong>Status:</strong> <span style="color: #e17055; font-weight: bold;">⏳ Verification Pending</span></p>
+                    </div>
+
+                    <div style="background-color: #ffebee; padding: 20px; border-radius: 8px; margin-bottom: 25px; border-left: 4px solid #f44336;">
+                        <h3 style="margin-top: 0; color: #c62828; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">📋</span>
+                            Reason for Decline
+                        </h3>
+                        <div style="background-color: #fff; padding: 15px; border-radius: 5px; border: 1px solid #ffcdd2;">
+                            <p style="margin: 0; color: #c62828; font-weight: bold;">${reason}</p>
+                        </div>
+                    </div>
+
+                    <div style="background-color: #e3f2fd; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #1976d2; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">🔄</span>
+                            Next Steps to Complete Verification
+                        </h3>
+                        <ol style="margin: 0; padding-left: 20px; color: #1976d2;">
+                            <li>Review the reason for decline carefully</li>
+                            <li>Gather the required documentation or information</li>
+                            <li>Update your profile with corrected details</li>
+                            <li>Resubmit your verification request</li>
+                            <li>Contact support if you need assistance</li>
+                        </ol>
+                    </div>
+
+                    <div style="background-color: #f3e5f5; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #7b1fa2;">📝 Common Verification Requirements</h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #7b1fa2;">
+                            <li>Clear, readable photo of valid government ID</li>
+                            <li>Complete and accurate personal information</li>
+                            <li>Verifiable contact details</li>
+                            <li>Professional profile photo (if required)</li>
+                        </ul>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="#" style="background-color: #f44336; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block; margin-right: 10px;">
+                            Update Profile
+                        </a>
+                        <a href="#" style="background-color: #2196f3; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">
+                            Contact Support
+                        </a>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-top: 30px;">
+                        <p style="color: #666; margin-bottom: 10px;">Need help with verification?</p>
+                        <p style="color: #007bff; margin: 5px 0;">📧 verification@fixmo.com</p>
+                        <p style="color: #007bff; margin: 5px 0;">📞 1-800-VERIFY</p>
+                        <p style="color: #007bff; margin: 5px 0;">📋 Verification Guide</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            We're here to help you complete the verification process.<br>
+                            This is an automated notification from Fixmo.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// 7. PROVIDER VERIFICATION REJECTION EMAIL
+export const sendProviderRejectionEmail = async (providerEmail, providerDetails, reason) => {
+    const { firstName, lastName, userName, location } = providerDetails;
+    
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: providerEmail,
+        subject: '❌ Provider Verification Declined - Resubmission Required',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #e74c3c; margin-bottom: 10px;">❌ Provider Verification Declined</h1>
+                        <p style="color: #666; font-size: 16px;">Your provider application requires additional documentation</p>
+                    </div>
+                    
+                    <div style="background-color: #ffeaa7; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #fdcb6e;">
+                        <h3 style="margin-top: 0; color: #e17055; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">👨‍🔧</span>
+                            Provider Application Details
+                        </h3>
+                        <p style="margin: 10px 0;"><strong>Name:</strong> ${firstName} ${lastName}</p>
+                        <p style="margin: 10px 0;"><strong>Username:</strong> ${userName}</p>
+                        <p style="margin: 10px 0;"><strong>Email:</strong> ${providerEmail}</p>
+                        <p style="margin: 10px 0;"><strong>Service Area:</strong> ${location || 'Not specified'}</p>
+                        <p style="margin: 10px 0;"><strong>Status:</strong> <span style="color: #e17055; font-weight: bold;">⏳ Verification Pending</span></p>
+                    </div>
+
+                    <div style="background-color: #ffebee; padding: 20px; border-radius: 8px; margin-bottom: 25px; border-left: 4px solid #f44336;">
+                        <h3 style="margin-top: 0; color: #c62828; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">📋</span>
+                            Reason for Decline
+                        </h3>
+                        <div style="background-color: #fff; padding: 15px; border-radius: 5px; border: 1px solid #ffcdd2;">
+                            <p style="margin: 0; color: #c62828; font-weight: bold;">${reason}</p>
+                        </div>
+                    </div>
+
+                    <div style="background-color: #e3f2fd; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #1976d2; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">🔄</span>
+                            Steps to Complete Provider Verification
+                        </h3>
+                        <ol style="margin: 0; padding-left: 20px; color: #1976d2;">
+                            <li>Address the specific issues mentioned above</li>
+                            <li>Update your provider profile information</li>
+                            <li>Upload clear, valid identification documents</li>
+                            <li>Provide proof of professional qualifications</li>
+                            <li>Resubmit your provider application</li>
+                        </ol>
+                    </div>
+
+                    <div style="background-color: #f3e5f5; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #7b1fa2;">📝 Provider Verification Checklist</h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #7b1fa2;">
+                            <li>✓ Clear government-issued photo ID</li>
+                            <li>✓ Proof of business registration (if applicable)</li>
+                            <li>✓ Professional certifications and licenses</li>
+                            <li>✓ Complete service area information</li>
+                            <li>✓ Professional profile photo</li>
+                            <li>✓ Accurate contact and location details</li>
+                        </ul>
+                    </div>
+
+                    <div style="background-color: #fff8e1; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #f57c00;">⏰ Important Notes</h3>
+                        <p style="color: #f57c00; margin: 0;">Your application will remain active for 30 days. Please resubmit with the required information within this timeframe to avoid having to restart the process.</p>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="#" style="background-color: #f44336; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block; margin-right: 10px;">
+                            Update Application
+                        </a>
+                        <a href="#" style="background-color: #2196f3; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">
+                            Provider Support
+                        </a>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-top: 30px;">
+                        <p style="color: #666; margin-bottom: 10px;">Provider Application Support</p>
+                        <p style="color: #007bff; margin: 5px 0;">📧 providers@fixmo.com</p>
+                        <p style="color: #007bff; margin: 5px 0;">📞 1-800-PROVIDER</p>
+                        <p style="color: #007bff; margin: 5px 0;">📋 Provider Guidelines</p>
+                        <p style="color: #007bff; margin: 5px 0;">🎥 Verification Tutorial</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            We look forward to welcoming you to our provider network.<br>
+                            This is an automated notification from Fixmo.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// 8. CERTIFICATE REJECTION EMAIL
+export const sendCertificateRejectionEmail = async (providerEmail, certificateDetails, reason) => {
+    const { certificateName, providerName, certificateNumber } = certificateDetails;
+    
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: providerEmail,
+        subject: '❌ Certificate Verification Declined - Resubmission Required',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #e74c3c; margin-bottom: 10px;">❌ Certificate Verification Declined</h1>
+                        <p style="color: #666; font-size: 16px;">Your certificate submission requires additional review</p>
+                    </div>
+                    
+                    <div style="background-color: #ffeaa7; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #fdcb6e;">
+                        <h3 style="margin-top: 0; color: #e17055; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">📜</span>
+                            Certificate Submission Details
+                        </h3>
+                        <p style="margin: 10px 0;"><strong>Provider:</strong> ${providerName}</p>
+                        <p style="margin: 10px 0;"><strong>Certificate:</strong> ${certificateName}</p>
+                        <p style="margin: 10px 0;"><strong>Certificate Number:</strong> ${certificateNumber}</p>
+                        <p style="margin: 10px 0;"><strong>Status:</strong> <span style="color: #e17055; font-weight: bold;">❌ Declined</span></p>
+                    </div>
+
+                    <div style="background-color: #ffebee; padding: 20px; border-radius: 8px; margin-bottom: 25px; border-left: 4px solid #f44336;">
+                        <h3 style="margin-top: 0; color: #c62828; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">📋</span>
+                            Reason for Decline
+                        </h3>
+                        <div style="background-color: #fff; padding: 15px; border-radius: 5px; border: 1px solid #ffcdd2;">
+                            <p style="margin: 0; color: #c62828; font-weight: bold;">${reason}</p>
+                        </div>
+                    </div>
+
+                    <div style="background-color: #e3f2fd; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #1976d2; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">🔄</span>
+                            Steps to Resubmit Certificate
+                        </h3>
+                        <ol style="margin: 0; padding-left: 20px; color: #1976d2;">
+                            <li>Review the specific decline reason above</li>
+                            <li>Obtain the correct or updated certificate</li>
+                            <li>Ensure document quality and legibility</li>
+                            <li>Verify all certificate information is current</li>
+                            <li>Resubmit through your provider dashboard</li>
+                        </ol>
+                    </div>
+
+                    <div style="background-color: #f3e5f5; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #7b1fa2;">📝 Certificate Requirements</h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #7b1fa2;">
+                            <li>✓ High-resolution, clear image or PDF</li>
+                            <li>✓ Current and not expired</li>
+                            <li>✓ Issued by recognized authority</li>
+                            <li>✓ Complete certificate with all details visible</li>
+                            <li>✓ Matches your registered provider name</li>
+                            <li>✓ Relevant to your service offerings</li>
+                        </ul>
+                    </div>
+
+                    <div style="background-color: #fff8e1; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #f57c00; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">💡</span>
+                            Tips for Successful Submission
+                        </h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #f57c00;">
+                            <li>Use good lighting when photographing certificates</li>
+                            <li>Ensure all text is clearly readable</li>
+                            <li>Include the complete certificate, not partial views</li>
+                            <li>Submit official copies, not photocopies when possible</li>
+                        </ul>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="#" style="background-color: #f44336; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block; margin-right: 10px;">
+                            Resubmit Certificate
+                        </a>
+                        <a href="#" style="background-color: #2196f3; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">
+                            Get Help
+                        </a>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-top: 30px;">
+                        <p style="color: #666; margin-bottom: 10px;">Certificate Verification Support</p>
+                        <p style="color: #007bff; margin: 5px 0;">📧 certifications@fixmo.com</p>
+                        <p style="color: #007bff; margin: 5px 0;">📞 1-800-CERTIFY</p>
+                        <p style="color: #007bff; margin: 5px 0;">📋 Certificate Guidelines</p>
+                        <p style="color: #007bff; margin: 5px 0;">❓ FAQ - Certificate Verification</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            We appreciate your commitment to professional standards.<br>
+                            This is an automated notification from Fixmo.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// ADMIN INVITATION EMAIL
+export const sendAdminInvitationEmail = async (adminEmail, adminDetails) => {
+    const { name, username, temporaryPassword, role, invitedBy } = adminDetails;
+    
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: adminEmail,
+        subject: '🛡️ Admin Account Created - Welcome to Fixmo Administration',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #007bff; margin-bottom: 10px;">🛡️ Admin Access Granted</h1>
+                        <p style="color: #666; font-size: 16px;">You have been invited to join the Fixmo administration team</p>
+                    </div>
+                    
+                    <div style="background-color: #e3f2fd; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #007bff;">
+                        <h3 style="margin-top: 0; color: #1976d2; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">👤</span>
+                            Admin Account Details
+                        </h3>
+                        <p style="margin: 10px 0;"><strong>Name:</strong> ${name}</p>
+                        <p style="margin: 10px 0;"><strong>Email:</strong> ${adminEmail}</p>
+                        <p style="margin: 10px 0;"><strong>Username:</strong> ${username}</p>
+                        <p style="margin: 10px 0;"><strong>Role:</strong> <span style="color: #007bff; font-weight: bold; text-transform: uppercase;">${role}</span></p>
+                        <p style="margin: 10px 0;"><strong>Invited by:</strong> ${invitedBy}</p>
+                    </div>
+
+                    <div style="background-color: #fff3e0; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #ff9800;">
+                        <h3 style="margin-top: 0; color: #ef6c00; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">🔑</span>
+                            Login Credentials
+                        </h3>
+                        <div style="background-color: #ffecb3; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace;">
+                            <p style="margin: 5px 0;"><strong>Email/Username:</strong> ${adminEmail}</p>
+                            <p style="margin: 5px 0;"><strong>Temporary Password:</strong> <span style="color: #d84315; font-weight: bold;">${temporaryPassword}</span></p>
+                        </div>
+                        <p style="color: #ef6c00; margin-top: 15px; margin-bottom: 0;">
+                            ⚠️ <strong>Important:</strong> You must change this password on your first login
+                        </p>
+                    </div>
+
+                    <div style="background-color: #e8f5e8; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #2e7d32; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">🚀</span>
+                            Getting Started
+                        </h3>
+                        <ol style="margin: 0; padding-left: 20px; color: #2e7d32;">
+                            <li>Click the login button below</li>
+                            <li>Use your email and temporary password to sign in</li>
+                            <li>Change your password when prompted</li>
+                            <li>Explore the admin dashboard</li>
+                            <li>Contact support if you need assistance</li>
+                        </ol>
+                    </div>
+
+                    <div style="background-color: #f3e5f5; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #7b1fa2;">🔒 Admin Responsibilities</h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #7b1fa2;">
+                            ${role === 'super_admin' ? `
+                            <li>Manage user and service provider accounts</li>
+                            <li>Oversee certificate verifications</li>
+                            <li>Create and manage other admin accounts</li>
+                            <li>Monitor platform activities and statistics</li>
+                            <li>Configure system settings and permissions</li>
+                            ` : `
+                            <li>Verify user and service provider accounts</li>
+                            <li>Review and approve certificates</li>
+                            <li>Monitor booking activities</li>
+                            <li>Respond to support requests</li>
+                            <li>Generate platform reports</li>
+                            `}
+                        </ul>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${process.env.ADMIN_LOGIN_URL || 'http://localhost:3000/admin/login'}" style="background-color: #007bff; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">
+                            Access Admin Panel
+                        </a>
+                    </div>
+
+                    <div style="background-color: #ffebee; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #c62828;">🔐 Security Reminders</h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #c62828;">
+                            <li>Keep your login credentials secure and confidential</li>
+                            <li>Use a strong, unique password</li>
+                            <li>Never share your admin access with others</li>
+                            <li>Log out completely when finished</li>
+                            <li>Report any suspicious activities immediately</li>
+                        </ul>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-top: 30px;">
+                        <p style="color: #666; margin-bottom: 10px;">Need help or have questions?</p>
+                        <p style="color: #007bff; margin: 5px 0;">📧 admin-support@fixmo.com</p>
+                        <p style="color: #007bff; margin: 5px 0;">📞 1-800-FIXMO-ADMIN</p>
+                        <p style="color: #007bff; margin: 5px 0;">📖 Admin Documentation</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            Welcome to the Fixmo administration team!<br>
+                            This is an automated notification from Fixmo Admin System.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// ADMIN PASSWORD RESET EMAIL
+export const sendAdminPasswordResetEmail = async (adminEmail, resetDetails) => {
+    const { name, username, newTemporaryPassword, resetBy, reason } = resetDetails;
+    
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: adminEmail,
+        subject: '🔄 Admin Password Reset - Fixmo Administration',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #ff6b35; margin-bottom: 10px;">🔄 Password Reset</h1>
+                        <p style="color: #666; font-size: 16px;">Your Fixmo admin password has been reset</p>
+                    </div>
+                    
+                    <div style="background-color: #fff3e0; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #ff9800;">
+                        <h3 style="margin-top: 0; color: #ef6c00; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">⚠️</span>
+                            Password Reset Notice
+                        </h3>
+                        <p style="margin: 10px 0; color: #ef6c00;">Your admin account password has been reset by a super administrator.</p>
+                        ${reason ? `<p style="margin: 10px 0; color: #ef6c00;"><strong>Reason:</strong> ${reason}</p>` : ''}
+                        <p style="margin: 10px 0; color: #ef6c00;"><strong>Reset by:</strong> ${resetBy}</p>
+                        <p style="margin: 10px 0; color: #ef6c00;"><strong>Reset time:</strong> ${new Date().toLocaleString()}</p>
+                    </div>
+
+                    <div style="background-color: #e3f2fd; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #007bff;">
+                        <h3 style="margin-top: 0; color: #1976d2; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">👤</span>
+                            Account Information
+                        </h3>
+                        <p style="margin: 10px 0;"><strong>Name:</strong> ${name}</p>
+                        <p style="margin: 10px 0;"><strong>Email:</strong> ${adminEmail}</p>
+                        <p style="margin: 10px 0;"><strong>Username:</strong> ${username}</p>
+                    </div>
+
+                    <div style="background-color: #ffebee; padding: 25px; border-radius: 10px; margin-bottom: 25px; border-left: 5px solid #f44336;">
+                        <h3 style="margin-top: 0; color: #c62828; display: flex; align-items: center;">
+                            <span style="font-size: 24px; margin-right: 10px;">🔑</span>
+                            New Login Credentials
+                        </h3>
+                        <div style="background-color: #ffcdd2; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace;">
+                            <p style="margin: 5px 0;"><strong>Email/Username:</strong> ${adminEmail}</p>
+                            <p style="margin: 5px 0;"><strong>New Temporary Password:</strong> <span style="color: #d84315; font-weight: bold;">${newTemporaryPassword}</span></p>
+                        </div>
+                        <p style="color: #c62828; margin-top: 15px; margin-bottom: 0;">
+                            ⚠️ <strong>Important:</strong> You must change this password immediately upon login
+                        </p>
+                    </div>
+
+                    <div style="background-color: #e8f5e8; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #2e7d32; display: flex; align-items: center;">
+                            <span style="font-size: 20px; margin-right: 8px;">🚀</span>
+                            Next Steps
+                        </h3>
+                        <ol style="margin: 0; padding-left: 20px; color: #2e7d32;">
+                            <li>Click the login button below</li>
+                            <li>Use your email and new temporary password</li>
+                            <li>Change your password immediately when prompted</li>
+                            <li>Choose a strong, unique password</li>
+                            <li>Contact support if you have any concerns</li>
+                        </ol>
+                    </div>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${process.env.ADMIN_LOGIN_URL || 'http://localhost:3000/admin/login'}" style="background-color: #ff6b35; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">
+                            Login to Admin Panel
+                        </a>
+                    </div>
+
+                    <div style="background-color: #f3e5f5; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #7b1fa2;">🔐 Security Recommendations</h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #7b1fa2;">
+                            <li>Change your password immediately</li>
+                            <li>Use a strong, unique password with special characters</li>
+                            <li>Do not share your new credentials with anyone</li>
+                            <li>Log out completely when finished</li>
+                            <li>Report any suspicious activities</li>
+                            <li>Contact support if you didn't request this reset</li>
+                        </ul>
+                    </div>
+
+                    <div style="background-color: #fff8e1; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #f57f17;">📞 Need Help?</h3>
+                        <p style="color: #f57f17; margin: 5px 0;">If you didn't request this password reset or have concerns about account security:</p>
+                        <p style="color: #007bff; margin: 5px 0;">📧 admin-support@fixmo.com</p>
+                        <p style="color: #007bff; margin: 5px 0;">📞 1-800-FIXMO-ADMIN</p>
+                        <p style="color: #007bff; margin: 5px 0;">🔒 Security Team: security@fixmo.com</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            This password reset was performed for security purposes.<br>
+                            This is an automated notification from Fixmo Admin System.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+/**
+ * Generic email sending function for custom use cases
+ * @param {Object} options - Email options
+ * @param {string} options.to - Recipient email address
+ * @param {string} options.subject - Email subject
+ * @param {string} options.html - HTML content of the email
+ * @param {string} [options.from] - Sender email (defaults to MAILER_USER)
+ */
+export const sendEmail = async ({ to, subject, html, from = process.env.MAILER_USER }) => {
+    const mailOptions = {
+        from: from,
+        to: to,
+        subject: subject,
+        html: html
     };
     
     await transporter.sendMail(mailOptions);

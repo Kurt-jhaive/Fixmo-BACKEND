@@ -10,6 +10,14 @@ const options = {
       description: `
         A comprehensive service management platform that connects customers with service providers
         
+        ## 🆕 New Features
+        
+        **🗓️ Date-Based Provider Filtering:**
+        - Customers can now filter service providers by availability on specific dates
+        - Only providers who are available and not booked on the selected date are shown
+        - Perfect for calendar-based booking workflows
+        - See the \`/auth/service-listings\` endpoint with \`date\` parameter
+        
         ## Authentication Guide
         
         **🔐 How to use JWT Authentication:**
@@ -17,6 +25,7 @@ const options = {
         1. **Get a JWT Token:**
            - For customers: Use \`POST /auth/login\` with email and password
            - For providers: Use \`POST /auth/provider-login\` with provider_email and provider_password
+           - For admins: Use \`POST /api/admin/login\` with username and password
            
         2. **Authorize in Swagger:**
            - Click the **"Authorize"** button (🔒) at the top right
@@ -27,16 +36,37 @@ const options = {
            - After authorization, you can access endpoints that require authentication
            - Look for the 🔒 icon next to endpoints that need authentication
            
+        ## Admin System
+        
+        **🛡️ Default Super Admin:**
+        - Email: super@fixmo.local
+        - Password: SuperAdmin2024! (must be changed on first login)
+        - Role: super_admin
+        
+        **👥 Admin Roles:**
+        - **admin**: Standard admin privileges
+        - **super_admin**: Can manage other admins + all admin privileges
+        
+        **🔑 Admin Features:**
+        - Secure login with JWT tokens
+        - Mandatory password change for new accounts
+        - Role-based access control
+        - Account activation/deactivation
+        - Password complexity requirements
+        
         ## Endpoint Categories
         
         - **🟢 Public Endpoints**: No authentication required (login, registration, public ratings)
         - **🔒 Protected Endpoints**: Require JWT token (certificates, appointments, service management)
+        - **🛡️ Admin Endpoints**: Require admin JWT token
+        - **👑 Super Admin**: Require super admin role
         
         ## Testing Flow
         
         1. Register or login to get a JWT token
         2. Click "Authorize" and paste your token
         3. Test protected endpoints like certificate upload
+        4. For admin testing: Login as super admin and test admin endpoints
       `,
       contact: {
         name: 'Fixmo API Support',
@@ -127,7 +157,7 @@ const options = {
             provider_id: { type: 'integer', description: 'Service provider for the appointment' },
             appointment_status: { 
               type: 'string', 
-              enum: ['pending', 'approved', 'confirmed', 'in-progress', 'finished', 'completed', 'cancelled', 'no-show'],
+              enum: ['scheduled', 'on-the-way', 'in-progress', 'in-warranty', 'finished', 'completed', 'cancelled', 'backjob'],
               description: 'Current appointment status' 
             },
             scheduled_date: { type: 'string', format: 'date-time', description: 'Scheduled appointment date and time' },
@@ -136,7 +166,11 @@ const options = {
             final_price: { type: 'number', format: 'float', nullable: true, description: 'Final agreed price' },
             availability_id: { type: 'integer', description: 'Associated availability slot' },
             service_id: { type: 'integer', description: 'Service being requested' },
-            cancellation_reason: { type: 'string', nullable: true, description: 'Reason for cancellation if cancelled' }
+            cancellation_reason: { type: 'string', nullable: true, description: 'Reason for cancellation if cancelled' },
+            warranty_days: { type: 'integer', nullable: true, description: 'Warranty days copied from service at booking' },
+            finished_at: { type: 'string', format: 'date-time', nullable: true, description: 'When provider finished the work' },
+            completed_at: { type: 'string', format: 'date-time', nullable: true, description: 'When customer marked completed or auto-completed' },
+            warranty_expires_at: { type: 'string', format: 'date-time', nullable: true, description: 'When warranty window expires' }
           }
         },
         Rating: {
@@ -216,12 +250,16 @@ const options = {
         description: 'Customer and Provider authentication endpoints'
       },
       {
+        name: 'Customer Services',
+        description: 'Customer service browsing and booking endpoints with advanced filtering'
+      },
+      {
         name: 'Services',
         description: 'Service management endpoints'
       },
       {
         name: 'Appointments',
-        description: 'Appointment booking and management'
+        description: 'Appointment booking and management (includes Backjob workflow)'
       },
       {
         name: 'Ratings',
@@ -252,7 +290,8 @@ const options = {
   apis: [
     './src/route/*.js',
     './src/controller/*.js',
-    './src/swagger/paths/*.js'
+    './src/swagger/paths/*.js',
+    './src/swagger/components/*.js'
   ],
 };
 

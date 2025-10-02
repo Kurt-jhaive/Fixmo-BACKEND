@@ -14,8 +14,11 @@ import appointmentRoutes from './route/appointmentRoutes.js';
 import adminRoutes from './route/adminRoutes.js';
 import ratingRoutes from './route/ratingRoutes.js';
 import messageRoutes from './route/messageRoutes.js';
+import warrantyAdminRoutes from './route/warrantyAdminRoutes.js';
 import testRoutes from './route/testRoutes.js';
+import verificationRoutes from './route/verificationRoutes.js';
 import { setWebSocketServer } from './controller/messageController.js';
+import { setWebSocketServer as setWarrantyJobWebSocket, initializeWarrantyExpiryJob } from './services/warrantyExpiryJob.js';
 import cors from 'cors';
 import { specs, swaggerUi } from './config/swagger.js';
 import MessageWebSocketServer from './services/MessageWebSocketServer.js';
@@ -152,6 +155,8 @@ app.use('/api/availability', availabilityRoutes); // Availability management rou
 app.use('/api/appointments', appointmentRoutes); // Appointment management routes
 app.use('/api/ratings', ratingRoutes); // Rating management routes
 app.use('/api/messages', messageRoutes); // Message management routes
+app.use('/api/admin/warranty', warrantyAdminRoutes); // Warranty management admin routes
+app.use('/api/verification', verificationRoutes); // Verification management routes
 app.use('/api/test', testRoutes); // Test routes for Cloudinary and other features
 
 // 404 handler for undefined routes (without wildcard)
@@ -186,12 +191,60 @@ app.use((err, req, res, next) => {
 // Initialize WebSocket server
 const messageWebSocket = new MessageWebSocketServer(httpServer);
 
-// Pass WebSocket server to message controller
+// Pass WebSocket server to message controller and warranty service
 setWebSocketServer(messageWebSocket);
+setWarrantyJobWebSocket(messageWebSocket);
+
+// Initialize warranty expiry cleanup job
+initializeWarrantyExpiryJob();
 
 httpServer.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Fixmo Backend API Server is running on http://0.0.0.0:${port}`);
   console.log(`📱 Ready for React Native connections`);
   console.log(`💬 WebSocket server initialized for real-time messaging`);
+  console.log(`⏰ Warranty expiry cleanup job initialized`);
   console.log(`🗄️ Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
 });
+
+// Auto-complete appointments after warranty window if customer hasn't completed
+// Runs every 6 hours to reduce load; uses warranty_days and finished_at/warranty_expires_at
+const AUTO_COMPLETE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+setInterval(async () => {
+  try {
+    const now = new Date();
+    // Find appointments that are in-warranty or backjob, have warranty_expires_at in the past, and are not completed/cancelled
+    // Exclude appointments with paused warranties (backjobs)
+    const expired = await prisma.appointment.findMany({
+      where: {
+        appointment_status: { in: ['in-warranty', 'backjob'] },
+        warranty_expires_at: { lte: now },
+        warranty_paused_at: null, // Only expire non-paused warranties
+      },
+      select: { appointment_id: true, appointment_status: true }
+    });
+
+    if (expired.length > 0) {
+      const ids = expired.map(a => a.appointment_id);
+      await prisma.appointment.updateMany({
+        where: { appointment_id: { in: ids } },
+        data: { appointment_status: 'completed', completed_at: now }
+      });
+      
+      // Also expire any active backjob applications for these appointments
+      await prisma.backjobApplication.updateMany({
+        where: { 
+          appointment_id: { in: ids },
+          status: { in: ['approved', 'pending'] }
+        },
+        data: { 
+          status: 'cancelled-by-admin',
+          admin_notes: 'Cancelled due to warranty expiration'
+        }
+      });
+      
+      console.log(`✅ Auto-completed ${ids.length} appointment(s) after warranty expiration and cancelled related backjobs.`);
+    }
+  } catch (err) {
+    console.error('Auto-complete job error:', err);
+  }
+}, AUTO_COMPLETE_INTERVAL_MS);

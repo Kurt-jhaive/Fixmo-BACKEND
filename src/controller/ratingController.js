@@ -1,7 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import path from 'path';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
-import fs from 'fs';
 
 const prisma = new PrismaClient();
 
@@ -95,6 +93,23 @@ export const createRating = async (req, res) => {
             }
         }
 
+        // Validate customer_id
+        if (!customer_id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required. Customer ID is missing.'
+            });
+        }
+
+        console.log('Creating rating with validated data:', {
+            appointment_id: parseInt(appointment_id),
+            provider_id: parseInt(provider_id),
+            customer_id,
+            rating_value: ratingNum,
+            rating_comment: rating_comment || null,
+            rating_photo
+        });
+
         // Create the rating
         const newRating = await prisma.rating.create({
             data: {
@@ -157,15 +172,17 @@ export const createRating = async (req, res) => {
 // Get all ratings for a specific provider
 export const getProviderRatings = async (req, res) => {
     try {
-        const { provider_id } = req.params;
+        const { providerId } = req.params; // Changed from provider_id to providerId
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
+        console.log('Getting provider ratings for provider ID:', providerId);
+
         // Get ratings with pagination
         const ratings = await prisma.rating.findMany({
             where: {
-                provider_id: parseInt(provider_id),
+                provider_id: parseInt(providerId), // Changed from provider_id to providerId
                 rated_by: 'customer'
             },
             include: {
@@ -199,7 +216,7 @@ export const getProviderRatings = async (req, res) => {
         // Get total count for pagination
         const totalRatings = await prisma.rating.count({
             where: {
-                provider_id: parseInt(provider_id),
+                provider_id: parseInt(providerId), // Changed from provider_id to providerId
                 rated_by: 'customer'
             }
         });
@@ -207,7 +224,7 @@ export const getProviderRatings = async (req, res) => {
         // Calculate rating statistics
         const ratingStats = await prisma.rating.aggregate({
             where: {
-                provider_id: parseInt(provider_id),
+                provider_id: parseInt(providerId), // Changed from provider_id to providerId
                 rated_by: 'customer'
             },
             _avg: {
@@ -222,7 +239,7 @@ export const getProviderRatings = async (req, res) => {
         const ratingDistribution = await Promise.all([1, 2, 3, 4, 5].map(async (star) => {
             const count = await prisma.rating.count({
                 where: {
-                    provider_id: parseInt(provider_id),
+                    provider_id: parseInt(providerId), // Changed from provider_id to providerId
                     rated_by: 'customer',
                     rating_value: star
                 }
@@ -465,10 +482,8 @@ export const deleteRating = async (req, res) => {
             });
         }
 
-        // Delete the photo if it exists
-        if (existingRating.rating_photo && fs.existsSync(existingRating.rating_photo)) {
-            fs.unlinkSync(existingRating.rating_photo);
-        }
+        // Note: Cloudinary photos are managed automatically - no manual deletion needed
+        // The photo URL stored in rating_photo is just a reference to Cloudinary
 
         // Delete the rating
         await prisma.rating.delete({

@@ -32,7 +32,7 @@ import {
   getAppointmentDetails,
   getCustomerBookingsDetailed,
   cancelAppointmentEnhanced,
-  getCustomerProfile
+  getCustomerProfile,
 } from '../controller/authCustomerController.js';
 
 const router = express.Router();

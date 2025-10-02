@@ -1,0 +1,464 @@
+{
+  "info": {
+    "name": "Fixmo Authentication API",
+    "description": "Complete authentication endpoints for customers and service providers",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "customerToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "providerToken",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Customer Authentication",
+      "item": [
+        {
+          "name": "1. Customer - Request Registration OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/request-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "request-otp"]
+            }
+          }
+        },
+        {
+          "name": "2. Customer - Verify OTP Only (Optional)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@example.com\",\n  \"otp\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "verify-otp"]
+            }
+          }
+        },
+        {
+          "name": "3. Customer - Complete Registration",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "email",
+                  "value": "customer@example.com",
+                  "type": "text"
+                },
+                {
+                  "key": "otp",
+                  "value": "123456",
+                  "type": "text"
+                },
+                {
+                  "key": "password",
+                  "value": "password123",
+                  "type": "text"
+                },
+                {
+                  "key": "userName",
+                  "value": "johndoe",
+                  "type": "text"
+                },
+                {
+                  "key": "first_name",
+                  "value": "John",
+                  "type": "text"
+                },
+                {
+                  "key": "last_name",
+                  "value": "Doe",
+                  "type": "text"
+                },
+                {
+                  "key": "birthday",
+                  "value": "1990-01-15",
+                  "type": "text"
+                },
+                {
+                  "key": "phone_number",
+                  "value": "+1234567890",
+                  "type": "text"
+                },
+                {
+                  "key": "user_location",
+                  "value": "New York, NY",
+                  "type": "text"
+                },
+                {
+                  "key": "user_exact_location",
+                  "value": "123 Main St",
+                  "type": "text"
+                },
+                {
+                  "key": "profile_photo",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "valid_id",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/verify-register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "verify-register"]
+            }
+          }
+        },
+        {
+          "name": "4. Customer - Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.collectionVariables.set(\"customerToken\", jsonData.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@example.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "5. Customer - Request Forgot Password OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/forgot-password-request-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "forgot-password-request-otp"]
+            }
+          }
+        },
+        {
+          "name": "6. Customer - Verify OTP and Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@example.com\",\n  \"otp\": \"123456\",\n  \"newPassword\": \"newPassword123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/forgot-password-verify-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "forgot-password-verify-otp"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Service Provider Authentication",
+      "item": [
+        {
+          "name": "1. Provider - Request Registration OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider_email\": \"provider@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/provider-request-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "provider-request-otp"]
+            }
+          }
+        },
+        {
+          "name": "2. Provider - Verify OTP Only (Optional)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider_email\": \"provider@example.com\",\n  \"otp\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/provider-verify-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "provider-verify-otp"]
+            }
+          }
+        },
+        {
+          "name": "3. Provider - Complete Registration",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "provider_email",
+                  "value": "provider@example.com",
+                  "type": "text"
+                },
+                {
+                  "key": "otp",
+                  "value": "123456",
+                  "type": "text"
+                },
+                {
+                  "key": "provider_password",
+                  "value": "password123",
+                  "type": "text"
+                },
+                {
+                  "key": "provider_userName",
+                  "value": "johnplumber",
+                  "type": "text"
+                },
+                {
+                  "key": "provider_first_name",
+                  "value": "John",
+                  "type": "text"
+                },
+                {
+                  "key": "provider_last_name",
+                  "value": "Smith",
+                  "type": "text"
+                },
+                {
+                  "key": "provider_birthday",
+                  "value": "1985-05-20",
+                  "type": "text"
+                },
+                {
+                  "key": "provider_phone_number",
+                  "value": "+1234567890",
+                  "type": "text"
+                },
+                {
+                  "key": "provider_location",
+                  "value": "Los Angeles, CA",
+                  "type": "text"
+                },
+                {
+                  "key": "provider_exact_location",
+                  "value": "456 Oak Ave",
+                  "type": "text"
+                },
+                {
+                  "key": "professions",
+                  "value": "[1, 3]",
+                  "type": "text",
+                  "description": "JSON array of profession IDs"
+                },
+                {
+                  "key": "experiences",
+                  "value": "[5, 3]",
+                  "type": "text",
+                  "description": "JSON array of years of experience"
+                },
+                {
+                  "key": "certificateNames",
+                  "value": "[\"Plumbing License\", \"HVAC Certification\"]",
+                  "type": "text",
+                  "description": "JSON array of certificate names"
+                },
+                {
+                  "key": "certificateNumbers",
+                  "value": "[\"PL-12345\", \"HVAC-67890\"]",
+                  "type": "text",
+                  "description": "JSON array of certificate numbers"
+                },
+                {
+                  "key": "expiryDates",
+                  "value": "[\"2026-12-31\", \"2027-06-30\"]",
+                  "type": "text",
+                  "description": "JSON array of expiry dates"
+                },
+                {
+                  "key": "provider_profile_photo",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "provider_valid_id",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "certificates",
+                  "type": "file",
+                  "src": "",
+                  "description": "First certificate file"
+                },
+                {
+                  "key": "certificates",
+                  "type": "file",
+                  "src": "",
+                  "description": "Second certificate file"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/provider-verify-register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "provider-verify-register"]
+            }
+          }
+        },
+        {
+          "name": "4. Provider - Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.collectionVariables.set(\"providerToken\", jsonData.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider_email\": \"provider@example.com\",\n  \"provider_password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/provider-login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "provider-login"]
+            }
+          }
+        },
+        {
+          "name": "5. Provider - Request Forgot Password OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider_email\": \"provider@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/provider-forgot-password-request-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "provider-forgot-password-request-otp"]
+            }
+          }
+        },
+        {
+          "name": "6. Provider - Verify OTP and Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider_email\": \"provider@example.com\",\n  \"otp\": \"123456\",\n  \"newPassword\": \"newPassword123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/provider-forgot-password-verify-otp",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "provider-forgot-password-verify-otp"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

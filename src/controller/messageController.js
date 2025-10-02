@@ -3,6 +3,12 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
+import { 
+    findOrCreateConversation, 
+    isMessagingAllowed, 
+    getActiveWarrantyExpiry,
+    checkAppointmentStatus 
+} from '../services/conversationWarrantyService.js';
 
 const prisma = new PrismaClient();
 
@@ -46,7 +52,7 @@ class MessageController {
         try {
             const userId = req.userId;
             const userType = req.userType || (req.body.userType || req.query.userType); // 'customer' or 'provider'
-            const { page = 1, limit = 20 } = req.query;
+            const { page = 1, limit = 20, includeCompleted } = req.query;
 
             if (!userType) {
                 return res.status(400).json({ 
@@ -60,29 +66,19 @@ class MessageController {
                 });
             }
 
+            // Build where clause based on user type
             const whereClause = userType === 'customer' 
                 ? { customer_id: userId }
                 : { provider_id: userId };
 
+            // Only filter out closed/archived conversations if includeCompleted is not true
+            if (includeCompleted !== 'true' && includeCompleted !== true) {
+                whereClause.status = { not: 'closed' };
+            }
+
             const conversations = await prisma.conversation.findMany({
-                where: {
-                    ...whereClause,
-                    status: { not: 'closed' }
-                },
+                where: whereClause,
                 include: {
-                    appointment: {
-                        select: {
-                            appointment_id: true,
-                            appointment_status: true,
-                            scheduled_date: true,
-                            service: {
-                                select: {
-                                    service_title: true,
-                                    service_description: true
-                                }
-                            }
-                        }
-                    },
                     customer: {
                         select: {
                             user_id: true,
@@ -127,16 +123,81 @@ class MessageController {
                 take: parseInt(limit)
             });
 
+            // Check and update conversation statuses based on appointment status
+            const conversationsToClose = [];
+            const allConversations = [];
+
+            for (const conv of conversations) {
+                try {
+                    // Check the appointment status for this conversation
+                    const appointmentStatus = await checkAppointmentStatus(conv.customer_id, conv.provider_id);
+                    
+                    // If appointment is completed or cancelled, mark for closing
+                    if (appointmentStatus.hasAppointment && !appointmentStatus.canMessage) {
+                        conversationsToClose.push(conv.conversation_id);
+                        
+                        // Include in results if includeCompleted is true
+                        allConversations.push({
+                            ...conv,
+                            appointment_status: appointmentStatus.appointmentStatus || 'completed',
+                            is_warranty_active: appointmentStatus.isInWarranty || false,
+                            can_message: appointmentStatus.canMessage || false
+                        });
+                    } else {
+                        allConversations.push({
+                            ...conv,
+                            appointment_status: appointmentStatus.appointmentStatus || 'unknown',
+                            is_warranty_active: appointmentStatus.isInWarranty || false,
+                            can_message: appointmentStatus.canMessage || false
+                        });
+                    }
+                } catch (error) {
+                    console.error(`Error checking appointment status for conversation ${conv.conversation_id}:`, error);
+                    // If we can't check the status, keep the conversation
+                    allConversations.push({
+                        ...conv,
+                        appointment_status: 'unknown',
+                        is_warranty_active: conv.warranty_expires ? new Date() < new Date(conv.warranty_expires) : false,
+                        can_message: true // Default to true if we can't check status
+                    });
+                }
+            }
+
+            // Close conversations for completed appointments
+            if (conversationsToClose.length > 0) {
+                await prisma.conversation.updateMany({
+                    where: {
+                        conversation_id: { in: conversationsToClose }
+                    },
+                    data: {
+                        status: 'closed',
+                        updated_at: new Date()
+                    }
+                });
+                console.log(`🔒 Auto-closed ${conversationsToClose.length} conversations for completed appointments`);
+            }
+
+            // Filter conversations based on includeCompleted parameter
+            let finalConversations = allConversations;
+            if (includeCompleted !== 'true' && includeCompleted !== true) {
+                // Only show conversations that weren't marked to close
+                finalConversations = allConversations.filter(conv => 
+                    !conversationsToClose.includes(conv.conversation_id)
+                );
+            }
+
             // Format conversations
-            const formattedConversations = conversations.map(conv => ({
+            const formattedConversations = finalConversations.map(conv => ({
                 conversation_id: conv.conversation_id,
-                appointment: conv.appointment,
                 participant: userType === 'customer' ? conv.provider : conv.customer,
                 last_message: conv.messages[0] || null,
                 unread_count: conv._count.messages,
                 status: conv.status,
+                warranty_expires: conv.warranty_expires,
+                appointment_status: conv.appointment_status,
                 created_at: conv.created_at,
-                last_message_at: conv.last_message_at
+                last_message_at: conv.last_message_at,
+                is_warranty_active: conv.is_warranty_active
             }));
 
             res.json({
@@ -145,7 +206,7 @@ class MessageController {
                 pagination: {
                     page: parseInt(page),
                     limit: parseInt(limit),
-                    total: conversations.length
+                    total: formattedConversations.length
                 }
             });
 
@@ -231,10 +292,7 @@ class MessageController {
 
             // Verify conversation access
             const conversation = await prisma.conversation.findUnique({
-                where: { conversation_id: parseInt(conversationId) },
-                include: {
-                    appointment: true
-                }
+                where: { conversation_id: parseInt(conversationId) }
             });
 
             if (!conversation || 
@@ -245,12 +303,38 @@ class MessageController {
                 });
             }
 
-            // Check if messaging is allowed for this appointment
-            const allowedStatuses = ['confirmed', 'in-progress', 'completed'];
-            if (!allowedStatuses.includes(conversation.appointment.appointment_status)) {
+            // Check if conversation is still active and within warranty period
+            if (conversation.status !== 'active') {
                 return res.status(403).json({
                     success: false,
-                    message: 'Messaging not available for this appointment status'
+                    message: 'This conversation has been closed'
+                });
+            }
+
+            // Check appointment status and update if needed
+            const appointmentStatus = await checkAppointmentStatus(conversation.customer_id, conversation.provider_id);
+            
+            if (!appointmentStatus.hasAppointment) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'No valid appointment found for this conversation'
+                });
+            }
+
+            // Check if messaging is allowed (any non-cancelled, non-completed appointment)
+            if (!appointmentStatus.canMessage) {
+                // If appointment is completed or cancelled, close the conversation
+                await prisma.conversation.update({
+                    where: { conversation_id: parseInt(conversationId) },
+                    data: { 
+                        status: 'closed',
+                        updated_at: new Date()
+                    }
+                });
+
+                return res.status(403).json({
+                    success: false,
+                    message: 'This conversation has been closed - appointment is cancelled or completed'
                 });
             }
 
@@ -359,49 +443,62 @@ class MessageController {
         }
     }
 
-    // Create conversation (when appointment is confirmed)
+    // Create conversation (for customer-provider pair)
     async createConversation(req, res) {
         try {
-            const { appointmentId } = req.body;
+            const { customerId, providerId } = req.body;
+            const userId = req.userId;
+            const userType = req.userType || req.body.userType;
 
-            // Get appointment details
-            const appointment = await prisma.appointment.findUnique({
-                where: { appointment_id: appointmentId },
-                include: {
-                    customer: true,
-                    serviceProvider: true
-                }
-            });
-
-            if (!appointment) {
-                return res.status(404).json({
+            // Validate input
+            if (!customerId || !providerId) {
+                return res.status(400).json({
                     success: false,
-                    message: 'Appointment not found'
+                    message: 'Customer ID and Provider ID are required'
                 });
             }
 
-            // Check if conversation already exists
-            const existingConversation = await prisma.conversation.findUnique({
-                where: { appointment_id: appointmentId }
-            });
+            // Verify user has permission to create this conversation
+            const requestedCustomerId = parseInt(customerId);
+            const requestedProviderId = parseInt(providerId);
 
-            if (existingConversation) {
-                return res.json({
-                    success: true,
-                    message: 'Conversation already exists',
-                    data: existingConversation
+            if (userType === 'customer' && userId !== requestedCustomerId) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Customers can only create conversations for themselves'
                 });
             }
 
-            // Create new conversation
-            const conversation = await prisma.conversation.create({
-                data: {
-                    appointment_id: appointmentId,
-                    customer_id: appointment.customer_id,
-                    provider_id: appointment.provider_id
-                },
+            if (userType === 'provider' && userId !== requestedProviderId) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Providers can only create conversations for themselves'
+                });
+            }
+
+            // Check if messaging is allowed (any non-cancelled, non-completed appointment)
+            const messagingAllowed = await isMessagingAllowed(requestedCustomerId, requestedProviderId);
+            if (!messagingAllowed) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Cannot create conversation - no valid appointment found or appointment is cancelled/completed'
+                });
+            }
+
+            // Get warranty expiry date for the conversation
+            const warrantyExpiry = await getActiveWarrantyExpiry(requestedCustomerId, requestedProviderId);
+
+            // Find or create conversation (this function handles duplicates)
+            const conversation = await findOrCreateConversation(
+                requestedCustomerId,
+                requestedProviderId,
+                warrantyExpiry
+            );
+
+            // Get conversation with related data
+            const conversationWithDetails = await prisma.conversation.findUnique({
+                where: { conversation_id: conversation.conversation_id },
                 include: {
-                    appointment: true,
                     customer: {
                         select: {
                             user_id: true,
@@ -423,8 +520,8 @@ class MessageController {
 
             res.status(201).json({
                 success: true,
-                message: 'Conversation created successfully',
-                data: conversation
+                message: 'Conversation ready',
+                data: conversationWithDetails
             });
 
         } catch (error) {
@@ -464,17 +561,6 @@ class MessageController {
                     conversation_id: parseInt(conversationId)
                 },
                 include: {
-                    appointment: {
-                        include: {
-                            service: {
-                                select: {
-                                    service_title: true,
-                                    service_description: true,
-                                    service_startingprice: true
-                                }
-                            }
-                        }
-                    },
                     customer: {
                         select: {
                             user_id: true,
@@ -686,10 +772,7 @@ class MessageController {
 
             // Verify conversation access
             const conversation = await prisma.conversation.findUnique({
-                where: { conversation_id: parseInt(conversationId) },
-                include: {
-                    appointment: true
-                }
+                where: { conversation_id: parseInt(conversationId) }
             });
 
             if (!conversation || 
@@ -700,12 +783,20 @@ class MessageController {
                 });
             }
 
-            // Check if messaging is allowed
-            const allowedStatuses = ['confirmed', 'in-progress', 'completed'];
-            if (!allowedStatuses.includes(conversation.appointment.appointment_status)) {
+            // Check if conversation is still active and within warranty period
+            if (conversation.status !== 'active') {
                 return res.status(403).json({
                     success: false,
-                    message: 'Messaging not available for this appointment status'
+                    message: 'This conversation has been closed'
+                });
+            }
+
+            // Check if messaging is allowed (any non-cancelled, non-completed appointment)
+            const messagingAllowed = await isMessagingAllowed(conversation.customer_id, conversation.provider_id);
+            if (!messagingAllowed) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'File upload not available - appointment is cancelled or completed'
                 });
             }
 

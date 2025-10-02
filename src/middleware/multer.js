@@ -163,6 +163,64 @@ const uploadRatingPhoto = multer({
     }
 });
 
+// Multiple service photos storage configuration - Use memory storage for Cloudinary
+const multipleServicePhotosStorage = multer.memoryStorage();
+
+// Service photos file filter (max 5 photos)
+const multipleServicePhotosFilter = (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+        cb(null, true);
+    } else {
+        cb(new Error('Only image files are allowed for service photos!'), false);
+    }
+};
+
+// Multer upload configuration for multiple service photos
+const uploadMultipleServicePhotos = multer({
+    storage: multipleServicePhotosStorage,
+    fileFilter: multipleServicePhotosFilter,
+    limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB limit per photo
+        files: 5 // Maximum 5 photos
+    }
+});
+
+// Backjob evidence storage configuration - Use memory storage for Cloudinary
+const backjobEvidenceStorage = multer.memoryStorage();
+
+// Backjob evidence file filter (images and videos)
+const backjobEvidenceFilter = (req, file, cb) => {
+    // Allow images and videos for backjob evidence
+    const allowedTypes = [
+        'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+        'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/webm'
+    ];
+    
+    if (allowedTypes.includes(file.mimetype)) {
+        cb(null, true);
+    } else {
+        cb(new Error('Only image and video files are allowed for backjob evidence!'), false);
+    }
+};
+
+// Multer upload configuration for backjob evidence
+const uploadBackjobEvidence = multer({
+    storage: backjobEvidenceStorage,
+    fileFilter: backjobEvidenceFilter,
+    limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB limit for evidence files
+        files: 5 // Maximum 5 evidence files
+    }
+});
+
 const upload = multer({ dest: 'uploads/' }); // existing upload configuration
 
-export { upload, uploadServiceImage, uploadServiceImageSimple, processServiceImage, uploadRatingPhoto };
+export { 
+    upload, 
+    uploadServiceImage, 
+    uploadServiceImageSimple, 
+    processServiceImage, 
+    uploadRatingPhoto,
+    uploadMultipleServicePhotos,
+    uploadBackjobEvidence
+};

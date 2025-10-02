@@ -1,6 +1,6 @@
 import express from 'express';
 import { requireAuth } from '../middleware/sessionAuth.js';
-import { uploadServiceImage } from '../middleware/multer.js';
+import { uploadServiceImage, uploadMultipleServicePhotos } from '../middleware/multer.js';
 import {
     getProviderServices,
     getServiceById,
@@ -25,7 +25,7 @@ router.use(requireAuth('provider'));
 // Service management routes
 router.get('/services', getProviderServices);
 router.get('/services/:serviceId', getServiceById);
-router.post('/services', uploadServiceImage.single('service_picture'), createService);
+router.post('/services', uploadMultipleServicePhotos.array('service_photos', 5), createService);
 router.put('/services/:serviceId', updateService);
 router.delete('/services/:serviceId', deleteService);
 router.patch('/services/:serviceId/toggle', toggleServiceAvailability);
