@@ -28,23 +28,11 @@ const uploadServiceImage = multer({
     }
 });
 
-// Alternative simpler configuration for service images (without Sharp processing initially)
-const serviceImageStorageSimple = multer.diskStorage({
-    destination: function (req, file, cb) {
-        const uploadPath = path.join(__dirname, '../../uploads/service-images/');
-        console.log('Simple multer destination path:', uploadPath);
-        cb(null, uploadPath);
-    },
-    filename: function (req, file, cb) {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const ext = path.extname(file.originalname).toLowerCase();
-        const filename = 'service_' + uniqueSuffix + (ext || '.jpg');
-        console.log('Simple multer filename generated:', filename);
-        cb(null, filename);
-    }
-});
+// Alternative simpler configuration for service images (using memory storage for Vercel)
+// Changed from diskStorage to memoryStorage for serverless compatibility
+const serviceImageStorageSimple = multer.memoryStorage();
 
-// Simple upload without image processing
+// Simple upload without image processing (but still using memory storage)
 const uploadServiceImageSimple = multer({
     storage: serviceImageStorageSimple,
     fileFilter: serviceImageFilter,
@@ -114,7 +102,13 @@ const processServiceImage = async (req, res, next) => {
 };
 
 // Test function to verify upload directory is accessible
+// Note: Only run in development, not needed for production (Vercel uses Cloudinary)
 const testUploadDirectory = () => {
+    // Skip in production or if already tested
+    if (process.env.NODE_ENV === 'production' || global.__multerDirectoryTested) {
+        return true;
+    }
+    
     try {
         const uploadPath = path.join(__dirname, '../../uploads/service-images/');
         
@@ -123,24 +117,29 @@ const testUploadDirectory = () => {
             console.error('Upload directory does not exist:', uploadPath);
             // Try to create it
             fs.mkdirSync(uploadPath, { recursive: true });
-            console.log('Created upload directory:', uploadPath);
+            console.log('✅ Created upload directory:', uploadPath);
         }
         
         // Test write permissions
         const testFile = path.join(uploadPath, 'test.txt');
         fs.writeFileSync(testFile, 'test');
         fs.unlinkSync(testFile);
-        console.log('Upload directory is writable:', uploadPath);
+        console.log('✅ Upload directory is writable:', uploadPath);
+        
+        // Mark as tested to prevent duplicate runs
+        global.__multerDirectoryTested = true;
         
         return true;
     } catch (error) {
-        console.error('Upload directory test failed:', error);
+        console.error('❌ Upload directory test failed:', error);
         return false;
     }
 };
 
-// Run test on module load
-testUploadDirectory();
+// Run test on module load (only once)
+if (process.env.NODE_ENV !== 'production') {
+    testUploadDirectory();
+}
 
 // Rating photo storage configuration - Use memory storage for Cloudinary
 const ratingPhotoStorage = multer.memoryStorage();
@@ -213,7 +212,8 @@ const uploadBackjobEvidence = multer({
     }
 });
 
-const upload = multer({ dest: 'uploads/' }); // existing upload configuration
+// Use memory storage for Vercel compatibility (serverless environment)
+const upload = multer({ storage: multer.memoryStorage() }); // Changed from diskStorage to memoryStorage
 
 export { 
     upload, 

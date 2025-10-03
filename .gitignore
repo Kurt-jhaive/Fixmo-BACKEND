@@ -3,6 +3,8 @@
 # dependencies
 /node_modules
 
+# uploads (local file storage - not for production)
+/uploads
 
 # Metro
 .metro-health-check*
@@ -18,8 +20,12 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
 
 # typescript
 *.tsbuildinfo
 
 app-example
+
+# Vercel
+.vercel

@@ -74,6 +74,12 @@ const runWarrantyExpiryCleanup = async () => {
  * Runs every hour at minute 0 (e.g., 1:00, 2:00, 3:00, etc.)
  */
 export const initializeWarrantyExpiryJob = () => {
+    // Prevent duplicate initialization
+    if (global.__warrantyJobInitialized) {
+        console.log('ℹ️  Warranty expiry job already initialized (skipping duplicate)');
+        return;
+    }
+    
     console.log('🕐 Initializing warranty expiry cleanup job...');
     
     // Run every hour at minute 0
@@ -83,6 +89,9 @@ export const initializeWarrantyExpiryJob = () => {
     });
     
     console.log('✅ Warranty expiry cleanup job scheduled (runs every hour at minute 0)');
+    
+    // Mark as initialized to prevent duplicates
+    global.__warrantyJobInitialized = true;
     
     // Optional: Run immediately on startup for testing
     if (process.env.NODE_ENV === 'development') {

@@ -107,18 +107,9 @@ const registrationUpload = multer({
 ]);
 
 // Configure multer for single certificate uploads
-const certificateStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadPath = 'uploads/certificates/';
-    ensureDirectoryExists(uploadPath);
-    cb(null, uploadPath);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, 'certificate-' + uniqueSuffix + ext);
-  }
-});
+// Using memory storage for Vercel compatibility (serverless environment)
+// Files will be uploaded to Cloudinary from memory buffer
+const certificateStorage = multer.memoryStorage(); // Changed from diskStorage to memoryStorage
 
 const certificateFilter = (req, file, cb) => {
   console.log('Certificate file filter check:', {
