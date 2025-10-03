@@ -6,6 +6,11 @@ import authMiddleware from '../middleware/authMiddleware.js';
 import { requireCustomerSession } from '../middleware/sessionAuth.js';
 import {
   login,
+  sendOTP,
+  verifyOTPForRegistration,
+  registerCustomer,
+  checkPhoneUnique,
+  checkUsernameUnique,
   requestOTP,
   verifyOTPOnly,
   verifyOTPAndRegister,
@@ -33,6 +38,7 @@ import {
   getCustomerBookingsDetailed,
   cancelAppointmentEnhanced,
   getCustomerProfile,
+  getCustomerBookingAvailability,
   requestCustomerProfileUpdateOTP,
   verifyOTPAndUpdateCustomerProfile,
 } from '../controller/authCustomerController.js';
@@ -58,7 +64,6 @@ const optionalAuth = (req, res, next) => {
     req.userType = decoded.userType;
   } catch (err) {
     // Invalid token, but don't fail - just continue without auth
-    console.log('Optional auth: Invalid token, continuing without authentication');
   }
   
   next();
@@ -103,11 +108,25 @@ const upload = multer({
 });
 
 router.post('/login', login);
+
+// New 3-step OTP flow for customer registration
+router.post('/send-otp', sendOTP);                        // Step 1: Send OTP to email
+router.post('/verify-otp', verifyOTPForRegistration);     // Step 2: Verify OTP
+router.post('/register', upload.fields([                  // Step 3: Register user
+  { name: 'profile_photo', maxCount: 1 },
+  { name: 'valid_id', maxCount: 1 }
+]), registerCustomer);
+
+// Uniqueness check endpoints
+router.post('/check-phone', checkPhoneUnique);            // Check if phone number is unique
+router.post('/check-username', checkUsernameUnique);      // Check if username is unique
+
+// Legacy endpoints for backward compatibility
 router.post('/request-otp', upload.fields([
   { name: 'profile_photo', maxCount: 1 },
   { name: 'valid_id', maxCount: 1 }
 ]), requestOTP);               // Step 1: Send OTP with file upload
-router.post('/verify-otp', verifyOTPOnly);  // Step 1.5: Verify OTP only (for registration flow)
+router.post('/verify-otp-only', verifyOTPOnly);  // Step 1.5: Verify OTP only (for registration flow)
 router.post('/verify-register', upload.fields([
   { name: 'profile_photo', maxCount: 1 },
   { name: 'valid_id', maxCount: 1 }
@@ -126,6 +145,8 @@ router.post('/reset-password-only', resetPasswordOnly);
 router.get('/user-profile/:userId', getUserProfile);
 // Get authenticated customer profile (new endpoint)
 router.get('/customer-profile', authMiddleware, getCustomerProfile);
+// Get customer's booking availability status (how many slots left)
+router.get('/customer-booking-availability', authMiddleware, getCustomerBookingAvailability);
 // Edit customer profile - Step 1: Request OTP
 router.post('/customer-profile/request-otp', authMiddleware, requestCustomerProfileUpdateOTP);
 // Edit customer profile - Step 2: Verify OTP and Update

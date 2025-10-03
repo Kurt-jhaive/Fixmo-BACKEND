@@ -72,9 +72,78 @@ export const login = async (req, res) => {
     }
 };
 
-// Step 1: Request OTP for registration
-export const requestOTP = async (req, res) => {
+/**
+ * @swagger
+ * /auth/send-otp:
+ *   post:
+ *     tags:
+ *       - Customer Authentication
+ *     summary: Step 1 - Send OTP to email for registration
+ *     description: Generates a 6-digit OTP and sends it to the customer's email. OTP expires in 5 minutes.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "customer@example.com"
+ *                 description: Customer's email address
+ *     responses:
+ *       200:
+ *         description: OTP sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "OTP sent to email successfully"
+ *       400:
+ *         description: Bad request - User already exists or email invalid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "User already exists with this email"
+ *       429:
+ *         description: Too many requests - Rate limit exceeded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Too many OTP requests. Please try again later"
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Error sending OTP"
+ */
+// Step 1: Send OTP - Generates and sends OTP to email
+export const sendOTP = async (req, res) => {
     const { email } = req.body;
+
+    // Validate input
+    if (!email) {
+        return res.status(400).json({ message: 'Email is required' });
+    }
 
     try {
         // Check rate limiting
@@ -83,25 +152,40 @@ export const requestOTP = async (req, res) => {
             return res.status(429).json({ message: rateLimitCheck.message });
         }
 
+        // Check if user already exists
         const existingUser = await prisma.user.findUnique({ where: { email } });
         if (existingUser) {
-            return res.status(400).json({ message: 'User already exists' });
+            return res.status(400).json({ message: 'User already exists with this email' });
         }
-
-        // Delete any previous OTPs for this email to prevent re-use
-        await prisma.oTPVerification.deleteMany({ where: { email } });
 
         // Generate 6-digit OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        // Save OTP in oTPVerification table
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-        await prisma.oTPVerification.create({
-            data: {
-                email,
-                otp,
-                expires_at: expiresAt
-            }
-        });
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+        // Check if OTP already exists for this email
+        const existingOTP = await prisma.oTPVerification.findFirst({ where: { email } });
+        
+        if (existingOTP) {
+            // Update existing OTP record
+            await prisma.oTPVerification.updateMany({
+                where: { email },
+                data: {
+                    otp,
+                    expires_at: expiresAt,
+                    verified: false // Reset verification status
+                }
+            });
+        } else {
+            // Create new OTP record
+            await prisma.oTPVerification.create({
+                data: {
+                    email,
+                    otp,
+                    expires_at: expiresAt,
+                    verified: false
+                }
+            });
+        }
 
         // Record the OTP attempt
         recordOTPAttempt(email);
@@ -110,16 +194,405 @@ export const requestOTP = async (req, res) => {
         await sendOTPEmail(email, otp);
         
         res.status(200).json({
-            message: 'OTP sent to email',
+            message: 'OTP sent to email successfully',
         });
 
     } catch (err) {
-        console.error(err);
+        console.error('Send OTP error:', err);
         res.status(500).json({ message: 'Error sending OTP' });
     }
 };
 
-export const verifyOTPAndRegister = async (req, res) => {
+/**
+ * @swagger
+ * /auth/check-phone:
+ *   post:
+ *     tags:
+ *       - Customer Authentication
+ *     summary: Check if phone number is unique
+ *     description: Validates if the phone number is available for registration (not already in use)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phone_number
+ *             properties:
+ *               phone_number:
+ *                 type: string
+ *                 example: "+1234567890"
+ *                 description: Phone number to check
+ *     responses:
+ *       200:
+ *         description: Phone number is available
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 available:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Phone number is available"
+ *       400:
+ *         description: Phone number already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 available:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Phone number already exists"
+ *       500:
+ *         description: Server error
+ */
+export const checkPhoneUnique = async (req, res) => {
+    const { phone_number } = req.body;
+
+    if (!phone_number) {
+        return res.status(400).json({ message: 'Phone number is required' });
+    }
+
+    try {
+        const existingUser = await prisma.user.findUnique({ 
+            where: { phone_number } 
+        });
+
+        if (existingUser) {
+            return res.status(400).json({ 
+                available: false, 
+                message: 'Phone number already exists' 
+            });
+        }
+
+        res.status(200).json({ 
+            available: true, 
+            message: 'Phone number is available' 
+        });
+    } catch (err) {
+        console.error('Check phone uniqueness error:', err);
+        res.status(500).json({ message: 'Error checking phone number' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/check-username:
+ *   post:
+ *     tags:
+ *       - Customer Authentication
+ *     summary: Check if username is unique
+ *     description: Validates if the username is available for registration (not already in use)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userName
+ *             properties:
+ *               userName:
+ *                 type: string
+ *                 example: "johndoe123"
+ *                 description: Username to check
+ *     responses:
+ *       200:
+ *         description: Username is available
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 available:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Username is available"
+ *       400:
+ *         description: Username already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 available:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Username already exists"
+ *       500:
+ *         description: Server error
+ */
+export const checkUsernameUnique = async (req, res) => {
+    const { userName } = req.body;
+
+    if (!userName) {
+        return res.status(400).json({ message: 'Username is required' });
+    }
+
+    try {
+        const existingUser = await prisma.user.findUnique({ 
+            where: { userName } 
+        });
+
+        if (existingUser) {
+            return res.status(400).json({ 
+                available: false, 
+                message: 'Username already exists' 
+            });
+        }
+
+        res.status(200).json({ 
+            available: true, 
+            message: 'Username is available' 
+        });
+    } catch (err) {
+        console.error('Check username uniqueness error:', err);
+        res.status(500).json({ message: 'Error checking username' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/verify-otp:
+ *   post:
+ *     tags:
+ *       - Customer Authentication
+ *     summary: Step 2 - Verify OTP code
+ *     description: Validates the OTP code sent to customer's email and marks it as verified
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - otp
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "customer@example.com"
+ *                 description: Customer's email address
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *                 description: 6-digit OTP code received via email
+ *     responses:
+ *       200:
+ *         description: OTP verified successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Email verified successfully. You can now proceed to registration."
+ *                 verified:
+ *                   type: boolean
+ *                   example: true
+ *       400:
+ *         description: Bad request - Invalid, expired, or missing OTP
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   enum:
+ *                     - "No OTP found for this email. Please request a new OTP."
+ *                     - "OTP has expired. Please request a new OTP."
+ *                     - "Invalid OTP. Please try again."
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Error verifying OTP"
+ */
+// Step 2: Verify OTP - Validates OTP and marks as verified
+export const verifyOTPForRegistration = async (req, res) => {
+    const { email, otp } = req.body;
+
+    // Validate input
+    if (!email || !otp) {
+        return res.status(400).json({ message: 'Email and OTP are required' });
+    }
+
+    try {
+        // Find OTP record
+        const otpRecord = await prisma.oTPVerification.findFirst({ 
+            where: { email }
+        });
+
+        if (!otpRecord) {
+            return res.status(400).json({ message: 'No OTP found for this email. Please request a new OTP.' });
+        }
+
+        // Check if already verified
+        if (otpRecord.verified) {
+            return res.status(200).json({ message: 'Email already verified. You can proceed to registration.' });
+        }
+
+        // Check if OTP is expired
+        if (new Date() > otpRecord.expires_at) {
+            return res.status(400).json({ message: 'OTP has expired. Please request a new OTP.' });
+        }
+
+        // Check if OTP matches
+        if (otpRecord.otp !== otp) {
+            return res.status(400).json({ message: 'Invalid OTP. Please try again.' });
+        }
+
+        // Mark OTP as verified
+        await prisma.oTPVerification.updateMany({
+            where: { email },
+            data: { verified: true }
+        });
+
+        res.status(200).json({ 
+            message: 'Email verified successfully. You can now proceed to registration.',
+            verified: true
+        });
+
+    } catch (err) {
+        console.error('Verify OTP error:', err);
+        res.status(500).json({ message: 'Error verifying OTP' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/register:
+ *   post:
+ *     tags:
+ *       - Customer Authentication
+ *     summary: Step 3 - Register customer account
+ *     description: Creates a new customer account after email verification. Requires OTP to be verified first.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *               - first_name
+ *               - last_name
+ *               - userName
+ *               - phone_number
+ *             properties:
+ *               first_name:
+ *                 type: string
+ *                 example: "John"
+ *               last_name:
+ *                 type: string
+ *                 example: "Doe"
+ *               userName:
+ *                 type: string
+ *                 example: "johndoe"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "customer@example.com"
+ *               password:
+ *                 type: string
+ *                 format: password
+ *                 example: "SecurePass123"
+ *               phone_number:
+ *                 type: string
+ *                 example: "+1234567890"
+ *               birthday:
+ *                 type: string
+ *                 format: date
+ *                 example: "1990-01-15"
+ *               user_location:
+ *                 type: string
+ *                 example: "New York"
+ *               exact_location:
+ *                 type: string
+ *                 example: "123 Main St, New York, NY 10001"
+ *               profile_photo:
+ *                 type: string
+ *                 format: binary
+ *                 description: Profile photo image file (max 5MB)
+ *               valid_id:
+ *                 type: string
+ *                 format: binary
+ *                 description: Valid ID image file (max 5MB)
+ *     responses:
+ *       201:
+ *         description: Customer registered successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "User registered successfully"
+ *                 token:
+ *                   type: string
+ *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *                 userId:
+ *                   type: integer
+ *                   example: 123
+ *                 userName:
+ *                   type: string
+ *                   example: "johndoe"
+ *                 profile_photo:
+ *                   type: string
+ *                   example: "https://res.cloudinary.com/.../profile.jpg"
+ *                 valid_id:
+ *                   type: string
+ *                   example: "https://res.cloudinary.com/.../id.jpg"
+ *       400:
+ *         description: Bad request - Validation failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   enum:
+ *                     - "Email not verified. Please verify your email before registering."
+ *                     - "Email not found. Please verify your email first."
+ *                     - "User already exists"
+ *                     - "Phone number is already registered with another account"
+ *                     - "All required fields must be provided"
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Server error during registration"
+ */
+// Step 3: Register - Creates user account after email verification
+export const registerCustomer = async (req, res) => {
   try {
     const {
       first_name,
@@ -130,12 +603,29 @@ export const verifyOTPAndRegister = async (req, res) => {
       password,
       phone_number,
       user_location,
-      exact_location,
-      otp
+      exact_location
     } = req.body;
     
     const profilePhotoFile = req.files && req.files['profile_photo'] ? req.files['profile_photo'][0] : null;
     const validIdFile = req.files && req.files['valid_id'] ? req.files['valid_id'][0] : null;
+
+    // Validate required fields
+    if (!email || !password || !first_name || !last_name || !userName || !phone_number) {
+        return res.status(400).json({ message: 'All required fields must be provided' });
+    }
+
+    // Check if email is verified
+    const otpRecord = await prisma.oTPVerification.findFirst({ 
+        where: { email }
+    });
+
+    if (!otpRecord) {
+        return res.status(400).json({ message: 'Email not found. Please verify your email first.' });
+    }
+
+    if (!otpRecord.verified) {
+        return res.status(400).json({ message: 'Email not verified. Please verify your email before registering.' });
+    }
 
     // Check if user already exists (prevent duplicate registration)
     const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -157,12 +647,6 @@ export const verifyOTPAndRegister = async (req, res) => {
     });
     if (existingPhoneProvider) {
       return res.status(400).json({ message: 'Phone number is already registered with a service provider account' });
-    }
-
-    // Verify OTP using the reusable utility
-    const verificationResult = await verifyOTP(email, otp);
-    if (!verificationResult.success) {
-      return res.status(400).json({ message: verificationResult.message });
     }
 
     // Upload images to Cloudinary
@@ -213,8 +697,8 @@ export const verifyOTPAndRegister = async (req, res) => {
     // Send registration success email
     await sendRegistrationSuccessEmail(email, first_name, userName); 
 
-    // Delete the used OTP
-    await cleanupOTP(email);
+    // Delete the used OTP record
+    await prisma.oTPVerification.deleteMany({ where: { email } });
 
     // Generate JWT token for immediate login after registration
     const token = jwt.sign({ 
@@ -237,6 +721,12 @@ export const verifyOTPAndRegister = async (req, res) => {
     res.status(500).json({ message: 'Server error during registration' });
   }
 };
+
+// Legacy endpoint for backward compatibility - kept for existing integrations
+export const requestOTP = sendOTP;
+
+// Legacy endpoint for backward compatibility - kept for existing integrations
+export const verifyOTPAndRegister = registerCustomer;
 
 // CUSTOMER: Step 1 - Request OTP for forgot password
 export const requestForgotPasswordOTP = async (req, res) => {
@@ -1145,16 +1635,6 @@ export const getServiceListingsForCustomer = async (req, res) => {
             startOfDay = new Date(requestedDate);
             endOfDay = new Date(requestedDate);
             endOfDay.setUTCDate(endOfDay.getUTCDate() + 1);
-            
-            console.log('📅 Filtering providers by availability for:', {
-                date,
-                requestedDate: requestedDate.toISOString(),
-                dayOfWeek,
-                dateRange: {
-                    start: startOfDay.toISOString(),
-                    end: endOfDay.toISOString()
-                }
-            });
         }
         
         // Build where clause for filtering
@@ -1301,8 +1781,6 @@ export const getServiceListingsForCustomer = async (req, res) => {
         }
         
         if (date && dayOfWeek && startOfDay && endOfDay) {
-            console.log('🔍 Checking availability for', serviceListings.length, 'providers');
-            
             // Get all provider IDs from the listings
             const providerIds = serviceListings.map(listing => listing.serviceProvider.provider_id);
             
@@ -1330,8 +1808,6 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 activeAppointments.map(apt => apt.provider_id)
             );
             
-            console.log('🚫 Providers with active appointments on', date, ':', Array.from(providersWithActiveAppointments));
-            
             // Get availability data for all providers for the requested day of week
             const providerAvailability = await prisma.availability.findMany({
                 where: {
@@ -1340,8 +1816,6 @@ export const getServiceListingsForCustomer = async (req, res) => {
                     availability_isActive: true
                 }
             });
-            
-            console.log('📊 Found availability data for', providerAvailability.length, 'provider slots');
             
             // Group availability by provider ID and check if they have any available slots
             const availableProviderIds = new Set();
@@ -1367,14 +1841,6 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 // 2. Booking is still allowed (before 3 PM if today)
                 // 3. No active appointments for this provider on this date
                 const isAvailable = !isPastDate && isBookingAllowed && !hasActiveAppointments;
-                
-                // Add debug logging for availability checking
-                console.log(`🔍 Provider ${availability.provider_id} slot ${availability.startTime}-${availability.endTime}:`, {
-                    isPastDate,
-                    isBookingAllowed: isToday ? `Before 3PM: ${isBookingAllowed}` : 'Not today',
-                    hasActiveAppointments,
-                    isAvailable
-                });
                 
                 if (isAvailable) {
                     availableProviderIds.add(availability.provider_id);
@@ -1426,8 +1892,6 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 
                 return hasAvailability;
             });
-            
-            console.log('✅ Filtered to', filteredListings.length, 'available providers for', date);
         }
 
         // Get total count for pagination (after availability filtering if applied)
@@ -1877,6 +2341,27 @@ export const createAppointment = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: 'All required fields must be provided'
+            });
+        }
+
+        // ✅ NEW: Check booking limit - customer can only have 3 scheduled appointments at a time
+        // Only 'scheduled' status counts toward the limit
+        // Statuses that don't count: 'on the way', 'in-progress', 'finished', 'completed', 'cancelled'
+        const customerScheduledAppointments = await prisma.appointment.count({
+            where: {
+                customer_id: parseInt(customerId),
+                appointment_status: 'scheduled'  // Only count 'scheduled' status
+            }
+        });
+
+        console.log('🔍 BOOKING CHECK - Customer scheduled appointments count:', customerScheduledAppointments);
+
+        if (customerScheduledAppointments >= 3) {
+            return res.status(400).json({
+                success: false,
+                message: 'Booking limit reached. You can only have 3 scheduled appointments at a time. Please wait for one of your appointments to change status (on the way, in-progress, completed, or cancelled) before booking again.',
+                currentScheduledCount: customerScheduledAppointments,
+                maxAllowed: 3
             });
         }
 
@@ -2632,6 +3117,97 @@ export const getCustomerProfile = async (req, res) => {
             success: false,
             message: 'Internal server error',
             error: error.message 
+        });
+    }
+};
+
+/**
+ * Get customer's booking availability status
+ * Returns how many appointment slots are available for booking
+ */
+export const getCustomerBookingAvailability = async (req, res) => {
+    try {
+        const userId = req.userId; // From auth middleware
+
+        // Count scheduled appointments (statuses that count toward the limit)
+        // Only 'scheduled' status counts toward the 3-appointment limit
+        // Other statuses don't count: 'on the way', 'in-progress', 'finished', 'completed', 'cancelled'
+
+        // DEBUG: Get all appointments for this customer to see actual statuses
+        const allAppointments = await prisma.appointment.findMany({
+            where: { customer_id: userId },
+            select: {
+                appointment_id: true,
+                appointment_status: true,
+                scheduled_date: true
+            }
+        });
+        
+        const scheduledCount = await prisma.appointment.count({
+            where: {
+                customer_id: userId,
+                appointment_status: 'scheduled'  // Only count 'scheduled' status
+            }
+        });
+
+        const maxAllowed = 3;
+        const availableSlots = maxAllowed - scheduledCount;
+        const canBook = scheduledCount < maxAllowed;
+
+        // Get the scheduled appointments details
+        const scheduledAppointments = await prisma.appointment.findMany({
+            where: {
+                customer_id: userId,
+                appointment_status: 'scheduled'  // Only fetch 'scheduled' status
+            },
+            select: {
+                appointment_id: true,
+                appointment_status: true,
+                scheduled_date: true,
+                service: {
+                    select: {
+                        service_title: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_first_name: true,
+                        provider_last_name: true
+                    }
+                }
+            },
+            orderBy: {
+                scheduled_date: 'asc'
+            }
+        });
+
+        res.status(200).json({
+            success: true,
+            message: 'Booking availability retrieved successfully',
+            data: {
+                canBook,
+                scheduledCount,
+                maxAllowed,
+                availableSlots,
+                message: canBook 
+                    ? `You can book ${availableSlots} more appointment${availableSlots !== 1 ? 's' : ''}`
+                    : 'Booking limit reached. Please wait for an appointment to be completed or cancelled.',
+                scheduledAppointments: scheduledAppointments.map(apt => ({
+                    appointment_id: apt.appointment_id,
+                    status: apt.appointment_status,
+                    scheduled_date: apt.scheduled_date,
+                    service_title: apt.service?.service_title,
+                    provider_name: `${apt.serviceProvider?.provider_first_name} ${apt.serviceProvider?.provider_last_name}`
+                }))
+            }
+        });
+
+    } catch (error) {
+        console.error('Error getting booking availability:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
         });
     }
 };

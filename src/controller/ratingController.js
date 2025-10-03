@@ -177,8 +177,6 @@ export const getProviderRatings = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
 
-        console.log('Getting provider ratings for provider ID:', providerId);
-
         // Get ratings with pagination
         const ratings = await prisma.rating.findMany({
             where: {

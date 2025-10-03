@@ -115,7 +115,7 @@ formData.append('provider_last_name', 'Smith');
 formData.append('provider_userName', 'johnsmith_plumber');
 formData.append('provider_phone_number', '+1234567890');
 formData.append('provider_location', 'New York, NY');
-formData.append('provider_exact_location', '123 Main St, Apt 4B, New York, NY 10001');
+formData.append('provider_exact_location', '100,200');
 formData.append('provider_birthday', '1985-05-15');
 formData.append('provider_uli', 'ULI123456789');
 
@@ -159,8 +159,8 @@ formData.append('certificate_images', certificateFile2);
   "certificates": [
     {
       "certificate_id": 1,
-      "certificate_name": "Master Plumber License",
-      "certificate_number": "MPL-12345",
+      "certificate_name": "Plumbing NCII",
+      "certificate_number": "14-digit number",
       "expiry_date": "2026-12-31T00:00:00.000Z",
       "certificate_image": "https://cloudinary.../cert1.jpg"
     },
@@ -470,7 +470,7 @@ const ProviderRegistration = () => {
     provider_location: '',
     provider_exact_location: '',
     provider_birthday: '',
-    provider_uli: ''
+    provider_uli: '' (17 alphanumeric characters (first 3 letters then numbers))
   });
   const [professions, setProfessions] = useState([]);
   const [experiences, setExperiences] = useState([]);

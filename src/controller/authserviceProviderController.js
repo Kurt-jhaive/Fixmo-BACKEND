@@ -20,39 +20,559 @@ const minutesToTime = (minutes) => {
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
 };
 
-// Step 1: Request OTP for service provider registration
-export const requestProviderOTP = async (req, res) => {
+/**
+ * @swagger
+ * /auth/provider/send-otp:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Step 1 - Send OTP to provider email
+ *     description: Generates a 6-digit OTP and sends it to the service provider's email. OTP expires in 5 minutes.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_email
+ *             properties:
+ *               provider_email:
+ *                 type: string
+ *                 format: email
+ *                 example: "provider@example.com"
+ *                 description: Service provider's email address
+ *     responses:
+ *       200:
+ *         description: OTP sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "OTP sent to provider email successfully"
+ *       400:
+ *         description: Bad request - Provider already exists or email invalid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Provider already exists with this email"
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Error sending OTP"
+ */
+// Step 1: Send OTP for service provider registration
+export const sendProviderOTP = async (req, res) => {
     const { provider_email } = req.body;
+
+    // Validate input
+    if (!provider_email) {
+        return res.status(400).json({ message: 'Email is required' });
+    }
+
     try {
+        // Check if provider already exists
         const existingProvider = await prisma.serviceProviderDetails.findUnique({ where: { provider_email } });
         if (existingProvider) {
-            return res.status(400).json({ message: 'Provider already exists' });
+            return res.status(400).json({ message: 'Provider already exists with this email' });
         }
-
-        // Delete any previous OTPs for this email to prevent re-use
-        await prisma.oTPVerification.deleteMany({ where: { email: provider_email } });
 
         // Generate 6-digit OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-        await prisma.oTPVerification.create({
-            data: {
-                email: provider_email,
-                otp,
-                expires_at: expiresAt
-            }
-        });
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
+        // Check if OTP already exists for this email
+        const existingOTP = await prisma.oTPVerification.findFirst({ where: { email: provider_email } });
+        
+        if (existingOTP) {
+            // Update existing OTP record
+            await prisma.oTPVerification.updateMany({
+                where: { email: provider_email },
+                data: {
+                    otp,
+                    expires_at: expiresAt,
+                    verified: false // Reset verification status
+                }
+            });
+        } else {
+            // Create new OTP record
+            await prisma.oTPVerification.create({
+                data: {
+                    email: provider_email,
+                    otp,
+                    expires_at: expiresAt,
+                    verified: false
+                }
+            });
+        }
+
+        // Send OTP email
         await sendOTPEmail(provider_email, otp);
-        res.status(200).json({ message: 'OTP sent to provider email' });
+        
+        res.status(200).json({ message: 'OTP sent to provider email successfully' });
     } catch (err) {
-        console.error(err);
+        console.error('Send provider OTP error:', err);
         res.status(500).json({ message: 'Error sending OTP' });
     }
 };
 
-// Step 2: Verify OTP and register service provider
-export const verifyProviderOTPAndRegister = async (req, res) => {
+/**
+ * @swagger
+ * /auth/provider/check-phone:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Check if provider phone number is unique
+ *     description: Validates if the phone number is available for provider registration (not already in use)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_phone_number
+ *             properties:
+ *               provider_phone_number:
+ *                 type: string
+ *                 example: "+1234567890"
+ *                 description: Phone number to check
+ *     responses:
+ *       200:
+ *         description: Phone number is available
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 available:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Phone number is available"
+ *       400:
+ *         description: Phone number already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 available:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Phone number already exists"
+ *       500:
+ *         description: Server error
+ */
+export const checkProviderPhoneUnique = async (req, res) => {
+    const { provider_phone_number } = req.body;
+
+    if (!provider_phone_number) {
+        return res.status(400).json({ message: 'Phone number is required' });
+    }
+
+    try {
+        const existingProvider = await prisma.serviceProviderDetails.findUnique({ 
+            where: { provider_phone_number } 
+        });
+
+        if (existingProvider) {
+            return res.status(400).json({ 
+                available: false, 
+                message: 'Phone number already exists' 
+            });
+        }
+
+        res.status(200).json({ 
+            available: true, 
+            message: 'Phone number is available' 
+        });
+    } catch (err) {
+        console.error('Check provider phone uniqueness error:', err);
+        res.status(500).json({ message: 'Error checking phone number' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/provider/check-username:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Check if provider username is unique
+ *     description: Validates if the username is available for provider registration (not already in use)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_userName
+ *             properties:
+ *               provider_userName:
+ *                 type: string
+ *                 example: "johndoe_provider"
+ *                 description: Username to check
+ *     responses:
+ *       200:
+ *         description: Username is available
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 available:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Username is available"
+ *       400:
+ *         description: Username already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 available:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Username already exists"
+ *       500:
+ *         description: Server error
+ */
+export const checkProviderUsernameUnique = async (req, res) => {
+    const { provider_userName } = req.body;
+
+    if (!provider_userName) {
+        return res.status(400).json({ message: 'Username is required' });
+    }
+
+    try {
+        const existingProvider = await prisma.serviceProviderDetails.findUnique({ 
+            where: { provider_userName } 
+        });
+
+        if (existingProvider) {
+            return res.status(400).json({ 
+                available: false, 
+                message: 'Username already exists' 
+            });
+        }
+
+        res.status(200).json({ 
+            available: true, 
+            message: 'Username is available' 
+        });
+    } catch (err) {
+        console.error('Check provider username uniqueness error:', err);
+        res.status(500).json({ message: 'Error checking username' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/provider/verify-otp:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Step 2 - Verify OTP code
+ *     description: Validates the OTP code sent to provider's email and marks it as verified
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_email
+ *               - otp
+ *             properties:
+ *               provider_email:
+ *                 type: string
+ *                 format: email
+ *                 example: "provider@example.com"
+ *                 description: Service provider's email address
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *                 description: 6-digit OTP code received via email
+ *     responses:
+ *       200:
+ *         description: OTP verified successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Email verified successfully. You can now proceed to registration."
+ *                 verified:
+ *                   type: boolean
+ *                   example: true
+ *       400:
+ *         description: Bad request - Invalid, expired, or missing OTP
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   enum:
+ *                     - "No OTP found for this email. Please request a new OTP."
+ *                     - "OTP has expired. Please request a new OTP."
+ *                     - "Invalid OTP. Please try again."
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Error verifying OTP"
+ */
+// Step 2: Verify OTP for service provider registration
+export const verifyProviderOTP = async (req, res) => {
+    const { provider_email, otp } = req.body;
+
+    // Validate input
+    if (!provider_email || !otp) {
+        return res.status(400).json({ message: 'Email and OTP are required' });
+    }
+
+    try {
+        // Find OTP record
+        const otpRecord = await prisma.oTPVerification.findFirst({ 
+            where: { email: provider_email }
+        });
+
+        if (!otpRecord) {
+            return res.status(400).json({ message: 'No OTP found for this email. Please request a new OTP.' });
+        }
+
+        // Check if already verified
+        if (otpRecord.verified) {
+            return res.status(200).json({ message: 'Email already verified. You can proceed to registration.' });
+        }
+
+        // Check if OTP is expired
+        if (new Date() > otpRecord.expires_at) {
+            return res.status(400).json({ message: 'OTP has expired. Please request a new OTP.' });
+        }
+
+        // Check if OTP matches
+        if (otpRecord.otp !== otp) {
+            return res.status(400).json({ message: 'Invalid OTP. Please try again.' });
+        }
+
+        // Mark OTP as verified
+        await prisma.oTPVerification.updateMany({
+            where: { email: provider_email },
+            data: { verified: true }
+        });
+
+        res.status(200).json({ 
+            message: 'Email verified successfully. You can now proceed to registration.',
+            verified: true
+        });
+
+    } catch (err) {
+        console.error('Verify provider OTP error:', err);
+        res.status(500).json({ message: 'Error verifying OTP' });
+    }
+};
+
+// Legacy endpoint for backward compatibility - kept for existing integrations
+export const requestProviderOTP = sendProviderOTP;
+
+/**
+ * @swagger
+ * /auth/provider/register:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Step 3 - Register service provider account
+ *     description: Creates a new service provider account after email verification. Requires OTP to be verified first. Automatically uploads files to Cloudinary.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_email
+ *               - provider_password
+ *               - provider_first_name
+ *               - provider_last_name
+ *               - provider_userName
+ *               - provider_phone_number
+ *               - provider_uli
+ *             properties:
+ *               provider_first_name:
+ *                 type: string
+ *                 example: "Jane"
+ *               provider_last_name:
+ *                 type: string
+ *                 example: "Smith"
+ *               provider_userName:
+ *                 type: string
+ *                 example: "janesmith"
+ *               provider_email:
+ *                 type: string
+ *                 format: email
+ *                 example: "provider@example.com"
+ *               provider_password:
+ *                 type: string
+ *                 format: password
+ *                 example: "SecurePass123"
+ *               provider_phone_number:
+ *                 type: string
+ *                 example: "+1234567890"
+ *               provider_uli:
+ *                 type: string
+ *                 example: "ULI1234"
+ *                 description: Unique Learner Identifier (4 digits)
+ *               provider_birthday:
+ *                 type: string
+ *                 format: date
+ *                 example: "1990-01-15"
+ *               provider_location:
+ *                 type: string
+ *                 example: "New York"
+ *               provider_exact_location:
+ *                 type: string
+ *                 example: "123 Main St, New York, NY 10001"
+ *               provider_profile_photo:
+ *                 type: string
+ *                 format: binary
+ *                 description: Profile photo image file (max 5MB)
+ *               provider_valid_id:
+ *                 type: string
+ *                 format: binary
+ *                 description: Valid ID image file (max 5MB)
+ *               certificateFile:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *                 description: Certificate files (max 10 files, 10MB each)
+ *               certificateNames:
+ *                 type: string
+ *                 example: '["Certificate 1", "Certificate 2"]'
+ *                 description: JSON array of certificate names
+ *               certificateNumbers:
+ *                 type: string
+ *                 example: '["CERT001", "CERT002"]'
+ *                 description: JSON array of certificate numbers
+ *               expiryDates:
+ *                 type: string
+ *                 example: '["2025-12-31", "2026-06-30"]'
+ *                 description: JSON array of expiry dates
+ *               professions:
+ *                 type: string
+ *                 example: '["Plumber", "Electrician"]'
+ *                 description: JSON array of professions
+ *               experiences:
+ *                 type: string
+ *                 example: '["5 years", "3 years"]'
+ *                 description: JSON array of experience durations
+ *     responses:
+ *       201:
+ *         description: Service provider registered successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Service provider registered successfully"
+ *                 token:
+ *                   type: string
+ *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *                 providerId:
+ *                   type: integer
+ *                   example: 123
+ *                 providerUserName:
+ *                   type: string
+ *                   example: "janesmith"
+ *                 provider_profile_photo:
+ *                   type: string
+ *                   example: "https://res.cloudinary.com/.../profile.jpg"
+ *                 provider_valid_id:
+ *                   type: string
+ *                   example: "https://res.cloudinary.com/.../id.jpg"
+ *                 certificates:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       certificate_id:
+ *                         type: integer
+ *                       certificate_name:
+ *                         type: string
+ *                       certificate_file_path:
+ *                         type: string
+ *                 professions:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       profession:
+ *                         type: string
+ *                       experience:
+ *                         type: string
+ *       400:
+ *         description: Bad request - Validation failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   enum:
+ *                     - "Email not verified. Please verify your email before registering."
+ *                     - "Email not found. Please verify your email first."
+ *                     - "Provider already exists"
+ *                     - "Phone number is already registered with another provider account"
+ *                     - "All required fields must be provided"
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Server error during provider registration"
+ */
+// Step 3: Register service provider after email verification
+export const registerServiceProvider = async (req, res) => {
     try {
         console.log('Provider registration request received');
         console.log('Request body keys:', Object.keys(req.body));
@@ -69,7 +589,6 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             provider_location,
             provider_exact_location,
             provider_uli,
-            otp,
             certificateNames,
             certificateNumbers,
             expiryDates,
@@ -86,13 +605,31 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             provider_phone_number,
             provider_location,
             provider_uli,
-            otp,
             certificateNames,
             certificateNumbers,
             expiryDates,
             professions,
             experiences
         });
+
+        // Validate required fields
+        if (!provider_email || !provider_password || !provider_first_name || !provider_last_name || 
+            !provider_userName || !provider_phone_number || !provider_uli) {
+            return res.status(400).json({ message: 'All required fields must be provided' });
+        }
+
+        // Check if email is verified
+        const otpRecord = await prisma.oTPVerification.findFirst({ 
+            where: { email: provider_email }
+        });
+
+        if (!otpRecord) {
+            return res.status(400).json({ message: 'Email not found. Please verify your email first.' });
+        }
+
+        if (!otpRecord.verified) {
+            return res.status(400).json({ message: 'Email not verified. Please verify your email before registering.' });
+        }
 
         // Check if provider already exists (prevent duplicate registration)
         const existingProvider = await prisma.serviceProviderDetails.findUnique({ where: { provider_email } });
@@ -106,9 +643,7 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
         });
         if (existingPhoneProvider) {
             return res.status(400).json({ message: 'Phone number is already registered with another provider account' });
-        }  
-        
-
+        }
 
         // Parse certificate data if it's JSON
         let parsedCertificateNames, parsedCertificateNumbers, parsedExpiryDates;
@@ -138,19 +673,13 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
         console.log('Parsed experiences:', parsedExperiences);
         console.log('Is parsedProfessions an array?', Array.isArray(parsedProfessions));
 
-        // Since email is already verified in step 1, we skip OTP verification here
-        // Only verify OTP if it's not a dummy value (for backward compatibility)
-        if (otp !== '123456') {
-            const verificationResult = await verifyOTP(provider_email, otp);
-            if (!verificationResult.success) {
-                return res.status(400).json({ message: verificationResult.message });
-            }
-        }
-
         // Handle file uploads to Cloudinary
         const profilePhotoFile = req.files && req.files['provider_profile_photo'] ? req.files['provider_profile_photo'][0] : null;
         const validIdFile = req.files && req.files['provider_valid_id'] ? req.files['provider_valid_id'][0] : null;
-        const certificateFiles = req.files && req.files['certificateFile'] ? req.files['certificateFile'] : [];
+        // Support both 'certificateFile' and 'certificate_images' field names
+        const certificateFiles = req.files && (req.files['certificateFile'] || req.files['certificate_images']) 
+            ? (req.files['certificateFile'] || req.files['certificate_images']) 
+            : [];
 
         let provider_profile_photo = null;
         let provider_valid_id = null;
@@ -210,6 +739,16 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
 
                 if (certificateName && certificateNumber && certificateFile) {
                     try {
+                        // Check if certificate number already exists
+                        const existingCert = await prisma.certificate.findUnique({
+                            where: { certificate_number: certificateNumber }
+                        });
+
+                        if (existingCert) {
+                            console.log(`Skipping certificate ${certificateNumber} - already exists`);
+                            continue; // Skip this certificate
+                        }
+
                         // Upload certificate to Cloudinary
                         const certificateUrl = await uploadToCloudinary(
                             certificateFile.buffer, 
@@ -250,14 +789,18 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
                 console.log(`Processing profession ${i}:`, profession);
                 console.log(`Processing experience ${i}:`, experience);
                 
-                if (profession && profession.trim()) {
+                // Ensure profession is a string and not empty
+                const professionStr = typeof profession === 'string' ? profession : String(profession);
+                const experienceStr = typeof experience === 'string' ? experience : String(experience);
+                
+                if (professionStr && professionStr.trim()) {
                     try {
                         console.log('Creating profession in database...');
                         const providerProfession = await prisma.providerProfession.create({
                             data: {
                                 provider_id: newProvider.provider_id,
-                                profession: profession.trim(),
-                                experience: experience ? experience.trim() : '0 years'
+                                profession: professionStr.trim(),
+                                experience: experienceStr ? experienceStr.trim() : '0 years'
                             }
                         });
                         console.log('Profession created successfully:', providerProfession);
@@ -274,8 +817,10 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             console.log('No professions to process or not an array');
         }
         
-        console.log('Final createdProfessions:', createdProfessions);// Delete the used OTP
-        await cleanupOTP(provider_email);
+        console.log('Final createdProfessions:', createdProfessions);
+        
+        // Delete the used OTP record
+        await prisma.oTPVerification.deleteMany({ where: { email: provider_email } });
 
         // Send registration success email
         await sendRegistrationSuccessEmail(provider_email, provider_first_name, provider_userName);
@@ -309,6 +854,9 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
         res.status(500).json({ message: 'Server error during provider registration' });
     }
 };
+
+// Legacy endpoint for backward compatibility - kept for existing integrations
+export const verifyProviderOTPAndRegister = registerServiceProvider;
 
 // Service provider login
 export const providerLogin = async (req, res) => {
@@ -2366,8 +2914,6 @@ export const getServiceListingsByTitle = async (req, res) => {
 export const getProviderProfessions = async (req, res) => {
     try {
         const { providerId } = req.params;
-        
-        console.log('Getting professions for provider ID:', providerId);
         
         // Get provider details with professions
         const provider = await prisma.serviceProviderDetails.findUnique({
