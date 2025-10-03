@@ -33,6 +33,8 @@ import {
   getCustomerBookingsDetailed,
   cancelAppointmentEnhanced,
   getCustomerProfile,
+  requestCustomerProfileUpdateOTP,
+  verifyOTPAndUpdateCustomerProfile,
 } from '../controller/authCustomerController.js';
 
 const router = express.Router();
@@ -124,6 +126,10 @@ router.post('/reset-password-only', resetPasswordOnly);
 router.get('/user-profile/:userId', getUserProfile);
 // Get authenticated customer profile (new endpoint)
 router.get('/customer-profile', authMiddleware, getCustomerProfile);
+// Edit customer profile - Step 1: Request OTP
+router.post('/customer-profile/request-otp', authMiddleware, requestCustomerProfileUpdateOTP);
+// Edit customer profile - Step 2: Verify OTP and Update
+router.put('/customer-profile', authMiddleware, verifyOTPAndUpdateCustomerProfile);
 // Update verification documents
 router.post('/update-verification-documents', upload.fields([
   { name: 'profilePicture', maxCount: 1 },

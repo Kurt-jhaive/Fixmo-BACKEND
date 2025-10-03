@@ -24,7 +24,7 @@ async function seedSuperAdmin() {
 
         // Hash the temporary password
         const saltRounds = parseInt(process.env.BCRYPT_SALT_ROUNDS) || 12;
-        const tempPassword = 'SuperAdmin2024!';
+        const tempPassword = 'SuperAdmin2025!';
         const hashedPassword = await bcrypt.hash(tempPassword, saltRounds);
 
         // Create super admin

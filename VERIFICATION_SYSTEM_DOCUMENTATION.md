@@ -21,6 +21,509 @@ If Rejected   → User can re-submit → back to pending
 
 ---
 
+## Profile Edit Endpoints (OTP Authentication)
+
+### Overview
+Profile editing requires two-step OTP (One-Time Password) verification for security:
+1. **Request OTP**: System sends 6-digit code to current email
+2. **Verify & Update**: Submit OTP with profile changes
+
+Both customer and provider profile edits follow this secure pattern.
+
+---
+
+### Customer Profile Edit
+
+#### Step 1: Request Profile Update OTP
+Request OTP to be sent to customer's current email address.
+
+**Endpoint:** `POST /auth/customer-profile/request-otp`
+
+**Authentication:** Customer token required
+
+**Request Example:**
+```http
+POST /auth/customer-profile/request-otp
+Authorization: Bearer <customer_token>
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "OTP sent to your email address: jo***@example.com",
+  "data": {
+    "maskedEmail": "jo***@example.com",
+    "expiresIn": "10 minutes"
+  }
+}
+```
+
+**Notes:**
+- OTP is 6 digits (e.g., 123456)
+- Valid for 10 minutes
+- Sent to customer's current email
+- Email is masked in response for privacy
+
+---
+
+#### Step 2: Verify OTP and Update Profile
+Submit OTP and new profile data to update.
+
+**Endpoint:** `PUT /auth/customer-profile`
+
+**Authentication:** Customer token required
+
+**Query Parameters:**
+- `otp` (required): 6-digit OTP received via email
+
+**Request Body:** (all fields optional, provide only what needs updating)
+```json
+{
+  "phone_number": "+1234567890",
+  "email": "newemail@example.com",
+  "user_location": "New York, NY",
+  "exact_location": "123 Main St, Apt 4B, New York, NY 10001"
+}
+```
+
+**Request Example:**
+```http
+PUT /auth/customer-profile?otp=123456
+Authorization: Bearer <customer_token>
+Content-Type: application/json
+
+{
+  "phone_number": "+1234567890",
+  "email": "newemail@example.com",
+  "user_location": "New York, NY",
+  "exact_location": "123 Main St, Apt 4B"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Profile updated successfully",
+  "data": {
+    "user_id": 123,
+    "first_name": "John",
+    "last_name": "Doe",
+    "email": "newemail@example.com",
+    "phone_number": "+1234567890",
+    "user_location": "New York, NY",
+    "exact_location": "123 Main St, Apt 4B",
+    "updated_at": "2025-10-03T14:30:00.000Z"
+  }
+}
+```
+
+**Validation Rules:**
+- At least one field must be provided
+- Email must be unique (not used by any customer or provider)
+- Phone number must be unique (not used by any customer or provider)
+- OTP must be valid and not expired
+- OTP is automatically deleted after successful update
+
+**Error Responses:**
+```json
+// Invalid OTP
+{
+  "success": false,
+  "message": "Invalid or expired OTP"
+}
+
+// Email already exists
+{
+  "success": false,
+  "message": "Email is already registered"
+}
+
+// Phone already exists
+{
+  "success": false,
+  "message": "Phone number is already registered"
+}
+
+// No fields provided
+{
+  "success": false,
+  "message": "At least one field must be provided for update"
+}
+```
+
+---
+
+### Provider Profile Edit
+
+#### Step 1: Request Profile Update OTP
+Request OTP to be sent to provider's current email address.
+
+**Endpoint:** `POST /auth/profile/request-otp`
+
+**Authentication:** Provider token required
+
+**Request Example:**
+```http
+POST /auth/profile/request-otp
+Authorization: Bearer <provider_token>
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "OTP sent to your email address: ja***@example.com",
+  "data": {
+    "maskedEmail": "ja***@example.com",
+    "expiresIn": "10 minutes"
+  }
+}
+```
+
+---
+
+#### Step 2: Verify OTP and Update Profile
+Submit OTP and new profile data to update.
+
+**Endpoint:** `PUT /auth/profile`
+
+**Authentication:** Provider token required
+
+**Query Parameters:**
+- `otp` (required): 6-digit OTP received via email
+
+**Request Body:** (all fields optional, provide only what needs updating)
+```json
+{
+  "provider_phone_number": "+0987654321",
+  "provider_email": "newprovider@example.com",
+  "provider_location": "Los Angeles, CA",
+  "exact_location": "456 Business Ave, Suite 200, Los Angeles, CA 90001"
+}
+```
+
+**Request Example:**
+```http
+PUT /auth/profile?otp=654321
+Authorization: Bearer <provider_token>
+Content-Type: application/json
+
+{
+  "provider_phone_number": "+0987654321",
+  "provider_email": "newprovider@example.com",
+  "provider_location": "Los Angeles, CA",
+  "exact_location": "456 Business Ave, Suite 200"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Provider profile updated successfully",
+  "data": {
+    "provider_id": 456,
+    "provider_first_name": "Jane",
+    "provider_last_name": "Smith",
+    "provider_email": "newprovider@example.com",
+    "provider_phone_number": "+0987654321",
+    "provider_location": "Los Angeles, CA",
+    "exact_location": "456 Business Ave, Suite 200",
+    "updated_at": "2025-10-03T14:30:00.000Z"
+  }
+}
+```
+
+**Validation Rules:**
+- At least one field must be provided
+- Email must be unique (not used by any customer or provider)
+- Phone number must be unique (not used by any customer or provider)
+- OTP must be valid and not expired
+- OTP is automatically deleted after successful update
+
+---
+
+### Frontend Integration Example (React Native)
+
+```jsx
+import React, { useState } from 'react';
+import { View, Text, TextInput, Button, Alert } from 'react-native';
+
+const EditProfileWithOTP = ({ token, userType }) => {
+  const [step, setStep] = useState(1); // 1 = request OTP, 2 = verify and update
+  const [otp, setOtp] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [location, setLocation] = useState('');
+  const [exactLocation, setExactLocation] = useState('');
+  const [maskedEmail, setMaskedEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const API_URL = 'http://localhost:3000';
+  const isCustomer = userType === 'customer';
+
+  // Step 1: Request OTP
+  const requestOTP = async () => {
+    setLoading(true);
+    try {
+      const endpoint = isCustomer 
+        ? '/auth/customer-profile/request-otp'
+        : '/auth/profile/request-otp';
+
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setMaskedEmail(data.data.maskedEmail);
+        setStep(2);
+        Alert.alert('Success', data.message);
+      } else {
+        Alert.alert('Error', data.message);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to request OTP');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Step 2: Verify OTP and Update Profile
+  const updateProfile = async () => {
+    if (!otp || otp.length !== 6) {
+      Alert.alert('Error', 'Please enter the 6-digit OTP');
+      return;
+    }
+
+    if (!email && !phone && !location && !exactLocation) {
+      Alert.alert('Error', 'Please provide at least one field to update');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const endpoint = isCustomer 
+        ? `/auth/customer-profile?otp=${otp}`
+        : `/auth/profile?otp=${otp}`;
+
+      const body = isCustomer ? {
+        ...(email && { email }),
+        ...(phone && { phone_number: phone }),
+        ...(location && { user_location: location }),
+        ...(exactLocation && { exact_location: exactLocation })
+      } : {
+        ...(email && { provider_email: email }),
+        ...(phone && { provider_phone_number: phone }),
+        ...(location && { provider_location: location }),
+        ...(exactLocation && { exact_location: exactLocation })
+      };
+
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(body)
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        Alert.alert('Success', data.message);
+        // Reset form
+        setStep(1);
+        setOtp('');
+        setEmail('');
+        setPhone('');
+        setLocation('');
+        setExactLocation('');
+      } else {
+        Alert.alert('Error', data.message);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update profile');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <View style={{ padding: 20 }}>
+      <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 20 }}>
+        Edit Profile
+      </Text>
+
+      {step === 1 ? (
+        // Step 1: Request OTP
+        <View>
+          <Text style={{ marginBottom: 15 }}>
+            Click the button below to receive a verification code via email.
+          </Text>
+          <Button 
+            title={loading ? "Sending..." : "Request Verification Code"}
+            onPress={requestOTP}
+            disabled={loading}
+          />
+        </View>
+      ) : (
+        // Step 2: Enter OTP and Update Profile
+        <View>
+          <Text style={{ marginBottom: 15, color: 'green' }}>
+            ✅ OTP sent to: {maskedEmail}
+          </Text>
+          <Text style={{ marginBottom: 15 }}>
+            Check your email and enter the 6-digit code below:
+          </Text>
+
+          <TextInput
+            placeholder="Enter 6-digit OTP"
+            value={otp}
+            onChangeText={setOtp}
+            keyboardType="number-pad"
+            maxLength={6}
+            style={{ borderWidth: 1, padding: 10, marginBottom: 15 }}
+          />
+
+          <Text style={{ fontWeight: 'bold', marginBottom: 10 }}>
+            Update Profile Information:
+          </Text>
+
+          <TextInput
+            placeholder="New Email (optional)"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            style={{ borderWidth: 1, padding: 10, marginBottom: 10 }}
+          />
+
+          <TextInput
+            placeholder="New Phone Number (optional)"
+            value={phone}
+            onChangeText={setPhone}
+            keyboardType="phone-pad"
+            style={{ borderWidth: 1, padding: 10, marginBottom: 10 }}
+          />
+
+          <TextInput
+            placeholder="New Location (optional)"
+            value={location}
+            onChangeText={setLocation}
+            style={{ borderWidth: 1, padding: 10, marginBottom: 10 }}
+          />
+
+          <TextInput
+            placeholder="New Exact Address (optional)"
+            value={exactLocation}
+            onChangeText={setExactLocation}
+            multiline
+            style={{ borderWidth: 1, padding: 10, marginBottom: 15, height: 60 }}
+          />
+
+          <Button 
+            title={loading ? "Updating..." : "Verify & Update Profile"}
+            onPress={updateProfile}
+            disabled={loading}
+          />
+
+          <Button 
+            title="Cancel"
+            onPress={() => {
+              setStep(1);
+              setOtp('');
+              setEmail('');
+              setPhone('');
+              setLocation('');
+              setExactLocation('');
+            }}
+            color="gray"
+          />
+        </View>
+      )}
+    </View>
+  );
+};
+
+export default EditProfileWithOTP;
+```
+
+---
+
+### Security Features
+
+**OTP Protection:**
+- 6-digit random code (100,000 - 999,999)
+- 10-minute expiration window
+- Single-use only (deleted after successful update)
+- Stored securely in OTPVerification table
+
+**Email Privacy:**
+- Email addresses are masked in responses
+- Example: `john.doe@example.com` → `jo***@example.com`
+
+**Uniqueness Validation:**
+- Email and phone validated across BOTH customer and provider tables
+- Prevents duplicate accounts
+- Ensures data integrity
+
+**Authentication:**
+- JWT token required for all requests
+- User can only edit their own profile
+- Admin cannot edit user profiles through these endpoints
+
+---
+
+### Testing Workflow
+
+**Customer Profile Edit:**
+```bash
+# 1. Request OTP
+curl -X POST http://localhost:3000/auth/customer-profile/request-otp \
+  -H "Authorization: Bearer <customer_token>"
+
+# Check email for OTP (e.g., 123456)
+
+# 2. Update profile with OTP
+curl -X PUT "http://localhost:3000/auth/customer-profile?otp=123456" \
+  -H "Authorization: Bearer <customer_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "newemail@example.com",
+    "phone_number": "+1234567890",
+    "user_location": "New York, NY",
+    "exact_location": "123 Main St, Apt 4B"
+  }'
+```
+
+**Provider Profile Edit:**
+```bash
+# 1. Request OTP
+curl -X POST http://localhost:3000/auth/profile/request-otp \
+  -H "Authorization: Bearer <provider_token>"
+
+# Check email for OTP (e.g., 654321)
+
+# 2. Update profile with OTP
+curl -X PUT "http://localhost:3000/auth/profile?otp=654321" \
+  -H "Authorization: Bearer <provider_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider_email": "newprovider@example.com",
+    "provider_phone_number": "+0987654321",
+    "provider_location": "Los Angeles, CA",
+    "exact_location": "456 Business Ave, Suite 200"
+  }'
+```
+
+---
+
 ## Admin Endpoints
 
 ### 1. Get Pending Verifications

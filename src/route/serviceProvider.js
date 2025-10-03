@@ -35,7 +35,9 @@ import {
   getServiceListingsByTitle,
   getProviderProfessions,
   getProviderDetails,
-  updateProviderDetails
+  updateProviderDetails,
+  requestProviderProfileEditOTP,
+  verifyOTPAndUpdateProviderProfile
 } from '../controller/authserviceProviderController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { uploadServiceImage } from '../middleware/multer.js';
@@ -216,6 +218,10 @@ router.post('/provider-reset-password', providerResetPassword);
 router.get('/profile', authMiddleware, getProviderProfile);
 // Get provider profile (protected route)
 router.get('/profile', authMiddleware, getProviderProfile);
+// Edit provider profile - Step 1: Request OTP
+router.post('/profile/request-otp', authMiddleware, requestProviderProfileEditOTP);
+// Edit provider profile - Step 2: Verify OTP and Update
+router.put('/profile', authMiddleware, verifyOTPAndUpdateProviderProfile);
 
 // Get provider services (protected route)
 router.get('/my-services', authMiddleware, getProviderServices);

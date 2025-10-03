@@ -2698,3 +2698,217 @@ export const updateProviderDetails = async (req, res) => {
     }
 };
 
+/**
+ * Step 1: Request OTP for provider profile update
+ * Sends OTP to provider's current email
+ */
+export const requestProviderProfileEditOTP = async (req, res) => {
+    try {
+        const providerId = req.userId; // From auth middleware
+
+        // Get provider's current email
+        const provider = await prisma.serviceProviderDetails.findUnique({
+            where: { provider_id: providerId },
+            select: { provider_email: true, provider_first_name: true }
+        });
+
+        if (!provider) {
+            return res.status(404).json({
+                success: false,
+                message: 'Provider not found'
+            });
+        }
+
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        // Store OTP in database
+        await prisma.oTPVerification.create({
+            data: {
+                email: provider.provider_email,
+                otp: otp,
+                expires_at: expiresAt
+            }
+        });
+
+        // Send OTP via email
+        await sendOTPEmail(provider.provider_email, otp);
+
+        res.status(200).json({
+            success: true,
+            message: 'OTP sent to your email. Please verify to proceed with profile update.',
+            email: provider.provider_email.replace(/(.{2})(.*)(@.*)/, '$1***$3') // Masked email
+        });
+
+    } catch (error) {
+        console.error('Error requesting provider profile update OTP:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to send OTP',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Step 2: Verify OTP and update provider profile
+ * Updates provider_phone_number, provider_email, provider_location, and exact_location
+ */
+export const verifyOTPAndUpdateProviderProfile = async (req, res) => {
+    try {
+        const providerId = req.userId; // From auth middleware
+        const { otp, provider_phone_number, provider_email, provider_location, exact_location } = req.body;
+
+        // Validate OTP is provided
+        if (!otp) {
+            return res.status(400).json({
+                success: false,
+                message: 'OTP is required'
+            });
+        }
+
+        // Validate at least one field is provided for update
+        if (!provider_phone_number && !provider_email && !provider_location && !exact_location) {
+            return res.status(400).json({
+                success: false,
+                message: 'At least one field (provider_phone_number, provider_email, provider_location, or exact_location) is required'
+            });
+        }
+
+        // Get provider's current email
+        const provider = await prisma.serviceProviderDetails.findUnique({
+            where: { provider_id: providerId }
+        });
+
+        if (!provider) {
+            return res.status(404).json({
+                success: false,
+                message: 'Provider not found'
+            });
+        }
+
+        // Verify OTP
+        const verificationResult = await verifyOTP(provider.provider_email, otp);
+
+        if (!verificationResult.success) {
+            return res.status(400).json({
+                success: false,
+                message: verificationResult.message
+            });
+        }
+
+        // Check if email is being changed and if it's already taken
+        if (provider_email && provider_email !== provider.provider_email) {
+            const emailExists = await prisma.serviceProviderDetails.findFirst({
+                where: { 
+                    provider_email: provider_email,
+                    provider_id: { not: providerId }
+                }
+            });
+
+            if (emailExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Email is already registered to another provider'
+                });
+            }
+
+            // Also check in customer table
+            const customerEmailExists = await prisma.user.findFirst({
+                where: { email: provider_email }
+            });
+
+            if (customerEmailExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Email is already registered as a customer'
+                });
+            }
+        }
+
+        // Check if phone number is being changed and if it's already taken
+        if (provider_phone_number && provider_phone_number !== provider.provider_phone_number) {
+            const phoneExists = await prisma.serviceProviderDetails.findFirst({
+                where: { 
+                    provider_phone_number: provider_phone_number,
+                    provider_id: { not: providerId }
+                }
+            });
+
+            if (phoneExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Phone number is already registered to another provider'
+                });
+            }
+
+            // Also check in customer table
+            const customerPhoneExists = await prisma.user.findFirst({
+                where: { phone_number: provider_phone_number }
+            });
+
+            if (customerPhoneExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Phone number is already registered as a customer'
+                });
+            }
+        }
+
+        // Prepare update data
+        const updateData = {};
+
+        if (provider_phone_number) {
+            updateData.provider_phone_number = provider_phone_number;
+        }
+
+        if (provider_email) {
+            updateData.provider_email = provider_email;
+        }
+
+        if (provider_location) {
+            updateData.provider_location = provider_location;
+        }
+
+        if (exact_location) {
+            updateData.exact_location = exact_location;
+        }
+
+        // Update provider profile
+        const updatedProvider = await prisma.serviceProviderDetails.update({
+            where: { provider_id: providerId },
+            data: updateData,
+            select: {
+                provider_id: true,
+                provider_first_name: true,
+                provider_last_name: true,
+                provider_userName: true,
+                provider_email: true,
+                provider_phone_number: true,
+                provider_location: true,
+                exact_location: true,
+                provider_profile_photo: true
+            }
+        });
+
+        // Clean up used OTP
+        await cleanupOTP(provider.provider_email);
+
+        res.status(200).json({
+            success: true,
+            message: 'Provider profile updated successfully',
+            data: updatedProvider
+        });
+
+    } catch (error) {
+        console.error('Error updating provider profile:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update provider profile',
+            error: error.message
+        });
+    }
+};
+
+

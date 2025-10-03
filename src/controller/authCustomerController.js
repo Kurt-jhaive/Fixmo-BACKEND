@@ -2636,5 +2636,221 @@ export const getCustomerProfile = async (req, res) => {
     }
 };
 
+/**
+ * Step 1: Request OTP for profile update
+ * Sends OTP to customer's current email
+ */
+export const requestCustomerProfileUpdateOTP = async (req, res) => {
+    try {
+        const userId = req.userId; // From auth middleware
+
+        // Get customer's current email
+        const customer = await prisma.user.findUnique({
+            where: { user_id: userId },
+            select: { email: true, first_name: true }
+        });
+
+        if (!customer) {
+            return res.status(404).json({
+                success: false,
+                message: 'Customer not found'
+            });
+        }
+
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        // Store OTP in database
+        await prisma.oTPVerification.create({
+            data: {
+                email: customer.email,
+                otp: otp,
+                expires_at: expiresAt
+            }
+        });
+
+        // Send OTP via email
+        await sendOTPEmail(customer.email, otp);
+
+        res.status(200).json({
+            success: true,
+            message: 'OTP sent to your email. Please verify to proceed with profile update.',
+            email: customer.email.replace(/(.{2})(.*)(@.*)/, '$1***$3') // Masked email
+        });
+
+    } catch (error) {
+        console.error('Error requesting profile update OTP:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to send OTP',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Step 2: Verify OTP and update customer profile
+ * Updates phone_number, email, user_location, and exact_location
+ */
+export const verifyOTPAndUpdateCustomerProfile = async (req, res) => {
+    try {
+        const userId = req.userId; // From auth middleware
+        const { otp, phone_number, email, user_location, exact_location } = req.body;
+
+        // Validate OTP is provided
+        if (!otp) {
+            return res.status(400).json({
+                success: false,
+                message: 'OTP is required'
+            });
+        }
+
+        // Validate at least one field is provided for update
+        if (!phone_number && !email && !user_location && !exact_location) {
+            return res.status(400).json({
+                success: false,
+                message: 'At least one field (phone_number, email, user_location, or exact_location) is required'
+            });
+        }
+
+        // Get customer's current email
+        const customer = await prisma.user.findUnique({
+            where: { user_id: userId }
+        });
+
+        if (!customer) {
+            return res.status(404).json({
+                success: false,
+                message: 'Customer not found'
+            });
+        }
+
+        // Verify OTP
+        const verificationResult = await verifyOTP(customer.email, otp);
+
+        if (!verificationResult.success) {
+            return res.status(400).json({
+                success: false,
+                message: verificationResult.message
+            });
+        }
+
+        // Check if email is being changed and if it's already taken
+        if (email && email !== customer.email) {
+            const emailExists = await prisma.user.findFirst({
+                where: { 
+                    email: email,
+                    user_id: { not: userId }
+                }
+            });
+
+            if (emailExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Email is already registered to another account'
+                });
+            }
+
+            // Also check in provider table
+            const providerEmailExists = await prisma.serviceProviderDetails.findFirst({
+                where: { provider_email: email }
+            });
+
+            if (providerEmailExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Email is already registered as a service provider'
+                });
+            }
+        }
+
+        // Check if phone number is being changed and if it's already taken
+        if (phone_number && phone_number !== customer.phone_number) {
+            const phoneExists = await prisma.user.findFirst({
+                where: { 
+                    phone_number: phone_number,
+                    user_id: { not: userId }
+                }
+            });
+
+            if (phoneExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Phone number is already registered to another account'
+                });
+            }
+
+            // Also check in provider table
+            const providerPhoneExists = await prisma.serviceProviderDetails.findFirst({
+                where: { provider_phone_number: phone_number }
+            });
+
+            if (providerPhoneExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Phone number is already registered as a service provider'
+                });
+            }
+        }
+
+        // Prepare update data
+        const updateData = {};
+
+        if (phone_number) {
+            updateData.phone_number = phone_number;
+        }
+
+        if (email) {
+            updateData.email = email;
+        }
+
+        if (user_location) {
+            updateData.user_location = user_location;
+        }
+
+        if (exact_location) {
+            updateData.exact_location = exact_location;
+        }
+
+        // Update customer profile
+        const updatedCustomer = await prisma.user.update({
+            where: { user_id: userId },
+            data: updateData,
+            select: {
+                user_id: true,
+                first_name: true,
+                last_name: true,
+                userName: true,
+                email: true,
+                phone_number: true,
+                user_location: true,
+                exact_location: true,
+                profile_photo: true
+            }
+        });
+
+        // Clean up used OTP
+        await cleanupOTP(customer.email);
+
+        res.status(200).json({
+            success: true,
+            message: 'Profile updated successfully',
+            data: updatedCustomer
+        });
+
+    } catch (error) {
+        console.error('Error updating customer profile:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update profile',
+            error: error.message
+        });
+    }
+};
+
+
+
+
 
 

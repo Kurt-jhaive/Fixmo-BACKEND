@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { sendEmail } from '../services/mailer.js';
+import { uploadToCloudinary } from '../services/cloudinaryService.js';
 
 const prisma = new PrismaClient();
 
@@ -521,16 +522,64 @@ export const getProviderVerificationStatus = async (req, res) => {
 
 /**
  * Customer: Re-submit verification (after rejection)
+ * Accepts both file uploads and direct Cloudinary URLs
  */
 export const resubmitCustomerVerification = async (req, res) => {
     try {
         const userId = req.userId;
-        const { valid_id_url } = req.body; // URL from Cloudinary upload
+        let { 
+            valid_id_url, 
+            profile_photo_url,
+            first_name,
+            last_name,
+            birthday,
+            user_location,
+            exact_location
+        } = req.body;
 
+        // Check if files are uploaded via multer
+        const files = req.files;
+        const validIdFile = files?.valid_id?.[0];
+        const profilePhotoFile = files?.profile_photo?.[0];
+
+        // Upload files to Cloudinary if provided
+        if (validIdFile) {
+            try {
+                valid_id_url = await uploadToCloudinary(
+                    validIdFile.buffer,
+                    'fixmo/verification/customers',
+                    `customer_id_resubmit_${userId}_${Date.now()}`
+                );
+            } catch (uploadError) {
+                console.error('Error uploading valid ID to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to upload valid ID image'
+                });
+            }
+        }
+
+        if (profilePhotoFile) {
+            try {
+                profile_photo_url = await uploadToCloudinary(
+                    profilePhotoFile.buffer,
+                    'fixmo/verification/customers',
+                    `customer_profile_resubmit_${userId}_${Date.now()}`
+                );
+            } catch (uploadError) {
+                console.error('Error uploading profile photo to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to upload profile photo'
+                });
+            }
+        }
+
+        // Validate that at least valid_id is provided
         if (!valid_id_url) {
             return res.status(400).json({
                 success: false,
-                message: 'Valid ID image is required'
+                message: 'Valid ID image is required (either file or URL)'
             });
         }
 
@@ -553,14 +602,43 @@ export const resubmitCustomerVerification = async (req, res) => {
             });
         }
 
+        // Prepare update data
+        const updateData = {
+            valid_id: valid_id_url,
+            verification_status: 'pending',
+            verification_submitted_at: new Date(),
+            rejection_reason: null
+        };
+
+        // Update profile photo if provided
+        if (profile_photo_url) {
+            updateData.profile_photo = profile_photo_url;
+        }
+
+        // Update additional user fields if provided
+        if (first_name) {
+            updateData.first_name = first_name;
+        }
+
+        if (last_name) {
+            updateData.last_name = last_name;
+        }
+
+        if (birthday) {
+            updateData.birthday = new Date(birthday);
+        }
+
+        if (user_location) {
+            updateData.user_location = user_location;
+        }
+
+        if (exact_location) {
+            updateData.exact_location = exact_location;
+        }
+
         const updatedCustomer = await prisma.user.update({
             where: { user_id: userId },
-            data: {
-                valid_id: valid_id_url,
-                verification_status: 'pending',
-                verification_submitted_at: new Date(),
-                rejection_reason: null
-            }
+            data: updateData
         });
 
         // Send notification to admin (optional)
@@ -572,7 +650,8 @@ export const resubmitCustomerVerification = async (req, res) => {
             data: {
                 user_id: updatedCustomer.user_id,
                 verification_status: updatedCustomer.verification_status,
-                verification_submitted_at: updatedCustomer.verification_submitted_at
+                verification_submitted_at: updatedCustomer.verification_submitted_at,
+                uploaded_via: validIdFile || profilePhotoFile ? 'file_upload' : 'url'
             }
         });
 
@@ -588,16 +667,88 @@ export const resubmitCustomerVerification = async (req, res) => {
 
 /**
  * Provider: Re-submit verification (after rejection)
+ * Accepts both file uploads and direct Cloudinary URLs
  */
 export const resubmitProviderVerification = async (req, res) => {
     try {
         const providerId = req.userId;
-        const { valid_id_url, certificate_urls } = req.body; // URLs from Cloudinary upload
+        let { 
+            valid_id_url, 
+            profile_photo_url, 
+            certificate_urls,
+            provider_first_name,
+            provider_last_name,
+            provider_birthday,
+            provider_location,
+            exact_location
+        } = req.body;
 
+        // Check if files are uploaded via multer
+        const files = req.files;
+        const validIdFile = files?.valid_id?.[0];
+        const profilePhotoFile = files?.profile_photo?.[0];
+        const certificateFiles = files?.certificates || [];
+
+        // Upload valid ID to Cloudinary if provided as file
+        if (validIdFile) {
+            try {
+                valid_id_url = await uploadToCloudinary(
+                    validIdFile.buffer,
+                    'fixmo/verification/providers',
+                    `provider_id_resubmit_${providerId}_${Date.now()}`
+                );
+            } catch (uploadError) {
+                console.error('Error uploading valid ID to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to upload valid ID image'
+                });
+            }
+        }
+
+        // Upload profile photo to Cloudinary if provided as file
+        if (profilePhotoFile) {
+            try {
+                profile_photo_url = await uploadToCloudinary(
+                    profilePhotoFile.buffer,
+                    'fixmo/verification/providers',
+                    `provider_profile_resubmit_${providerId}_${Date.now()}`
+                );
+            } catch (uploadError) {
+                console.error('Error uploading profile photo to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to upload profile photo'
+                });
+            }
+        }
+
+        // Upload certificates to Cloudinary if provided as files
+        if (certificateFiles.length > 0) {
+            try {
+                certificate_urls = [];
+                for (let i = 0; i < certificateFiles.length; i++) {
+                    const certUrl = await uploadToCloudinary(
+                        certificateFiles[i].buffer,
+                        'fixmo/certificates',
+                        `provider_cert_${providerId}_${Date.now()}_${i}`
+                    );
+                    certificate_urls.push(certUrl);
+                }
+            } catch (uploadError) {
+                console.error('Error uploading certificates to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to upload certificate images'
+                });
+            }
+        }
+
+        // Validate that at least valid_id is provided
         if (!valid_id_url) {
             return res.status(400).json({
                 success: false,
-                message: 'Valid ID image is required'
+                message: 'Valid ID image is required (either file or URL)'
             });
         }
 
@@ -620,15 +771,44 @@ export const resubmitProviderVerification = async (req, res) => {
             });
         }
 
+        // Prepare update data
+        const updateData = {
+            provider_valid_id: valid_id_url,
+            verification_status: 'pending',
+            verification_submitted_at: new Date(),
+            rejection_reason: null
+        };
+
+        // Update profile photo if provided
+        if (profile_photo_url) {
+            updateData.provider_profile_photo = profile_photo_url;
+        }
+
+        // Update additional provider fields if provided
+        if (provider_first_name) {
+            updateData.provider_first_name = provider_first_name;
+        }
+
+        if (provider_last_name) {
+            updateData.provider_last_name = provider_last_name;
+        }
+
+        if (provider_birthday) {
+            updateData.provider_birthday = new Date(provider_birthday);
+        }
+
+        if (provider_location) {
+            updateData.provider_location = provider_location;
+        }
+
+        if (exact_location) {
+            updateData.exact_location = exact_location;
+        }
+
         // Update provider details
         const updatedProvider = await prisma.serviceProviderDetails.update({
             where: { provider_id: providerId },
-            data: {
-                provider_valid_id: valid_id_url,
-                verification_status: 'pending',
-                verification_submitted_at: new Date(),
-                rejection_reason: null
-            }
+            data: updateData
         });
 
         // If new certificates are provided, update them
@@ -653,7 +833,9 @@ export const resubmitProviderVerification = async (req, res) => {
             data: {
                 provider_id: updatedProvider.provider_id,
                 verification_status: updatedProvider.verification_status,
-                verification_submitted_at: updatedProvider.verification_submitted_at
+                verification_submitted_at: updatedProvider.verification_submitted_at,
+                uploaded_via: validIdFile || profilePhotoFile || certificateFiles.length > 0 ? 'file_upload' : 'url',
+                certificates_count: certificate_urls?.length || 0
             }
         });
 
