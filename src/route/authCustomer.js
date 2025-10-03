@@ -37,6 +37,31 @@ import {
 
 const router = express.Router();
 
+// Optional authentication middleware - doesn't fail if no token provided
+const optionalAuth = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  
+  if (!authHeader) {
+    // No token provided, continue without authentication
+    return next();
+  }
+
+  // Token provided, try to verify it
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+  
+  try {
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.userId = decoded.userId || decoded.id;
+    req.userType = decoded.userType;
+  } catch (err) {
+    // Invalid token, but don't fail - just continue without auth
+    console.log('Optional auth: Invalid token, continuing without authentication');
+  }
+  
+  next();
+};
+
 // Ensure upload directories exist
 const ensureDirectoryExists = (dir) => {
   if (!fs.existsSync(dir)) {
@@ -106,7 +131,7 @@ router.post('/update-verification-documents', upload.fields([
 ]), updateVerificationDocuments);
 
 // Get service listings for customer dashboard
-router.get('/service-listings', getServiceListingsForCustomer);
+router.get('/service-listings', optionalAuth, getServiceListingsForCustomer);
 // Get service categories
 router.get('/service-categories', getServiceCategories);
 // Get customer statistics

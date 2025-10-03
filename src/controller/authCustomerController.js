@@ -1105,6 +1105,28 @@ export const getServiceListingsForCustomer = async (req, res) => {
     } = req.query;
 
     try {
+        // Get authenticated user info if available (optional authentication)
+        const authenticatedUserId = req.userId; // From authMiddleware if token is provided
+        const authenticatedUserType = req.userType;
+        
+        // Get customer details if authenticated to enable self-exclusion
+        let customerDetails = null;
+        if (authenticatedUserId && authenticatedUserType === 'customer') {
+            customerDetails = await prisma.user.findUnique({
+                where: { user_id: authenticatedUserId },
+                select: {
+                    first_name: true,
+                    last_name: true,
+                    email: true,
+                    phone_number: true
+                }
+            });
+            console.log('🔍 Customer authenticated:', {
+                userId: authenticatedUserId,
+                name: `${customerDetails?.first_name} ${customerDetails?.last_name}`
+            });
+        }
+        
         const skip = (parseInt(page) - 1) * parseInt(limit);
         
         // Parse the requested date and get day of week if date is provided
@@ -1233,6 +1255,46 @@ export const getServiceListingsForCustomer = async (req, res) => {
         // If date filtering is requested, filter providers based on availability
         let filteredListings = serviceListings;
         let availabilityInfo = {};
+        
+        // First, apply self-exclusion filter if customer is authenticated
+        if (customerDetails) {
+            const customerFirstName = customerDetails.first_name.toLowerCase().trim();
+            const customerLastName = customerDetails.last_name.toLowerCase().trim();
+            const customerEmail = customerDetails.email.toLowerCase().trim();
+            const customerPhone = customerDetails.phone_number.trim();
+            
+            const beforeCount = filteredListings.length;
+            
+            filteredListings = filteredListings.filter(listing => {
+                const provider = listing.serviceProvider;
+                const providerFirstName = provider.provider_first_name.toLowerCase().trim();
+                const providerLastName = provider.provider_last_name.toLowerCase().trim();
+                const providerEmail = provider.provider_email.toLowerCase().trim();
+                const providerPhone = provider.provider_phone_number.trim();
+                
+                // Exclude if names match AND (email matches OR phone matches)
+                const namesMatch = customerFirstName === providerFirstName && customerLastName === providerLastName;
+                const emailMatches = customerEmail === providerEmail;
+                const phoneMatches = customerPhone === providerPhone;
+                
+                const isSamePerson = namesMatch && (emailMatches || phoneMatches);
+                
+                if (isSamePerson) {
+                    console.log('🚫 Excluding provider (same person as customer):', {
+                        provider_id: provider.provider_id,
+                        name: `${provider.provider_first_name} ${provider.provider_last_name}`,
+                        email: provider.provider_email
+                    });
+                }
+                
+                return !isSamePerson; // Keep if NOT the same person
+            });
+            
+            const excludedCount = beforeCount - filteredListings.length;
+            if (excludedCount > 0) {
+                console.log(`✅ Self-exclusion filter applied: ${excludedCount} provider(s) excluded`);
+            }
+        }
         
         if (date && dayOfWeek && startOfDay && endOfDay) {
             console.log('🔍 Checking availability for', serviceListings.length, 'providers');
