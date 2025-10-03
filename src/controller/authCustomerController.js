@@ -1027,6 +1027,10 @@ export const getUserProfile = async (req, res) => {
                 profile_photo: true,
                 valid_id: true,
                 is_verified: true,
+                verification_status: true,
+                rejection_reason: true,
+                verification_submitted_at: true,
+                verification_reviewed_at: true,
                 created_at: true
             }
         });
@@ -2579,6 +2583,10 @@ export const getCustomerProfile = async (req, res) => {
                 birthday: true,
                 is_activated: true,
                 is_verified: true,
+                verification_status: true,
+                rejection_reason: true,
+                verification_submitted_at: true,
+                verification_reviewed_at: true,
                 created_at: true
             }
         });
@@ -2605,6 +2613,10 @@ export const getCustomerProfile = async (req, res) => {
             birthday: customer.birthday,
             is_activated: customer.is_activated,
             is_verified: customer.is_verified,
+            verification_status: customer.verification_status,
+            rejection_reason: customer.rejection_reason,
+            verification_submitted_at: customer.verification_submitted_at,
+            verification_reviewed_at: customer.verification_reviewed_at,
             created_at: customer.created_at
         };
 
