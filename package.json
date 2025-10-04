@@ -8,7 +8,8 @@
     "start": "node ./src/server.js",
     "seed:admin": "node ./src/seeders/seedSuperAdmin.js",
     "seed:all": "node ./src/seeders/index.js",
-    "test:admin": "node ./test-admin-system.js"
+    "test:admin": "node ./test-admin-system.js",
+    "postinstall": "prisma generate"
   },
   "keywords": [],
   "author": "",
