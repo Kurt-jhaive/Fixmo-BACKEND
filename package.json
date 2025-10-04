@@ -8,9 +8,7 @@
     "start": "node ./src/server.js",
     "seed:admin": "node ./src/seeders/seedSuperAdmin.js",
     "seed:all": "node ./src/seeders/index.js",
-    "test:admin": "node ./test-admin-system.js",
-    "postinstall": "prisma generate",
-    "vercel-build": "prisma generate && prisma migrate deploy"
+    "test:admin": "node ./test-admin-system.js"
   },
   "keywords": [],
   "author": "",
