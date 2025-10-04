@@ -1,7 +1,5 @@
 import express from 'express';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { requireCustomerSession } from '../middleware/sessionAuth.js';
 import {
@@ -71,18 +69,7 @@ const optionalAuth = (req, res, next) => {
   next();
 };
 
-// Ensure upload directories exist
-const ensureDirectoryExists = (dir) => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-};
-
-// Create necessary directories (for backward compatibility)
-ensureDirectoryExists('uploads/customer-profiles');
-ensureDirectoryExists('uploads/customer-ids');
-
-// Use memory storage for Cloudinary uploads
+// Use memory storage for Cloudinary uploads (serverless-compatible)
 const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
