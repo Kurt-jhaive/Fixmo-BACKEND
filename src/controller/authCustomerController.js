@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { sendOTPEmail, sendRegistrationSuccessEmail, sendBookingCancellationEmail, sendBookingConfirmationToCustomer, sendBookingConfirmationToProvider, sendBookingCancellationToCustomer, sendBookingCompletionToCustomer, sendBookingCompletionToProvider } from '../services/mailer.js';
 import { forgotrequestOTP, verifyOTPAndResetPassword, verifyOTP, cleanupOTP } from '../services/otpUtils.js';
-import { checkOTPRateLimit, recordOTPAttempt } from '../services/rateLimitUtils.js';
+import { checkOTPRateLimit, recordOTPAttempt, checkForgotPasswordRateLimit, recordForgotPasswordAttempt, resetForgotPasswordAttempts } from '../services/rateLimitUtils.js';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
 
 const prisma = new PrismaClient();
@@ -728,17 +728,303 @@ export const requestOTP = sendOTP;
 // Legacy endpoint for backward compatibility - kept for existing integrations
 export const verifyOTPAndRegister = registerCustomer;
 
+/**
+ * @swagger
+ * /auth/forgot-password:
+ *   post:
+ *     tags:
+ *       - Customer Authentication
+ *     summary: Step 1 - Request OTP for password reset
+ *     description: Sends a 6-digit OTP to customer's email for password reset. Limited to 3 attempts per 30 minutes.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "customer@example.com"
+ *     responses:
+ *       200:
+ *         description: OTP sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Password reset OTP sent to your email"
+ *                 attemptsLeft:
+ *                   type: integer
+ *                   example: 2
+ *       400:
+ *         description: User not found
+ *       429:
+ *         description: Too many attempts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Maximum forgot password attempts (3) reached. Please try again in 25 minutes."
+ *       500:
+ *         description: Server error
+ */
 // CUSTOMER: Step 1 - Request OTP for forgot password
 export const requestForgotPasswordOTP = async (req, res) => {
-    await forgotrequestOTP({
-        email: req.body.email,
-        userType: 'customer',
-        existsCheck: async (email, phone_number) => await prisma.user.findUnique({ where: { email, phone_number } }),
-        existsErrorMsg: 'User not found'
-    }, res);
+    const { email } = req.body;
+    
+    if (!email) {
+        return res.status(400).json({ message: 'Email is required' });
+    }
+    
+    try {
+        // Check rate limiting (3 attempts, 30-minute cooldown)
+        const rateLimitCheck = await checkForgotPasswordRateLimit(email);
+        if (!rateLimitCheck.allowed) {
+            return res.status(429).json({ 
+                message: rateLimitCheck.message,
+                remainingMinutes: rateLimitCheck.remainingMinutes
+            });
+        }
+        
+        // Check if user exists
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user) {
+            return res.status(400).json({ message: 'No account found with this email' });
+        }
+        
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+        
+        // Store or update OTP
+        const existingOTP = await prisma.oTPVerification.findFirst({ where: { email } });
+        
+        if (existingOTP) {
+            await prisma.oTPVerification.updateMany({
+                where: { email },
+                data: {
+                    otp,
+                    expires_at: expiresAt,
+                    verified: false
+                }
+            });
+        } else {
+            await prisma.oTPVerification.create({
+                data: {
+                    email,
+                    otp,
+                    expires_at: expiresAt,
+                    verified: false
+                }
+            });
+        }
+        
+        // Send OTP email
+        await sendOTPEmail(email, otp, 'password reset');
+        
+        // Record attempt
+        recordForgotPasswordAttempt(email);
+        
+        res.status(200).json({ 
+            message: 'Password reset OTP sent to your email',
+            attemptsLeft: rateLimitCheck.attemptsLeft - 1
+        });
+        
+    } catch (err) {
+        console.error('Forgot password OTP error:', err);
+        res.status(500).json({ message: 'Error processing password reset request' });
+    }
 };
 
-// CUSTOMER: Step 2 - Verify OTP and reset password
+/**
+ * @swagger
+ * /auth/verify-forgot-password:
+ *   post:
+ *     tags:
+ *       - Customer Authentication
+ *     summary: Step 2 - Verify OTP for password reset
+ *     description: Verifies the OTP code sent to customer's email
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - otp
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "customer@example.com"
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: OTP verified successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "OTP verified. You can now reset your password."
+ *                 verified:
+ *                   type: boolean
+ *                   example: true
+ *       400:
+ *         description: Invalid or expired OTP
+ *       500:
+ *         description: Server error
+ */
+// CUSTOMER: Step 2 - Verify OTP (separate step)
+export const verifyForgotPasswordOTP = async (req, res) => {
+    const { email, otp } = req.body;
+    
+    if (!email || !otp) {
+        return res.status(400).json({ message: 'Email and OTP are required' });
+    }
+    
+    try {
+        // Find OTP record
+        const otpRecord = await prisma.oTPVerification.findFirst({ 
+            where: { email }
+        });
+        
+        if (!otpRecord) {
+            return res.status(400).json({ message: 'No OTP found. Please request a new one.' });
+        }
+        
+        // Check if OTP is expired
+        if (new Date() > new Date(otpRecord.expires_at)) {
+            return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+        }
+        
+        // Verify OTP
+        if (otpRecord.otp !== otp) {
+            return res.status(400).json({ message: 'Invalid OTP. Please try again.' });
+        }
+        
+        // Mark as verified
+        await prisma.oTPVerification.updateMany({
+            where: { email },
+            data: { verified: true }
+        });
+        
+        res.status(200).json({ 
+            message: 'OTP verified. You can now reset your password.',
+            verified: true
+        });
+        
+    } catch (err) {
+        console.error('Verify forgot password OTP error:', err);
+        res.status(500).json({ message: 'Error verifying OTP' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/reset-password:
+ *   post:
+ *     tags:
+ *       - Customer Authentication
+ *     summary: Step 3 - Reset password
+ *     description: Resets customer password after OTP verification
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - newPassword
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "customer@example.com"
+ *               newPassword:
+ *                 type: string
+ *                 format: password
+ *                 example: "NewSecurePass123!"
+ *     responses:
+ *       200:
+ *         description: Password reset successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Password reset successfully"
+ *       400:
+ *         description: OTP not verified or user not found
+ *       500:
+ *         description: Server error
+ */
+// CUSTOMER: Step 3 - Reset password after OTP verification
+export const resetPasswordCustomer = async (req, res) => {
+    const { email, newPassword } = req.body;
+    
+    if (!email || !newPassword) {
+        return res.status(400).json({ message: 'Email and new password are required' });
+    }
+    
+    try {
+        // Check if OTP was verified
+        const otpRecord = await prisma.oTPVerification.findFirst({ 
+            where: { email }
+        });
+        
+        if (!otpRecord || !otpRecord.verified) {
+            return res.status(400).json({ message: 'Please verify your OTP first' });
+        }
+        
+        // Check if user exists
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user) {
+            return res.status(400).json({ message: 'User not found' });
+        }
+        
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        
+        // Update password
+        await prisma.user.update({
+            where: { email },
+            data: { password: hashedPassword }
+        });
+        
+        // Delete OTP record
+        await prisma.oTPVerification.deleteMany({ where: { email } });
+        
+        // Reset rate limiting for this email
+        resetForgotPasswordAttempts(email);
+        
+        res.status(200).json({ message: 'Password reset successfully' });
+        
+    } catch (err) {
+        console.error('Reset password error:', err);
+        res.status(500).json({ message: 'Error resetting password' });
+    }
+};
+
+// LEGACY: Combined Step 2 - Verify OTP and reset password (for backward compatibility)
 export const verifyForgotPasswordOTPAndReset = async (req, res) => {
     await verifyOTPAndResetPassword({
         email: req.body.email,
@@ -1164,7 +1450,8 @@ export const getCustomerAppointments = async (req, res) => {
                         provider_last_name: true,
                         provider_email: true,
                         provider_phone_number: true,
-                        provider_location: true
+                        provider_location: true,
+                        provider_exact_location: true
                     }
                 }
             },
@@ -1722,12 +2009,10 @@ export const getServiceListingsForCustomer = async (req, res) => {
                     }
                 },
                 specific_services: {
-                    include: {
-                        category: {
-                            select: {
-                                category_name: true
-                            }
-                        }
+                    select: {
+                        specific_service_id: true,
+                        specific_service_title: true,
+                        specific_service_description: true
                     }
                 }
             },
@@ -1925,7 +2210,6 @@ export const getServiceListingsForCustomer = async (req, res) => {
                     location: listing.serviceProvider.provider_location,
                     profilePhoto: listing.serviceProvider.provider_profile_photo
                 },
-                categories: listing.specific_services.map(service => service.category.category_name),
                 specificServices: listing.specific_services.map(service => ({
                     id: service.specific_service_id,
                     title: service.specific_service_title,
@@ -2758,7 +3042,8 @@ export const getCustomerBookingsDetailed = async (req, res) => {
                         provider_email: true,
                         provider_profile_photo: true,
                         provider_rating: true,
-                        provider_location: true
+                        provider_location: true,
+                        provider_exact_location: true
                     }
                 },
                 service: {
@@ -2810,7 +3095,8 @@ export const getCustomerBookingsDetailed = async (req, res) => {
                     email: appointment.serviceProvider.provider_email,
                     profile_photo: appointment.serviceProvider.provider_profile_photo,
                     rating: appointment.serviceProvider.provider_rating,
-                    location: appointment.serviceProvider.provider_location
+                    location: appointment.serviceProvider.provider_location,
+                    exact_location: appointment.serviceProvider.provider_exact_location
                 },
                 timeSlot: {
                     startTime: appointment.availability.startTime,
@@ -3158,7 +3444,7 @@ export const getCustomerBookingAvailability = async (req, res) => {
         const scheduledAppointments = await prisma.appointment.findMany({
             where: {
                 customer_id: userId,
-                appointment_status: 'scheduled'  // Only fetch 'scheduled' status
+                appointment_status: { in: ['scheduled', 'in-progress'] }  // Only fetch 'scheduled' and 'ongoing' status
             },
             select: {
                 appointment_id: true,
@@ -3166,13 +3452,15 @@ export const getCustomerBookingAvailability = async (req, res) => {
                 scheduled_date: true,
                 service: {
                     select: {
-                        service_title: true
+                        service_title: true,
+                        service_startingprice: true
                     }
                 },
                 serviceProvider: {
                     select: {
                         provider_first_name: true,
-                        provider_last_name: true
+                        provider_last_name: true,
+                        provider_exact_location: true
                     }
                 }
             },
@@ -3196,8 +3484,10 @@ export const getCustomerBookingAvailability = async (req, res) => {
                     appointment_id: apt.appointment_id,
                     status: apt.appointment_status,
                     scheduled_date: apt.scheduled_date,
+                    service_startingprice: apt.service?.service_startingprice,
                     service_title: apt.service?.service_title,
-                    provider_name: `${apt.serviceProvider?.provider_first_name} ${apt.serviceProvider?.provider_last_name}`
+                    provider_name: `${apt.serviceProvider?.provider_first_name} ${apt.serviceProvider?.provider_last_name}`,
+                    provider_exact_location: apt.serviceProvider?.provider_exact_location
                 }))
             }
         });

@@ -173,7 +173,6 @@ export const createService = async (req, res) => {
 
         console.log('Create service request:', {
             providerId,
-            category_id,
             service_title,
             service_description,
             service_startingprice,
@@ -182,22 +181,10 @@ export const createService = async (req, res) => {
         });
 
         // Validation
-        if (!category_id || !service_title || !service_description || !service_startingprice) {
+        if (!service_title || !service_description || !service_startingprice) {
             return res.status(400).json({
                 success: false,
-                message: 'All fields are required (category_id, service_title, service_description, service_startingprice)'
-            });
-        }
-
-        // Verify that the category exists
-        const category = await prisma.serviceCategory.findUnique({
-            where: { category_id: parseInt(category_id) }
-        });
-
-        if (!category) {
-            return res.status(404).json({
-                success: false,
-                message: 'Category not found. Please select a valid category.'
+                message: 'All fields are required (service_title, service_description, service_startingprice)'
             });
         }
 
@@ -236,7 +223,7 @@ export const createService = async (req, res) => {
                     specific_service_title: service_title,
                     specific_service_description: service_description,
                     service_id: serviceListing.service_id,
-                    category_id: parseInt(category_id)
+                    category_id: 1  // Default category (can be made optional in future migration)
                 }
             });
 
@@ -312,18 +299,16 @@ export const updateService = async (req, res) => {
         const { serviceId } = req.params;
         const providerId = req.userId;
         const {
-            service_title,
             service_description,
             service_startingprice,
-            category_id,
             certificate_ids
         } = req.body;
 
         // Validate input
-        if (!service_title || !service_description || !service_startingprice || !category_id) {
+        if (!service_description || !service_startingprice) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'All fields are required (service_title, service_description, service_startingprice, category_id).' 
+                message: 'All fields are required (service_description, service_startingprice).' 
             });
         }
 
@@ -347,25 +332,12 @@ export const updateService = async (req, res) => {
             });
         }
 
-        // Verify that the category exists
-        const category = await prisma.serviceCategory.findUnique({
-            where: { category_id: parseInt(category_id) }
-        });
-
-        if (!category) {
-            return res.status(404).json({
-                success: false,
-                message: 'Category not found. Please select a valid category.'
-            });
-        }
-
         // Update in transaction
         const updatedService = await prisma.$transaction(async (prisma) => {
             // Update the service listing
             const serviceListing = await prisma.serviceListing.update({
                 where: { service_id: serviceListingId },
                 data: {
-                    service_title: service_title.trim(),
                     service_description: service_description.trim(),
                     service_startingprice: parseFloat(service_startingprice)
                 }
@@ -376,9 +348,7 @@ export const updateService = async (req, res) => {
                 await prisma.specificService.update({
                     where: { specific_service_id: existingService.specific_services[0].specific_service_id },
                     data: {
-                        specific_service_title: service_title.trim(),
                         specific_service_description: service_description.trim(),
-                        category_id: parseInt(category_id)
                     }
                 });
             }

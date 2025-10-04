@@ -15,6 +15,8 @@ import {
   verifyOTPOnly,
   verifyOTPAndRegister,
   requestForgotPasswordOTP,
+  verifyForgotPasswordOTP,
+  resetPasswordCustomer,
   verifyForgotPasswordOTPAndReset,
   resetPassword,
   addAppointment,
@@ -132,13 +134,14 @@ router.post('/verify-register', upload.fields([
   { name: 'valid_id', maxCount: 1 }
 ]), verifyOTPAndRegister); // Step 2: Validate OTP + register with file upload
 
-// Forgot password: request OTP
+// NEW: 3-Step Forgot Password Flow (with rate limiting)
+router.post('/forgot-password', requestForgotPasswordOTP);          // Step 1: Request OTP (3 attempts/30min)
+router.post('/verify-forgot-password', verifyForgotPasswordOTP);    // Step 2: Verify OTP
+router.post('/reset-password', resetPasswordCustomer);              // Step 3: Reset password
+
+// LEGACY: Forgot password routes (for backward compatibility)
 router.post('/forgot-password-request-otp', requestForgotPasswordOTP);
-// Forgot password: verify OTP and reset password
 router.post('/forgot-password-verify-otp', verifyForgotPasswordOTPAndReset);
-// Simple password reset (OTP already verified)
-router.post('/reset-password', resetPassword);
-// Simple password reset (OTP already verified)
 router.post('/reset-password-only', resetPasswordOnly);
 
 // Get user profile and verification status

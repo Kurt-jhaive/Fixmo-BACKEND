@@ -14,6 +14,8 @@ import {
   verifyProviderOTPAndRegister,
   providerLogin,
   requestProviderForgotPasswordOTP,
+  verifyProviderForgotPasswordOTP,
+  resetPasswordProvider,
   verifyProviderForgotPasswordOTPAndReset,
   providerResetPassword,
   uploadCertificate,
@@ -24,6 +26,8 @@ import {
   deleteAvailability,
   getProviderDayAvailability,
   getProviderProfile,
+  getProviderProfileById,
+  updateAvailabilityByDate,
   getProviderServices,
   requestProviderProfileUpdateOTP,
   updateProviderProfileWithOTP,
@@ -252,17 +256,23 @@ router.post('/provider-verify-register', (req, res, next) => {
 // Service provider login
 router.post('/provider-login', providerLogin);
 router.post('/loginProvider', providerLogin);
-// Forgot password: request OTP
+
+// NEW: 3-Step Forgot Password Flow (with rate limiting)
+router.post('/provider/forgot-password', requestProviderForgotPasswordOTP);          // Step 1: Request OTP (3 attempts/30min)
+router.post('/provider/verify-forgot-password', verifyProviderForgotPasswordOTP);    // Step 2: Verify OTP
+router.post('/provider/reset-password', resetPasswordProvider);                      // Step 3: Reset password
+
+// LEGACY: Forgot password routes (for backward compatibility)
 router.post('/provider-forgot-password-request-otp', requestProviderForgotPasswordOTP);
-// Forgot password: verify OTP and reset password
 router.post('/provider-forgot-password-verify-otp', verifyProviderForgotPasswordOTPAndReset);
-// Simple provider password reset (OTP already verified)
 router.post('/provider-reset-password', providerResetPassword);
 
 // Provider profile (protected route)
+router.get('/provider-profile', authMiddleware, getProviderProfile);
+// Backward-compatible alias for existing clients
 router.get('/profile', authMiddleware, getProviderProfile);
-// Get provider profile (protected route)
-router.get('/profile', authMiddleware, getProviderProfile);
+// Get detailed provider profile with certificates, professions, and ratings (JWT authenticated)
+router.get('/profile-detailed', authMiddleware, getProviderProfileById);
 // Edit provider profile - Step 1: Request OTP
 router.post('/profile/request-otp', authMiddleware, requestProviderProfileEditOTP);
 // Edit provider profile - Step 2: Verify OTP and Update
@@ -381,6 +391,8 @@ router.get('/provider/:provider_id/availability/:dayOfWeek', getProviderDayAvail
 
 // Update specific availability
 router.put('/availability/:availability_id', updateAvailability);
+// Update availability by date (provider-protected route)
+router.put('/availability/date', authMiddleware, updateAvailabilityByDate);
 // Delete specific availability
 router.delete('/availability/:availability_id', deleteAvailability);
 

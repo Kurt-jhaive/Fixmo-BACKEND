@@ -1,9 +1,10 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
-import { sendOTPEmail, sendRegistrationSuccessEmail } from '../services/mailer.js';
+import { sendOTPEmail, sendRegistrationSuccessEmail, sendAppointmentStatusUpdateEmail } from '../services/mailer.js';
 import { forgotrequestOTP, verifyOTPAndResetPassword, verifyOTP, cleanupOTP } from '../services/otpUtils.js';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
+import { checkForgotPasswordRateLimit, recordForgotPasswordAttempt, resetForgotPasswordAttempts } from '../services/rateLimitUtils.js';
 
 const prisma = new PrismaClient();
 
@@ -923,17 +924,282 @@ export const providerLogin = async (req, res) => {
     }
 };
 
+/**
+ * @swagger
+ * /auth/provider/forgot-password:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Step 1 - Request OTP for password reset
+ *     description: Sends a 6-digit OTP to provider's email for password reset. Limited to 3 attempts per 30 minutes.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_email
+ *             properties:
+ *               provider_email:
+ *                 type: string
+ *                 format: email
+ *                 example: "provider@example.com"
+ *     responses:
+ *       200:
+ *         description: OTP sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Password reset OTP sent to your email"
+ *                 attemptsLeft:
+ *                   type: integer
+ *                   example: 2
+ *       400:
+ *         description: Provider not found
+ *       429:
+ *         description: Too many attempts
+ *       500:
+ *         description: Server error
+ */
 // PROVIDER: Step 1 - Request OTP for forgot password
 export const requestProviderForgotPasswordOTP = async (req, res) => {
-    await forgotrequestOTP({
-        email: req.body.provider_email,
-        userType: 'provider',
-        existsCheck: async (email) => await prisma.serviceProviderDetails.findUnique({ where: { provider_email: email } }),
-        existsErrorMsg: 'Provider not found'
-    }, res);
+    const { provider_email } = req.body;
+    
+    if (!provider_email) {
+        return res.status(400).json({ message: 'Email is required' });
+    }
+    
+    try {
+        // Check rate limiting (3 attempts, 30-minute cooldown)
+        const rateLimitCheck = await checkForgotPasswordRateLimit(provider_email);
+        if (!rateLimitCheck.allowed) {
+            return res.status(429).json({ 
+                message: rateLimitCheck.message,
+                remainingMinutes: rateLimitCheck.remainingMinutes
+            });
+        }
+        
+        // Check if provider exists
+        const provider = await prisma.serviceProviderDetails.findUnique({ 
+            where: { provider_email } 
+        });
+        if (!provider) {
+            return res.status(400).json({ message: 'No account found with this email' });
+        }
+        
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+        
+        // Store or update OTP
+        const existingOTP = await prisma.oTPVerification.findFirst({ 
+            where: { email: provider_email } 
+        });
+        
+        if (existingOTP) {
+            await prisma.oTPVerification.updateMany({
+                where: { email: provider_email },
+                data: {
+                    otp,
+                    expires_at: expiresAt,
+                    verified: false
+                }
+            });
+        } else {
+            await prisma.oTPVerification.create({
+                data: {
+                    email: provider_email,
+                    otp,
+                    expires_at: expiresAt,
+                    verified: false
+                }
+            });
+        }
+        
+        // Send OTP email
+        await sendOTPEmail(provider_email, otp, 'password reset');
+        
+        // Record attempt
+        recordForgotPasswordAttempt(provider_email);
+        
+        res.status(200).json({ 
+            message: 'Password reset OTP sent to your email',
+            attemptsLeft: rateLimitCheck.attemptsLeft - 1
+        });
+        
+    } catch (err) {
+        console.error('Provider forgot password OTP error:', err);
+        res.status(500).json({ message: 'Error processing password reset request' });
+    }
 };
 
-// PROVIDER: Step 2 - Verify OTP and reset password
+/**
+ * @swagger
+ * /auth/provider/verify-forgot-password:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Step 2 - Verify OTP for password reset
+ *     description: Verifies the OTP code sent to provider's email
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_email
+ *               - otp
+ *             properties:
+ *               provider_email:
+ *                 type: string
+ *                 format: email
+ *                 example: "provider@example.com"
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: OTP verified successfully
+ *       400:
+ *         description: Invalid or expired OTP
+ *       500:
+ *         description: Server error
+ */
+// PROVIDER: Step 2 - Verify OTP (separate step)
+export const verifyProviderForgotPasswordOTP = async (req, res) => {
+    const { provider_email, otp } = req.body;
+    
+    if (!provider_email || !otp) {
+        return res.status(400).json({ message: 'Email and OTP are required' });
+    }
+    
+    try {
+        // Find OTP record
+        const otpRecord = await prisma.oTPVerification.findFirst({ 
+            where: { email: provider_email }
+        });
+        
+        if (!otpRecord) {
+            return res.status(400).json({ message: 'No OTP found. Please request a new one.' });
+        }
+        
+        // Check if OTP is expired
+        if (new Date() > new Date(otpRecord.expires_at)) {
+            return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+        }
+        
+        // Verify OTP
+        if (otpRecord.otp !== otp) {
+            return res.status(400).json({ message: 'Invalid OTP. Please try again.' });
+        }
+        
+        // Mark as verified
+        await prisma.oTPVerification.updateMany({
+            where: { email: provider_email },
+            data: { verified: true }
+        });
+        
+        res.status(200).json({ 
+            message: 'OTP verified. You can now reset your password.',
+            verified: true
+        });
+        
+    } catch (err) {
+        console.error('Verify provider forgot password OTP error:', err);
+        res.status(500).json({ message: 'Error verifying OTP' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/provider/reset-password:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Step 3 - Reset password
+ *     description: Resets provider password after OTP verification
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_email
+ *               - newPassword
+ *             properties:
+ *               provider_email:
+ *                 type: string
+ *                 format: email
+ *                 example: "provider@example.com"
+ *               newPassword:
+ *                 type: string
+ *                 format: password
+ *                 example: "NewSecurePass123!"
+ *     responses:
+ *       200:
+ *         description: Password reset successfully
+ *       400:
+ *         description: OTP not verified or provider not found
+ *       500:
+ *         description: Server error
+ */
+// PROVIDER: Step 3 - Reset password after OTP verification
+export const resetPasswordProvider = async (req, res) => {
+    const { provider_email, newPassword } = req.body;
+    
+    if (!provider_email || !newPassword) {
+        return res.status(400).json({ message: 'Email and new password are required' });
+    }
+    
+    try {
+        // Check if OTP was verified
+        const otpRecord = await prisma.oTPVerification.findFirst({ 
+            where: { email: provider_email }
+        });
+        
+        if (!otpRecord || !otpRecord.verified) {
+            return res.status(400).json({ message: 'Please verify your OTP first' });
+        }
+        
+        // Check if provider exists
+        const provider = await prisma.serviceProviderDetails.findUnique({ 
+            where: { provider_email } 
+        });
+        if (!provider) {
+            return res.status(400).json({ message: 'Provider not found' });
+        }
+        
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        
+        // Update password
+        await prisma.serviceProviderDetails.update({
+            where: { provider_email },
+            data: { provider_password: hashedPassword }
+        });
+        
+        // Delete OTP record
+        await prisma.oTPVerification.deleteMany({ where: { email: provider_email } });
+        
+        // Reset rate limiting for this email
+        resetForgotPasswordAttempts(provider_email);
+        
+        res.status(200).json({ message: 'Password reset successfully' });
+        
+    } catch (err) {
+        console.error('Reset provider password error:', err);
+        res.status(500).json({ message: 'Error resetting password' });
+    }
+};
+
+// LEGACY: Combined Step 2 - Verify OTP and reset password (for backward compatibility)
 export const verifyProviderForgotPasswordOTPAndReset = async (req, res) => {
     await verifyOTPAndResetPassword({
         email: req.body.provider_email,
@@ -1396,16 +1662,225 @@ export const providerResetPassword = async (req, res) => {
 // Get provider profile
 export const getProviderProfile = async (req, res) => {
     try {
-        // Use the provider ID from the authentication middleware
-        const providerId = req.userId;
-        
-        if (!providerId) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Provider ID not found in session' 
+        // Extract provider ID from JWT token (decoded by authMiddleware)
+        const providerId = Number(req.userId);
+
+        if (!providerId || Number.isNaN(providerId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid token: Provider ID not found'
             });
         }
 
+        const provider = await prisma.serviceProviderDetails.findUnique({
+            where: { provider_id: providerId },
+            select: {
+                provider_id: true,
+                provider_first_name: true,
+                provider_last_name: true,
+                provider_userName: true,
+                provider_email: true,
+                provider_phone_number: true,
+                provider_profile_photo: true,
+                provider_valid_id: true,
+                provider_location: true,
+                provider_exact_location: true,
+                provider_uli: true,
+                provider_birthday: true,
+                provider_isVerified: true,
+                verification_status: true,
+                rejection_reason: true,
+                verification_submitted_at: true,
+                verification_reviewed_at: true,
+                provider_rating: true,
+                provider_isActivated: true,
+                created_at: true,
+                provider_professions: {
+                    select: {
+                        id: true,
+                        profession: true,
+                        experience: true
+                    },
+                    orderBy: {
+                        id: 'asc'
+                    }
+                },
+                provider_certificates: {
+                    select: {
+                        certificate_id: true,
+                        certificate_name: true,
+                        certificate_number: true,
+                        certificate_file_path: true,
+                        expiry_date: true,
+                        certificate_status: true,
+                        created_at: true
+                    }
+                },
+                provider_services: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_description: true,
+                        service_startingprice: true,
+                        servicelisting_isActive: true
+                    },
+                    orderBy: {
+                        service_id: 'desc'
+                    },
+                    take: 5
+                }
+            }
+        });
+
+        if (!provider) {
+            return res.status(404).json({
+                success: false,
+                message: 'Provider not found'
+            });
+        }
+
+        const profileData = {
+            provider_id: provider.provider_id,
+            first_name: provider.provider_first_name,
+            last_name: provider.provider_last_name,
+            full_name: `${provider.provider_first_name} ${provider.provider_last_name}`.trim(),
+            userName: provider.provider_userName,
+            email: provider.provider_email,
+            phone_number: provider.provider_phone_number,
+            profile_photo: provider.provider_profile_photo,
+            valid_id: provider.provider_valid_id,
+            location: provider.provider_location,
+            exact_location: provider.provider_exact_location,
+            uli: provider.provider_uli,
+            birthday: provider.provider_birthday,
+            is_verified: provider.provider_isVerified,
+            verification_status: provider.verification_status,
+            rejection_reason: provider.rejection_reason,
+            verification_submitted_at: provider.verification_submitted_at,
+            verification_reviewed_at: provider.verification_reviewed_at,
+            rating: provider.provider_rating,
+            is_activated: provider.provider_isActivated,
+            created_at: provider.created_at,
+            professions: provider.provider_professions.map((profession) => ({
+                id: profession.id,
+                profession: profession.profession,
+                experience: profession.experience
+            })),
+            certificates: provider.provider_certificates.map((certificate) => ({
+                certificate_id: certificate.certificate_id,
+                certificate_name: certificate.certificate_name,
+                certificate_number: certificate.certificate_number,
+                certificate_file_path: certificate.certificate_file_path,
+                expiry_date: certificate.expiry_date,
+                certificate_status: certificate.certificate_status,
+                status: certificate.certificate_status,
+                created_at: certificate.created_at
+            })),
+            recent_services: provider.provider_services.map((service) => ({
+                service_id: service.service_id,
+                service_title: service.service_title,
+                service_description: service.service_description,
+                service_startingprice: service.service_startingprice,
+                is_active: service.servicelisting_isActive
+            })),
+            totals: {
+                professions: provider.provider_professions.length,
+                certificates: provider.provider_certificates.length,
+                recent_services: provider.provider_services.length
+            }
+        };
+
+        return res.status(200).json({
+            success: true,
+            message: 'Provider profile retrieved successfully',
+            data: profileData
+        });
+    } catch (error) {
+        console.error('Error fetching provider profile:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/profile-detailed:
+ *   get:
+ *     tags:
+ *       - Service Provider Profile
+ *     summary: Get detailed provider profile (JWT authenticated)
+ *     description: Retrieve detailed service provider information including ratings, certifications, and professions. Uses JWT token to identify the provider.
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Provider profile retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Provider profile retrieved successfully"
+ *                 provider:
+ *                   type: object
+ *                   properties:
+ *                     provider_id:
+ *                       type: integer
+ *                     provider_first_name:
+ *                       type: string
+ *                     provider_last_name:
+ *                       type: string
+ *                     provider_userName:
+ *                       type: string
+ *                     provider_email:
+ *                       type: string
+ *                     provider_phone_number:
+ *                       type: string
+ *                     provider_profile_photo:
+ *                       type: string
+ *                     provider_rating:
+ *                       type: number
+ *                     provider_location:
+ *                       type: string
+ *                     provider_uli:
+ *                       type: string
+ *                     provider_isVerified:
+ *                       type: boolean
+ *                     verification_status:
+ *                       type: string
+ *                     created_at:
+ *                       type: string
+ *                     certificates:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     professions:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     ratings_count:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *       404:
+ *         description: Provider not found
+ *       500:
+ *         description: Server error
+ */
+// Get detailed provider profile using JWT token
+export const getProviderProfileById = async (req, res) => {
+    const providerId = req.userId; // From JWT token via authMiddleware
+
+    if (!providerId) {
+        return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    try {
         const provider = await prisma.serviceProviderDetails.findUnique({
             where: { provider_id: parseInt(providerId) },
             select: {
@@ -1416,6 +1891,7 @@ export const getProviderProfile = async (req, res) => {
                 provider_email: true,
                 provider_phone_number: true,
                 provider_profile_photo: true,
+                provider_valid_id: true,
                 provider_isVerified: true,
                 verification_status: true,
                 rejection_reason: true,
@@ -1423,9 +1899,48 @@ export const getProviderProfile = async (req, res) => {
                 verification_reviewed_at: true,
                 provider_rating: true,
                 provider_location: true,
+                provider_exact_location: true,
                 provider_uli: true,
+                provider_birthday: true,
                 created_at: true,
-                provider_isActivated: true
+                provider_isActivated: true,
+                provider_certificates: {
+                    select: {
+                        certificate_id: true,
+                        certificate_name: true,
+                        certificate_number: true,
+                        certificate_file_path: true,
+                        expiry_date: true
+                    }
+                },
+                provider_professions: {
+                    select: {
+                        id: true,
+                        profession: true,
+                        experience: true
+                    }
+                },
+                provider_ratings: {
+                    select: {
+                        id: true,
+                        rating_value: true,
+                        rating_comment: true,
+                        rating_photo: true,
+                        created_at: true,
+                        user: {
+                            select: {
+                                user_id: true,
+                                first_name: true,
+                                last_name: true,
+                                profile_photo: true
+                            }
+                        }
+                    },
+                    orderBy: {
+                        created_at: 'desc'
+                    },
+                    take: 10 // Latest 10 ratings
+                }
             }
         });
 
@@ -1433,9 +1948,159 @@ export const getProviderProfile = async (req, res) => {
             return res.status(404).json({ message: 'Provider not found' });
         }
 
-        res.status(200).json(provider);
+        // Calculate ratings statistics
+        const ratingsCount = await prisma.rating.count({
+            where: { provider_id: parseInt(providerId) }
+        });
+
+        res.status(200).json({
+            message: 'Provider profile retrieved successfully',
+            provider: {
+                ...provider,
+                ratings_count: ratingsCount,
+                certificates: provider.provider_certificates,
+                professions: provider.provider_professions,
+                recent_ratings: provider.provider_ratings
+            }
+        });
+    } catch (err) {
+        console.error('Get provider profile error:', err);
+        res.status(500).json({ message: 'Server error retrieving provider profile' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/availability/date:
+ *   put:
+ *     tags:
+ *       - Service Provider Availability
+ *     summary: Update provider availability for a specific date
+ *     description: Change availability status (active/inactive) for a specific date. Providers can mark themselves unavailable for specific dates.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - date
+ *               - isActive
+ *             properties:
+ *               date:
+ *                 type: string
+ *                 format: date
+ *                 example: "2025-10-15"
+ *                 description: Date to update availability (YYYY-MM-DD)
+ *               isActive:
+ *                 type: boolean
+ *                 example: false
+ *                 description: Set to false to mark as unavailable, true for available
+ *               dayOfWeek:
+ *                 type: string
+ *                 example: "Monday"
+ *                 description: Optional - Day of week (auto-detected if not provided)
+ *     responses:
+ *       200:
+ *         description: Availability updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Availability for 2025-10-15 (Monday) updated successfully"
+ *                 date:
+ *                   type: string
+ *                 dayOfWeek:
+ *                   type: string
+ *                 isActive:
+ *                   type: boolean
+ *                 availability:
+ *                   type: object
+ *       400:
+ *         description: Bad request - missing or invalid parameters
+ *       401:
+ *         description: Unauthorized - authentication required
+ *       404:
+ *         description: Provider or availability not found
+ *       500:
+ *         description: Server error
+ */
+// Update provider availability for a specific date
+export const updateAvailabilityByDate = async (req, res) => {
+    try {
+        const providerId = req.userId; // From auth middleware
+        const { date, isActive, dayOfWeek } = req.body;
+
+        // Validate input
+        if (!date) {
+            return res.status(400).json({ message: 'Date is required (format: YYYY-MM-DD)' });
+        }
+
+        if (typeof isActive !== 'boolean') {
+            return res.status(400).json({ message: 'isActive must be a boolean (true or false)' });
+        }
+
+        // Parse and validate date
+        const targetDate = new Date(date);
+        if (isNaN(targetDate.getTime())) {
+            return res.status(400).json({ message: 'Invalid date format. Use YYYY-MM-DD' });
+        }
+
+        // Get day of week from date
+        const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const calculatedDayOfWeek = daysOfWeek[targetDate.getDay()];
+        const finalDayOfWeek = dayOfWeek || calculatedDayOfWeek;
+
+        // Check if provider exists
+        const provider = await prisma.serviceProviderDetails.findUnique({
+            where: { provider_id: parseInt(providerId) }
+        });
+
+        if (!provider) {
+            return res.status(404).json({ message: 'Provider not found' });
+        }
+
+        // Find availability for this day of week
+        const availability = await prisma.availability.findFirst({
+            where: {
+                provider_id: parseInt(providerId),
+                dayOfWeek: finalDayOfWeek
+            }
+        });
+
+        if (!availability) {
+            return res.status(404).json({ 
+                message: `No availability found for ${finalDayOfWeek}. Please create availability first.`,
+                dayOfWeek: finalDayOfWeek
+            });
+        }
+
+        // Update availability status
+        const updatedAvailability = await prisma.availability.update({
+            where: { availability_id: availability.availability_id },
+            data: { availability_isActive: isActive }
+        });
+
+        res.status(200).json({
+            message: `Availability for ${date} (${finalDayOfWeek}) updated successfully`,
+            date: date,
+            dayOfWeek: finalDayOfWeek,
+            isActive: isActive,
+            availability: {
+                availability_id: updatedAvailability.availability_id,
+                dayOfWeek: updatedAvailability.dayOfWeek,
+                startTime: updatedAvailability.startTime,
+                endTime: updatedAvailability.endTime,
+                availability_isActive: updatedAvailability.availability_isActive
+            }
+        });
     } catch (error) {
-        console.error('Error fetching provider profile:', error);
+        console.error('Error updating availability by date:', error);
         res.status(500).json({ message: 'Internal server error' });
     }
 };
@@ -1677,7 +2342,15 @@ export const getProviderBookings = async (req, res) => {
                         first_name: true,
                         last_name: true,
                         email: true,
-                        phone_number: true
+                        phone_number: true,
+                        exact_location: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
                     }
                 }
             },
@@ -1714,7 +2387,18 @@ export const getProviderActivity = async (req, res) => {
             where: { provider_id: parseInt(providerId) },
             include: {
                 customer: {
-                    select: { first_name: true, last_name: true }
+                    select: { 
+                        first_name: true, 
+                        last_name: true,
+                        exact_location: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
                 }
             },
             orderBy: { created_at: 'desc' },
@@ -2316,13 +3000,43 @@ export const updateAppointmentStatusProvider = async (req, res) => {
                         service_title: true,
                         service_description: true
                     }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_phone_number: true
+                    }
                 }
             }
         });
 
+        // Send email notification for 'on the way' and 'in-progress' status
+        if (status === 'on the way' || status === 'in-progress') {
+            try {
+                await sendAppointmentStatusUpdateEmail(updatedAppointment.customer.email, {
+                    customerName: `${updatedAppointment.customer.first_name} ${updatedAppointment.customer.last_name}`,
+                    providerName: `${updatedAppointment.serviceProvider.provider_first_name} ${updatedAppointment.serviceProvider.provider_last_name}`,
+                    providerPhone: updatedAppointment.serviceProvider.provider_phone_number,
+                    serviceTitle: updatedAppointment.service.service_title,
+                    scheduledDate: updatedAppointment.scheduled_date,
+                    appointmentId: updatedAppointment.appointment_id,
+                    newStatus: status,
+                    statusMessage: status === 'on the way' 
+                        ? 'Your service provider is heading to your location. Please be ready!' 
+                        : 'Your service provider has started working on your request.'
+                });
+                console.log(`✅ Status update email sent to ${updatedAppointment.customer.email} for status: ${status}`);
+            } catch (emailError) {
+                // Log error but don't fail the status update
+                console.error('❌ Failed to send status update email:', emailError);
+            }
+        }
+
         res.status(200).json({
             success: true,
             message: `Appointment status updated to ${status}`,
+            emailSent: (status === 'on the way' || status === 'in-progress'),
             data: updatedAppointment
         });
     } catch (error) {
@@ -2701,12 +3415,6 @@ export const getAllServiceListings = async (req, res) => {
                 },
                 specific_services: {
                     include: {
-                        category: {
-                            select: {
-                                category_id: true,
-                                category_name: true
-                            }
-                        },
                         covered_by_certificates: {
                             include: {
                                 certificate: {
@@ -2758,10 +3466,6 @@ export const getAllServiceListings = async (req, res) => {
                 provider_profile_photo: listing.serviceProvider.provider_profile_photo,
                 provider_member_since: listing.serviceProvider.created_at
             },
-            categories: listing.specific_services.map(service => ({
-                category_id: service.category.category_id,
-                category_name: service.category.category_name
-            })),
             certificates: listing.specific_services.flatMap(service => 
                 service.covered_by_certificates.map(cert => ({
                     certificate_id: cert.certificate.certificate_id,
@@ -2842,13 +3546,10 @@ export const getServiceListingsByTitle = async (req, res) => {
                     }
                 },
                 specific_services: {
-                    include: {
-                        category: {
-                            select: {
-                                category_id: true,
-                                category_name: true
-                            }
-                        }
+                    select: {
+                        specific_service_id: true,
+                        specific_service_title: true,
+                        specific_service_description: true
                     }
                 }
             },
@@ -2881,10 +3582,6 @@ export const getServiceListingsByTitle = async (req, res) => {
                 provider_profile_photo: listing.serviceProvider.provider_profile_photo,
                 provider_member_since: listing.serviceProvider.created_at
             },
-            categories: listing.specific_services.map(service => ({
-                category_id: service.category.category_id,
-                category_name: service.category.category_name
-            })),
             specific_services: listing.specific_services.map(service => ({
                 specific_service_id: service.specific_service_id,
                 specific_service_title: service.specific_service_title,
@@ -2951,8 +3648,7 @@ export const getProviderProfessions = async (req, res) => {
                 professions: provider.provider_professions.map(prof => ({
                     id: prof.id,
                     profession: prof.profession,
-                    experience: prof.experience,
-                    created_at: prof.created_at
+                    experience: prof.experience
                 }))
             }
         });
@@ -2970,8 +3666,16 @@ export const getProviderProfessions = async (req, res) => {
 // Get provider details (for the authenticated provider)
 export const getProviderDetails = async (req, res) => {
     try {
-        const providerId = req.userId; // From JWT token
-        
+        // Extract provider ID from JWT token (decoded by authMiddleware)
+        const providerId = Number(req.userId);
+
+        if (!providerId || Number.isNaN(providerId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid token: Provider ID not found'
+            });
+        }
+
         console.log('Getting details for provider ID:', providerId);
         
         // Get provider details with all related information
@@ -2983,14 +3687,14 @@ export const getProviderDetails = async (req, res) => {
                         id: 'asc'
                     }
                 },
-                certificates: {
+                provider_certificates: {
                     select: {
                         certificate_id: true,
                         certificate_name: true,
                         certificate_number: true,
                         certificate_file_path: true,
                         expiry_date: true,
-                        status: true,
+                        certificate_status: true,
                         created_at: true
                     }
                 },
@@ -3000,11 +3704,10 @@ export const getProviderDetails = async (req, res) => {
                         service_title: true,
                         service_description: true,
                         service_startingprice: true,
-                        servicelisting_isActive: true,
-                        created_at: true
+                        servicelisting_isActive: true
                     },
                     orderBy: {
-                        created_at: 'desc'
+                        service_id: 'desc'
                     },
                     take: 5 // Get latest 5 services
                 }
@@ -3053,16 +3756,16 @@ export const getProviderDetails = async (req, res) => {
                 professions: provider.provider_professions.map(prof => ({
                     id: prof.id,
                     profession: prof.profession,
-                    experience: prof.experience,
-                    created_at: prof.created_at
+                    experience: prof.experience
                 })),
-                certificates: provider.certificates.map(cert => ({
+                certificates: provider.provider_certificates.map(cert => ({
                     certificate_id: cert.certificate_id,
                     certificate_name: cert.certificate_name,
                     certificate_number: cert.certificate_number,
                     certificate_file_path: cert.certificate_file_path,
                     expiry_date: cert.expiry_date,
-                    status: cert.status,
+                    certificate_status: cert.certificate_status,
+                    status: cert.certificate_status,
                     created_at: cert.created_at
                 })),
                 recent_services: provider.provider_services.map(service => ({
@@ -3070,13 +3773,12 @@ export const getProviderDetails = async (req, res) => {
                     service_title: service.service_title,
                     service_description: service.service_description,
                     service_startingprice: service.service_startingprice,
-                    is_active: service.servicelisting_isActive,
-                    created_at: service.created_at
+                    is_active: service.servicelisting_isActive
                 })),
                 
                 // Summary Statistics
                 total_professions: provider.provider_professions.length,
-                total_certificates: provider.certificates.length,
+                total_certificates: provider.provider_certificates.length,
                 total_services: provider.provider_services.length
             }
         });
