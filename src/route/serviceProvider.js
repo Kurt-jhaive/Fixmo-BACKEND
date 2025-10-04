@@ -53,6 +53,7 @@ import { PrismaClient } from '@prisma/client';
 const router = express.Router();
 
 // Configure multer memory storage for Cloudinary uploads (serverless-compatible)
+// Fixed: Removed local filesystem directory creation for Vercel compatibility
 const registrationStorage = multer.memoryStorage();
 
 // File filter to accept only images for profile photos and IDs, and documents for certificates
