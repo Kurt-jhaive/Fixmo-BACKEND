@@ -871,7 +871,7 @@ export const providerLogin = async (req, res) => {
         if (!isMatch) {
             return res.status(400).json({ message: 'Invalid email or password' });
         }
-          // Create JWT token
+        // Create JWT token
         const token = jwt.sign(
             { 
                 userId: provider.provider_id, // Use userId to match middleware expectation
@@ -884,39 +884,48 @@ export const providerLogin = async (req, res) => {
             { expiresIn: '30d' } // 30 days for mobile app
         );
 
-        // Create session
-        req.session.provider = {
-            id: provider.provider_id,
-            email: provider.provider_email,
-            userName: provider.provider_userName,
-            firstName: provider.provider_first_name,
-            lastName: provider.provider_last_name,
-            loginTime: new Date()
+        // Create session (only if sessions are enabled)
+        if (req.session) {
+            req.session.provider = {
+                id: provider.provider_id,
+                email: provider.provider_email,
+                userName: provider.provider_userName,
+                firstName: provider.provider_first_name,
+                lastName: provider.provider_last_name,
+                loginTime: new Date()
+            };
+        }
+
+        // Prepare response
+        const responseData = {
+            success: true,
+            message: 'Login successful',
+            token,
+            providerId: provider.provider_id,
+            providerUserName: provider.provider_userName,
+            userType: 'provider',
+            provider: {
+                id: provider.provider_id,
+                firstName: provider.provider_first_name,
+                lastName: provider.provider_last_name,
+                email: provider.provider_email,
+                userName: provider.provider_userName
+            }
         };
 
-        // Save session before responding
-        req.session.save((err) => {
-            if (err) {
-                console.error('Session save error:', err);
-                return res.status(500).json({ message: 'Session creation failed' });
-            }
-
-            res.status(200).json({
-                success: true,
-                message: 'Login successful',
-                token,
-                providerId: provider.provider_id,
-                providerUserName: provider.provider_userName,
-                userType: 'provider',
-                provider: {
-                    id: provider.provider_id,
-                    firstName: provider.provider_first_name,
-                    lastName: provider.provider_last_name,
-                    email: provider.provider_email,
-                    userName: provider.provider_userName
+        // Save session if it exists, otherwise respond immediately
+        if (req.session && req.session.save) {
+            req.session.save((err) => {
+                if (err) {
+                    console.error('Session save error:', err);
+                    return res.status(500).json({ message: 'Session creation failed' });
                 }
+                res.status(200).json(responseData);
             });
-        });
+        } else {
+            // No session in production, just return JWT
+            res.status(200).json(responseData);
+        }
         
     } catch (err) {
         console.error(err);
