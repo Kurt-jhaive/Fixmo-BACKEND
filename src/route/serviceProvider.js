@@ -1,7 +1,5 @@
 import express from 'express';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
 import sharp from 'sharp';
 import {
   sendProviderOTP,
@@ -54,20 +52,7 @@ import { PrismaClient } from '@prisma/client';
 
 const router = express.Router();
 
-// Ensure upload directories exist
-const ensureDirectoryExists = (dir) => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-};
-
-// Create necessary directories (for backward compatibility)
-ensureDirectoryExists('uploads/profiles');
-ensureDirectoryExists('uploads/ids');
-ensureDirectoryExists('uploads/certificates');
-ensureDirectoryExists('uploads/service-images');
-
-// Configure multer memory storage for Cloudinary uploads
+// Configure multer memory storage for Cloudinary uploads (serverless-compatible)
 const registrationStorage = multer.memoryStorage();
 
 // File filter to accept only images for profile photos and IDs, and documents for certificates

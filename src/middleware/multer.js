@@ -1,11 +1,5 @@
 import multer from 'multer';
 import sharp from 'sharp';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Storage configuration for service images with memory storage for Cloudinary
 const serviceImageStorage = multer.memoryStorage(); // Use memory storage for Cloudinary processing
@@ -41,34 +35,27 @@ const uploadServiceImageSimple = multer({
     }
 });
 
-// Middleware to process and save service images as JPG
+// Middleware to process service images in memory (Cloudinary-compatible)
+// Note: Image processing is now done in memory, no local filesystem required
 const processServiceImage = async (req, res, next) => {
     if (!req.file) {
         return next();
     }
 
     try {
-        // Generate unique filename
+        // Generate unique filename for reference
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
         const filename = 'service_' + uniqueSuffix + '.jpg';
-        const uploadPath = path.join(__dirname, '../../uploads/service-images/');
-        const filePath = path.join(uploadPath, filename);
 
-        console.log('Processing service image:', {
+        console.log('Processing service image in memory:', {
             originalname: req.file.originalname,
             mimetype: req.file.mimetype,
             size: req.file.size,
-            filename: filename,
-            filePath: filePath
+            filename: filename
         });
 
-        // Ensure directory exists
-        if (!fs.existsSync(uploadPath)) {
-            fs.mkdirSync(uploadPath, { recursive: true });
-        }
-
-        // Process image with Sharp - convert to JPG and resize
-        await sharp(req.file.buffer)
+        // Process image with Sharp in memory - convert to JPG and resize
+        const processedBuffer = await sharp(req.file.buffer)
             .resize(800, 600, { 
                 fit: 'cover', 
                 position: 'center',
@@ -78,17 +65,16 @@ const processServiceImage = async (req, res, next) => {
                 quality: 85,
                 progressive: true
             })
-            .toFile(filePath);
+            .toBuffer();
 
-        // Add file information to req.file for the controller
+        // Replace buffer with processed version
+        req.file.buffer = processedBuffer;
         req.file.filename = filename;
-        req.file.path = filePath;
-        req.file.destination = uploadPath;
+        req.file.mimetype = 'image/jpeg';
 
-        console.log('Image processed successfully:', {
+        console.log('Image processed successfully in memory:', {
             filename: filename,
-            path: filePath,
-            size: req.file.size
+            size: processedBuffer.length
         });
 
         next();
@@ -101,45 +87,8 @@ const processServiceImage = async (req, res, next) => {
     }
 };
 
-// Test function to verify upload directory is accessible
-// Note: Only run in development, not needed for production (Vercel uses Cloudinary)
-const testUploadDirectory = () => {
-    // Skip in production or if already tested
-    if (process.env.NODE_ENV === 'production' || global.__multerDirectoryTested) {
-        return true;
-    }
-    
-    try {
-        const uploadPath = path.join(__dirname, '../../uploads/service-images/');
-        
-        // Check if directory exists
-        if (!fs.existsSync(uploadPath)) {
-            console.error('Upload directory does not exist:', uploadPath);
-            // Try to create it
-            fs.mkdirSync(uploadPath, { recursive: true });
-            console.log('✅ Created upload directory:', uploadPath);
-        }
-        
-        // Test write permissions
-        const testFile = path.join(uploadPath, 'test.txt');
-        fs.writeFileSync(testFile, 'test');
-        fs.unlinkSync(testFile);
-        console.log('✅ Upload directory is writable:', uploadPath);
-        
-        // Mark as tested to prevent duplicate runs
-        global.__multerDirectoryTested = true;
-        
-        return true;
-    } catch (error) {
-        console.error('❌ Upload directory test failed:', error);
-        return false;
-    }
-};
-
-// Run test on module load (only once)
-if (process.env.NODE_ENV !== 'production') {
-    testUploadDirectory();
-}
+// Note: Test function removed - not needed for serverless environments
+// All uploads use memory storage and Cloudinary for persistence
 
 // Rating photo storage configuration - Use memory storage for Cloudinary
 const ratingPhotoStorage = multer.memoryStorage();
