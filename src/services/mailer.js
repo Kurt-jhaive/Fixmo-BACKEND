@@ -1424,3 +1424,245 @@ export const sendEmail = async ({ to, subject, html, from = process.env.MAILER_U
     
     await transporter.sendMail(mailOptions);
 };
+
+/**
+ * Send appointment status update notification to customer
+ * Notifies customer when provider changes appointment status to 'on the way' or 'in-progress'
+ */
+export const sendAppointmentStatusUpdateEmail = async (customerEmail, statusDetails) => {
+    const {
+        customerName,
+        providerName,
+        providerPhone,
+        serviceTitle,
+        scheduledDate,
+        appointmentId,
+        newStatus,
+        statusMessage
+    } = statusDetails;
+
+    const formattedDate = new Date(scheduledDate).toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+
+    const formattedTime = new Date(scheduledDate).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+
+    // Determine status color and icon
+    const statusConfig = {
+        'on the way': {
+            color: '#FF9800',
+            icon: '🚗',
+            title: 'Provider is On The Way!',
+            message: statusMessage || 'Your service provider is heading to your location.'
+        },
+        'in-progress': {
+            color: '#2196F3',
+            icon: '🔧',
+            title: 'Service In Progress',
+            message: statusMessage || 'Your service provider has started working on your request.'
+        }
+    };
+
+    const config = statusConfig[newStatus] || {
+        color: '#4CAF50',
+        icon: '📋',
+        title: 'Appointment Status Updated',
+        message: statusMessage || `Your appointment status has been updated to: ${newStatus}`
+    };
+
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: customerEmail,
+        subject: `${config.icon} ${config.title} - Appointment #${appointmentId}`,
+        html: `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        line-height: 1.6;
+                        color: #333;
+                        margin: 0;
+                        padding: 0;
+                        background-color: #f4f4f4;
+                    }
+                    .container {
+                        max-width: 600px;
+                        margin: 20px auto;
+                        background: white;
+                        border-radius: 10px;
+                        overflow: hidden;
+                        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                    }
+                    .header {
+                        background: linear-gradient(135deg, ${config.color} 0%, ${config.color}dd 100%);
+                        color: white;
+                        padding: 30px;
+                        text-align: center;
+                    }
+                    .header h1 {
+                        margin: 0;
+                        font-size: 28px;
+                        font-weight: 600;
+                    }
+                    .status-icon {
+                        font-size: 60px;
+                        margin-bottom: 15px;
+                    }
+                    .content {
+                        padding: 30px;
+                    }
+                    .message-box {
+                        background: #f8f9fa;
+                        border-left: 4px solid ${config.color};
+                        padding: 15px;
+                        margin: 20px 0;
+                        border-radius: 4px;
+                    }
+                    .info-grid {
+                        display: table;
+                        width: 100%;
+                        margin: 20px 0;
+                    }
+                    .info-row {
+                        display: table-row;
+                    }
+                    .info-label {
+                        display: table-cell;
+                        padding: 12px 0;
+                        font-weight: 600;
+                        color: #666;
+                        width: 40%;
+                    }
+                    .info-value {
+                        display: table-cell;
+                        padding: 12px 0;
+                        color: #333;
+                    }
+                    .status-badge {
+                        display: inline-block;
+                        background: ${config.color};
+                        color: white;
+                        padding: 6px 16px;
+                        border-radius: 20px;
+                        font-weight: 600;
+                        font-size: 14px;
+                        text-transform: uppercase;
+                    }
+                    .provider-info {
+                        background: #e8f5e9;
+                        padding: 20px;
+                        border-radius: 8px;
+                        margin: 20px 0;
+                    }
+                    .provider-info h3 {
+                        margin-top: 0;
+                        color: #2e7d32;
+                    }
+                    .contact-btn {
+                        display: inline-block;
+                        background: ${config.color};
+                        color: white;
+                        padding: 12px 24px;
+                        text-decoration: none;
+                        border-radius: 6px;
+                        margin-top: 10px;
+                        font-weight: 600;
+                    }
+                    .footer {
+                        background: #f8f9fa;
+                        padding: 20px;
+                        text-align: center;
+                        color: #666;
+                        font-size: 14px;
+                    }
+                    .divider {
+                        height: 1px;
+                        background: #e0e0e0;
+                        margin: 25px 0;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <div class="status-icon">${config.icon}</div>
+                        <h1>${config.title}</h1>
+                    </div>
+                    
+                    <div class="content">
+                        <p style="font-size: 18px; margin-top: 0;">Hello <strong>${customerName}</strong>,</p>
+                        
+                        <div class="message-box">
+                            <p style="margin: 0; font-size: 16px;">${config.message}</p>
+                        </div>
+
+                        <div class="divider"></div>
+
+                        <h3 style="color: #333; margin-bottom: 15px;">📋 Appointment Details</h3>
+                        <div class="info-grid">
+                            <div class="info-row">
+                                <div class="info-label">Appointment ID:</div>
+                                <div class="info-value"><strong>#${appointmentId}</strong></div>
+                            </div>
+                            <div class="info-row">
+                                <div class="info-label">Service:</div>
+                                <div class="info-value">${serviceTitle}</div>
+                            </div>
+                            <div class="info-row">
+                                <div class="info-label">Scheduled Date:</div>
+                                <div class="info-value">${formattedDate}</div>
+                            </div>
+                            <div class="info-row">
+                                <div class="info-label">Time:</div>
+                                <div class="info-value">${formattedTime}</div>
+                            </div>
+                            <div class="info-row">
+                                <div class="info-label">Status:</div>
+                                <div class="info-value">
+                                    <span class="status-badge">${newStatus.toUpperCase()}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="divider"></div>
+
+                        <div class="provider-info">
+                            <h3>👤 Service Provider Information</h3>
+                            <p style="margin: 8px 0;"><strong>Provider:</strong> ${providerName}</p>
+                            <p style="margin: 8px 0;"><strong>Contact:</strong> ${providerPhone}</p>
+                            ${newStatus === 'on the way' ? 
+                                '<p style="margin: 15px 0 0 0; color: #2e7d32;"><strong>💡 Tip:</strong> Please ensure someone is available to receive the service provider.</p>' :
+                                '<p style="margin: 15px 0 0 0; color: #1976d2;"><strong>💡 Note:</strong> The service is currently being performed. You may contact the provider if you have any questions.</p>'
+                            }
+                        </div>
+
+                        <div class="divider"></div>
+
+                        <p style="color: #666; font-size: 14px; margin-bottom: 0;">
+                            If you have any questions or concerns, please don't hesitate to contact your service provider directly.
+                        </p>
+                    </div>
+                    
+                    <div class="footer">
+                        <p style="margin: 5px 0;"><strong>Fixmo - Your Trusted Service Platform</strong></p>
+                        <p style="margin: 5px 0;">This is an automated notification. Please do not reply to this email.</p>
+                        <p style="margin: 15px 0 5px 0; font-size: 12px; color: #999;">
+                            © ${new Date().getFullYear()} Fixmo. All rights reserved.
+                        </p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `
+    };
+
+    await transporter.sendMail(mailOptions);
+};

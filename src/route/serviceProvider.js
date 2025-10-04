@@ -4,11 +4,18 @@ import path from 'path';
 import fs from 'fs';
 import sharp from 'sharp';
 import {
+  sendProviderOTP,
+  verifyProviderOTP,
+  registerServiceProvider,
+  checkProviderPhoneUnique,
+  checkProviderUsernameUnique,
   requestProviderOTP,
   verifyProviderOTPOnly,
   verifyProviderOTPAndRegister,
   providerLogin,
   requestProviderForgotPasswordOTP,
+  verifyProviderForgotPasswordOTP,
+  resetPasswordProvider,
   verifyProviderForgotPasswordOTPAndReset,
   providerResetPassword,
   uploadCertificate,
@@ -19,6 +26,8 @@ import {
   deleteAvailability,
   getProviderDayAvailability,
   getProviderProfile,
+  getProviderProfileById,
+  updateAvailabilityByDate,
   getProviderServices,
   requestProviderProfileUpdateOTP,
   updateProviderProfileWithOTP,
@@ -35,7 +44,9 @@ import {
   getServiceListingsByTitle,
   getProviderProfessions,
   getProviderDetails,
-  updateProviderDetails
+  updateProviderDetails,
+  requestProviderProfileEditOTP,
+  verifyOTPAndUpdateProviderProfile
 } from '../controller/authserviceProviderController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { uploadServiceImage } from '../middleware/multer.js';
@@ -74,8 +85,8 @@ const fileFilter = (req, file, cb) => {
     } else {
       cb(new Error(`${file.fieldname} must be an image file (JPG, PNG, GIF, etc.)`), false);
     }
-  } else if (file.fieldname === 'certificateFile') {
-    // Accept images and documents for certificates
+  } else if (file.fieldname === 'certificateFile' || file.fieldname === 'certificate_images') {
+    // Accept images and documents for certificates (support both field names)
     const allowedMimeTypes = [
       'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
       'application/pdf', 'application/msword', 
@@ -97,28 +108,20 @@ const registrationUpload = multer({
   storage: registrationStorage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit per file
+    fileSize: 10 * 1024 * 1024, // 10MB limit per file
     files: 12 // Maximum 12 files total (1 profile + 1 ID + 10 certificates)
   }
 }).fields([
   { name: 'provider_profile_photo', maxCount: 1 },
   { name: 'provider_valid_id', maxCount: 1 },
-  { name: 'certificateFile', maxCount: 10 } // Allow up to 10 certificates
+  { name: 'certificateFile', maxCount: 10 }, // Allow up to 10 certificates
+  { name: 'certificate_images', maxCount: 10 } // Support alternative field name
 ]);
 
 // Configure multer for single certificate uploads
-const certificateStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadPath = 'uploads/certificates/';
-    ensureDirectoryExists(uploadPath);
-    cb(null, uploadPath);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, 'certificate-' + uniqueSuffix + ext);
-  }
-});
+// Using memory storage for Vercel compatibility (serverless environment)
+// Files will be uploaded to Cloudinary from memory buffer
+const certificateStorage = multer.memoryStorage(); // Changed from diskStorage to memoryStorage
 
 const certificateFilter = (req, file, cb) => {
   console.log('Certificate file filter check:', {
@@ -174,10 +177,49 @@ const profileUpdateUpload = multer({
 
 const prisma = new PrismaClient();
 
+// New 3-step OTP flow for service provider registration
+router.post('/provider/send-otp', sendProviderOTP);                // Step 1: Send OTP to email
+router.post('/provider/verify-otp', verifyProviderOTP);            // Step 2: Verify OTP
+router.post('/provider/register', (req, res, next) => {            // Step 3: Register provider
+  registrationUpload(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      console.error('Multer error:', err);
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+          success: false,
+          message: 'File too large. Maximum size is 5MB per file.'
+        });
+      } else if (err.code === 'LIMIT_FILE_COUNT') {
+        return res.status(400).json({
+          success: false,
+          message: 'Too many files. Maximum is 12 files total.'
+        });
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: `Upload error: ${err.message}`
+        });
+      }
+    } else if (err) {
+      console.error('File validation error:', err);
+      return res.status(400).json({
+        success: false,
+        message: err.message
+      });
+    }
+    next();
+  });
+}, registerServiceProvider);
+
+// Uniqueness check endpoints
+router.post('/provider/check-phone', checkProviderPhoneUnique);       // Check if phone number is unique
+router.post('/provider/check-username', checkProviderUsernameUnique); // Check if username is unique
+
+// Legacy endpoints for backward compatibility
 // Step 1: Service provider requests OTP
 router.post('/provider-request-otp', requestProviderOTP);
 // Step 1.5: Service provider verifies OTP only (for registration flow)
-router.post('/provider-verify-otp', verifyProviderOTPOnly);
+router.post('/provider-verify-otp-only', verifyProviderOTPOnly);
 // Step 2: Service provider verifies OTP and registers with error handling
 router.post('/provider-verify-register', (req, res, next) => {
   registrationUpload(req, res, (err) => {
@@ -214,17 +256,27 @@ router.post('/provider-verify-register', (req, res, next) => {
 // Service provider login
 router.post('/provider-login', providerLogin);
 router.post('/loginProvider', providerLogin);
-// Forgot password: request OTP
+
+// NEW: 3-Step Forgot Password Flow (with rate limiting)
+router.post('/provider/forgot-password', requestProviderForgotPasswordOTP);          // Step 1: Request OTP (3 attempts/30min)
+router.post('/provider/verify-forgot-password', verifyProviderForgotPasswordOTP);    // Step 2: Verify OTP
+router.post('/provider/reset-password', resetPasswordProvider);                      // Step 3: Reset password
+
+// LEGACY: Forgot password routes (for backward compatibility)
 router.post('/provider-forgot-password-request-otp', requestProviderForgotPasswordOTP);
-// Forgot password: verify OTP and reset password
 router.post('/provider-forgot-password-verify-otp', verifyProviderForgotPasswordOTPAndReset);
-// Simple provider password reset (OTP already verified)
 router.post('/provider-reset-password', providerResetPassword);
 
 // Provider profile (protected route)
+router.get('/provider-profile', authMiddleware, getProviderProfile);
+// Backward-compatible alias for existing clients
 router.get('/profile', authMiddleware, getProviderProfile);
-// Get provider profile (protected route)
-router.get('/profile', authMiddleware, getProviderProfile);
+// Get detailed provider profile with certificates, professions, and ratings (JWT authenticated)
+router.get('/profile-detailed', authMiddleware, getProviderProfileById);
+// Edit provider profile - Step 1: Request OTP
+router.post('/profile/request-otp', authMiddleware, requestProviderProfileEditOTP);
+// Edit provider profile - Step 2: Verify OTP and Update
+router.put('/profile', authMiddleware, verifyOTPAndUpdateProviderProfile);
 
 // Get provider services (protected route)
 router.get('/my-services', authMiddleware, getProviderServices);
@@ -339,6 +391,8 @@ router.get('/provider/:provider_id/availability/:dayOfWeek', getProviderDayAvail
 
 // Update specific availability
 router.put('/availability/:availability_id', updateAvailability);
+// Update availability by date (provider-protected route)
+router.put('/availability/date', authMiddleware, updateAvailabilityByDate);
 // Delete specific availability
 router.delete('/availability/:availability_id', deleteAvailability);
 

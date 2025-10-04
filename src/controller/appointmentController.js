@@ -635,7 +635,7 @@ export const updateAppointmentStatus = async (req, res) => {
         }
 
         // Validate status values
-    const validStatuses = ['scheduled', 'on-the-way', 'in-progress', 'in-warranty', 'finished', 'completed', 'cancelled'];
+    const validStatuses = ['scheduled', 'On the Way', 'in-progress', 'in-warranty', 'finished', 'completed', 'cancelled'];
         if (!validStatuses.includes(status.toLowerCase())) {
             return res.status(400).json({
                 success: false,
@@ -1333,6 +1333,7 @@ export const getProviderAppointments = async (req, res) => {
                             email: true,
                             phone_number: true,
                             user_location: true,
+                            exact_location: true,
                             profile_photo: true
                         }
                     },
@@ -1496,6 +1497,7 @@ export const getCustomerAppointments = async (req, res) => {
                             provider_email: true,
                             provider_phone_number: true,
                             provider_location: true,
+                            provider_exact_location: true,
                             provider_profile_photo: true,
                             provider_rating: true
                         }

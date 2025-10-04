@@ -270,6 +270,10 @@ class AdminController {
                     valid_id: true,
                     userName: true,
                     is_verified: true,
+                    verification_status: true,
+                    rejection_reason: true,
+                    verification_submitted_at: true,
+                    verification_reviewed_at: true,
                     is_activated: true,
                     created_at: true
                 }
@@ -306,6 +310,10 @@ class AdminController {
                     exact_location: true,
                     userName: true,
                     is_verified: true,
+                    verification_status: true,
+                    rejection_reason: true,
+                    verification_submitted_at: true,
+                    verification_reviewed_at: true,
                     is_activated: true,
                     birthday: true,
                     created_at: true
@@ -335,7 +343,12 @@ class AdminController {
 
             const user = await prisma.user.update({
                 where: { user_id: parseInt(userId) },
-                data: { is_verified: true }
+                data: { 
+                    is_verified: true,
+                    verification_status: 'approved',
+                    rejection_reason: null,
+                    verification_reviewed_at: new Date()
+                }
             });
 
             // Send approval email
@@ -422,7 +435,10 @@ class AdminController {
                 where: { user_id: parseInt(userId) },
                 data: { 
                     is_verified: false,
-                    user_reason: reason
+                    verification_status: 'rejected',
+                    rejection_reason: reason,
+                    user_reason: reason,
+                    verification_reviewed_at: new Date()
                 }
             });
 
@@ -460,6 +476,10 @@ class AdminController {
                     provider_valid_id: true,
                     provider_userName: true,
                     provider_isVerified: true,
+                    verification_status: true,
+                    rejection_reason: true,
+                    verification_submitted_at: true,
+                    verification_reviewed_at: true,
                     provider_isActivated: true,
                     provider_rating: true,
                     created_at: true
@@ -522,7 +542,12 @@ class AdminController {
 
             const provider = await prisma.serviceProviderDetails.update({
                 where: { provider_id: parseInt(providerId) },
-                data: { provider_isVerified: true }
+                data: { 
+                    provider_isVerified: true,
+                    verification_status: 'approved',
+                    rejection_reason: null,
+                    verification_reviewed_at: new Date()
+                }
             });
 
             // Send approval email
@@ -609,7 +634,10 @@ class AdminController {
                 where: { provider_id: parseInt(providerId) },
                 data: { 
                     provider_isVerified: false,
-                    provider_reason: reason
+                    verification_status: 'rejected',
+                    rejection_reason: reason,
+                    provider_reason: reason,
+                    verification_reviewed_at: new Date()
                 }
             });
 

@@ -1,4 +1,5 @@
 import express from 'express';
+import multer from 'multer';
 import {
     getPendingVerifications,
     approveCustomerVerification,
@@ -14,6 +15,25 @@ import { adminAuthMiddleware } from '../middleware/adminAuthMiddleware.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 
 const router = express.Router();
+
+// Configure multer for file uploads
+const storage = multer.memoryStorage();
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed'), false);
+  }
+};
+
+const upload = multer({ 
+  storage, 
+  fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit per file
+    files: 5 // Maximum 5 files (2 for basic + 3 for certificates)
+  }
+});
 
 // ============================================
 // ADMIN ROUTES - Require admin authentication
@@ -72,9 +92,12 @@ router.get('/customer/status', authMiddleware, getCustomerVerificationStatus);
  * @route   POST /api/verification/customer/resubmit
  * @desc    Re-submit customer verification after rejection
  * @access  Authenticated Customer
- * @body    { valid_id_url: string }
+ * @body    Files: valid_id, profile_photo OR URLs: { valid_id_url: string, profile_photo_url?: string }
  */
-router.post('/customer/resubmit', authMiddleware, resubmitCustomerVerification);
+router.post('/customer/resubmit', authMiddleware, upload.fields([
+  { name: 'valid_id', maxCount: 1 },
+  { name: 'profile_photo', maxCount: 1 }
+]), resubmitCustomerVerification);
 
 // ============================================
 // PROVIDER ROUTES - Require provider authentication
@@ -91,8 +114,12 @@ router.get('/provider/status', authMiddleware, getProviderVerificationStatus);
  * @route   POST /api/verification/provider/resubmit
  * @desc    Re-submit provider verification after rejection
  * @access  Authenticated Provider
- * @body    { valid_id_url: string, certificate_urls: string[] }
+ * @body    Files: valid_id, profile_photo, certificates OR URLs: { valid_id_url: string, profile_photo_url?: string, certificate_urls?: string[] }
  */
-router.post('/provider/resubmit', authMiddleware, resubmitProviderVerification);
+router.post('/provider/resubmit', authMiddleware, upload.fields([
+  { name: 'valid_id', maxCount: 1 },
+  { name: 'profile_photo', maxCount: 1 },
+  { name: 'certificates', maxCount: 3 }
+]), resubmitProviderVerification);
 
 export default router;

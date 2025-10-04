@@ -1,9 +1,10 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
-import { sendOTPEmail, sendRegistrationSuccessEmail } from '../services/mailer.js';
+import { sendOTPEmail, sendRegistrationSuccessEmail, sendAppointmentStatusUpdateEmail } from '../services/mailer.js';
 import { forgotrequestOTP, verifyOTPAndResetPassword, verifyOTP, cleanupOTP } from '../services/otpUtils.js';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
+import { checkForgotPasswordRateLimit, recordForgotPasswordAttempt, resetForgotPasswordAttempts } from '../services/rateLimitUtils.js';
 
 const prisma = new PrismaClient();
 
@@ -20,39 +21,559 @@ const minutesToTime = (minutes) => {
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
 };
 
-// Step 1: Request OTP for service provider registration
-export const requestProviderOTP = async (req, res) => {
+/**
+ * @swagger
+ * /auth/provider/send-otp:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Step 1 - Send OTP to provider email
+ *     description: Generates a 6-digit OTP and sends it to the service provider's email. OTP expires in 5 minutes.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_email
+ *             properties:
+ *               provider_email:
+ *                 type: string
+ *                 format: email
+ *                 example: "provider@example.com"
+ *                 description: Service provider's email address
+ *     responses:
+ *       200:
+ *         description: OTP sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "OTP sent to provider email successfully"
+ *       400:
+ *         description: Bad request - Provider already exists or email invalid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Provider already exists with this email"
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Error sending OTP"
+ */
+// Step 1: Send OTP for service provider registration
+export const sendProviderOTP = async (req, res) => {
     const { provider_email } = req.body;
+
+    // Validate input
+    if (!provider_email) {
+        return res.status(400).json({ message: 'Email is required' });
+    }
+
     try {
+        // Check if provider already exists
         const existingProvider = await prisma.serviceProviderDetails.findUnique({ where: { provider_email } });
         if (existingProvider) {
-            return res.status(400).json({ message: 'Provider already exists' });
+            return res.status(400).json({ message: 'Provider already exists with this email' });
         }
-
-        // Delete any previous OTPs for this email to prevent re-use
-        await prisma.oTPVerification.deleteMany({ where: { email: provider_email } });
 
         // Generate 6-digit OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-        await prisma.oTPVerification.create({
-            data: {
-                email: provider_email,
-                otp,
-                expires_at: expiresAt
-            }
-        });
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
+        // Check if OTP already exists for this email
+        const existingOTP = await prisma.oTPVerification.findFirst({ where: { email: provider_email } });
+        
+        if (existingOTP) {
+            // Update existing OTP record
+            await prisma.oTPVerification.updateMany({
+                where: { email: provider_email },
+                data: {
+                    otp,
+                    expires_at: expiresAt,
+                    verified: false // Reset verification status
+                }
+            });
+        } else {
+            // Create new OTP record
+            await prisma.oTPVerification.create({
+                data: {
+                    email: provider_email,
+                    otp,
+                    expires_at: expiresAt,
+                    verified: false
+                }
+            });
+        }
+
+        // Send OTP email
         await sendOTPEmail(provider_email, otp);
-        res.status(200).json({ message: 'OTP sent to provider email' });
+        
+        res.status(200).json({ message: 'OTP sent to provider email successfully' });
     } catch (err) {
-        console.error(err);
+        console.error('Send provider OTP error:', err);
         res.status(500).json({ message: 'Error sending OTP' });
     }
 };
 
-// Step 2: Verify OTP and register service provider
-export const verifyProviderOTPAndRegister = async (req, res) => {
+/**
+ * @swagger
+ * /auth/provider/check-phone:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Check if provider phone number is unique
+ *     description: Validates if the phone number is available for provider registration (not already in use)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_phone_number
+ *             properties:
+ *               provider_phone_number:
+ *                 type: string
+ *                 example: "+1234567890"
+ *                 description: Phone number to check
+ *     responses:
+ *       200:
+ *         description: Phone number is available
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 available:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Phone number is available"
+ *       400:
+ *         description: Phone number already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 available:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Phone number already exists"
+ *       500:
+ *         description: Server error
+ */
+export const checkProviderPhoneUnique = async (req, res) => {
+    const { provider_phone_number } = req.body;
+
+    if (!provider_phone_number) {
+        return res.status(400).json({ message: 'Phone number is required' });
+    }
+
+    try {
+        const existingProvider = await prisma.serviceProviderDetails.findUnique({ 
+            where: { provider_phone_number } 
+        });
+
+        if (existingProvider) {
+            return res.status(400).json({ 
+                available: false, 
+                message: 'Phone number already exists' 
+            });
+        }
+
+        res.status(200).json({ 
+            available: true, 
+            message: 'Phone number is available' 
+        });
+    } catch (err) {
+        console.error('Check provider phone uniqueness error:', err);
+        res.status(500).json({ message: 'Error checking phone number' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/provider/check-username:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Check if provider username is unique
+ *     description: Validates if the username is available for provider registration (not already in use)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_userName
+ *             properties:
+ *               provider_userName:
+ *                 type: string
+ *                 example: "johndoe_provider"
+ *                 description: Username to check
+ *     responses:
+ *       200:
+ *         description: Username is available
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 available:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Username is available"
+ *       400:
+ *         description: Username already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 available:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Username already exists"
+ *       500:
+ *         description: Server error
+ */
+export const checkProviderUsernameUnique = async (req, res) => {
+    const { provider_userName } = req.body;
+
+    if (!provider_userName) {
+        return res.status(400).json({ message: 'Username is required' });
+    }
+
+    try {
+        const existingProvider = await prisma.serviceProviderDetails.findUnique({ 
+            where: { provider_userName } 
+        });
+
+        if (existingProvider) {
+            return res.status(400).json({ 
+                available: false, 
+                message: 'Username already exists' 
+            });
+        }
+
+        res.status(200).json({ 
+            available: true, 
+            message: 'Username is available' 
+        });
+    } catch (err) {
+        console.error('Check provider username uniqueness error:', err);
+        res.status(500).json({ message: 'Error checking username' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/provider/verify-otp:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Step 2 - Verify OTP code
+ *     description: Validates the OTP code sent to provider's email and marks it as verified
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_email
+ *               - otp
+ *             properties:
+ *               provider_email:
+ *                 type: string
+ *                 format: email
+ *                 example: "provider@example.com"
+ *                 description: Service provider's email address
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *                 description: 6-digit OTP code received via email
+ *     responses:
+ *       200:
+ *         description: OTP verified successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Email verified successfully. You can now proceed to registration."
+ *                 verified:
+ *                   type: boolean
+ *                   example: true
+ *       400:
+ *         description: Bad request - Invalid, expired, or missing OTP
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   enum:
+ *                     - "No OTP found for this email. Please request a new OTP."
+ *                     - "OTP has expired. Please request a new OTP."
+ *                     - "Invalid OTP. Please try again."
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Error verifying OTP"
+ */
+// Step 2: Verify OTP for service provider registration
+export const verifyProviderOTP = async (req, res) => {
+    const { provider_email, otp } = req.body;
+
+    // Validate input
+    if (!provider_email || !otp) {
+        return res.status(400).json({ message: 'Email and OTP are required' });
+    }
+
+    try {
+        // Find OTP record
+        const otpRecord = await prisma.oTPVerification.findFirst({ 
+            where: { email: provider_email }
+        });
+
+        if (!otpRecord) {
+            return res.status(400).json({ message: 'No OTP found for this email. Please request a new OTP.' });
+        }
+
+        // Check if already verified
+        if (otpRecord.verified) {
+            return res.status(200).json({ message: 'Email already verified. You can proceed to registration.' });
+        }
+
+        // Check if OTP is expired
+        if (new Date() > otpRecord.expires_at) {
+            return res.status(400).json({ message: 'OTP has expired. Please request a new OTP.' });
+        }
+
+        // Check if OTP matches
+        if (otpRecord.otp !== otp) {
+            return res.status(400).json({ message: 'Invalid OTP. Please try again.' });
+        }
+
+        // Mark OTP as verified
+        await prisma.oTPVerification.updateMany({
+            where: { email: provider_email },
+            data: { verified: true }
+        });
+
+        res.status(200).json({ 
+            message: 'Email verified successfully. You can now proceed to registration.',
+            verified: true
+        });
+
+    } catch (err) {
+        console.error('Verify provider OTP error:', err);
+        res.status(500).json({ message: 'Error verifying OTP' });
+    }
+};
+
+// Legacy endpoint for backward compatibility - kept for existing integrations
+export const requestProviderOTP = sendProviderOTP;
+
+/**
+ * @swagger
+ * /auth/provider/register:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Step 3 - Register service provider account
+ *     description: Creates a new service provider account after email verification. Requires OTP to be verified first. Automatically uploads files to Cloudinary.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_email
+ *               - provider_password
+ *               - provider_first_name
+ *               - provider_last_name
+ *               - provider_userName
+ *               - provider_phone_number
+ *               - provider_uli
+ *             properties:
+ *               provider_first_name:
+ *                 type: string
+ *                 example: "Jane"
+ *               provider_last_name:
+ *                 type: string
+ *                 example: "Smith"
+ *               provider_userName:
+ *                 type: string
+ *                 example: "janesmith"
+ *               provider_email:
+ *                 type: string
+ *                 format: email
+ *                 example: "provider@example.com"
+ *               provider_password:
+ *                 type: string
+ *                 format: password
+ *                 example: "SecurePass123"
+ *               provider_phone_number:
+ *                 type: string
+ *                 example: "+1234567890"
+ *               provider_uli:
+ *                 type: string
+ *                 example: "ULI1234"
+ *                 description: Unique Learner Identifier (4 digits)
+ *               provider_birthday:
+ *                 type: string
+ *                 format: date
+ *                 example: "1990-01-15"
+ *               provider_location:
+ *                 type: string
+ *                 example: "New York"
+ *               provider_exact_location:
+ *                 type: string
+ *                 example: "123 Main St, New York, NY 10001"
+ *               provider_profile_photo:
+ *                 type: string
+ *                 format: binary
+ *                 description: Profile photo image file (max 5MB)
+ *               provider_valid_id:
+ *                 type: string
+ *                 format: binary
+ *                 description: Valid ID image file (max 5MB)
+ *               certificateFile:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *                 description: Certificate files (max 10 files, 10MB each)
+ *               certificateNames:
+ *                 type: string
+ *                 example: '["Certificate 1", "Certificate 2"]'
+ *                 description: JSON array of certificate names
+ *               certificateNumbers:
+ *                 type: string
+ *                 example: '["CERT001", "CERT002"]'
+ *                 description: JSON array of certificate numbers
+ *               expiryDates:
+ *                 type: string
+ *                 example: '["2025-12-31", "2026-06-30"]'
+ *                 description: JSON array of expiry dates
+ *               professions:
+ *                 type: string
+ *                 example: '["Plumber", "Electrician"]'
+ *                 description: JSON array of professions
+ *               experiences:
+ *                 type: string
+ *                 example: '["5 years", "3 years"]'
+ *                 description: JSON array of experience durations
+ *     responses:
+ *       201:
+ *         description: Service provider registered successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Service provider registered successfully"
+ *                 token:
+ *                   type: string
+ *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *                 providerId:
+ *                   type: integer
+ *                   example: 123
+ *                 providerUserName:
+ *                   type: string
+ *                   example: "janesmith"
+ *                 provider_profile_photo:
+ *                   type: string
+ *                   example: "https://res.cloudinary.com/.../profile.jpg"
+ *                 provider_valid_id:
+ *                   type: string
+ *                   example: "https://res.cloudinary.com/.../id.jpg"
+ *                 certificates:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       certificate_id:
+ *                         type: integer
+ *                       certificate_name:
+ *                         type: string
+ *                       certificate_file_path:
+ *                         type: string
+ *                 professions:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       profession:
+ *                         type: string
+ *                       experience:
+ *                         type: string
+ *       400:
+ *         description: Bad request - Validation failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   enum:
+ *                     - "Email not verified. Please verify your email before registering."
+ *                     - "Email not found. Please verify your email first."
+ *                     - "Provider already exists"
+ *                     - "Phone number is already registered with another provider account"
+ *                     - "All required fields must be provided"
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Server error during provider registration"
+ */
+// Step 3: Register service provider after email verification
+export const registerServiceProvider = async (req, res) => {
     try {
         console.log('Provider registration request received');
         console.log('Request body keys:', Object.keys(req.body));
@@ -69,7 +590,6 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             provider_location,
             provider_exact_location,
             provider_uli,
-            otp,
             certificateNames,
             certificateNumbers,
             expiryDates,
@@ -86,13 +606,31 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             provider_phone_number,
             provider_location,
             provider_uli,
-            otp,
             certificateNames,
             certificateNumbers,
             expiryDates,
             professions,
             experiences
         });
+
+        // Validate required fields
+        if (!provider_email || !provider_password || !provider_first_name || !provider_last_name || 
+            !provider_userName || !provider_phone_number || !provider_uli) {
+            return res.status(400).json({ message: 'All required fields must be provided' });
+        }
+
+        // Check if email is verified
+        const otpRecord = await prisma.oTPVerification.findFirst({ 
+            where: { email: provider_email }
+        });
+
+        if (!otpRecord) {
+            return res.status(400).json({ message: 'Email not found. Please verify your email first.' });
+        }
+
+        if (!otpRecord.verified) {
+            return res.status(400).json({ message: 'Email not verified. Please verify your email before registering.' });
+        }
 
         // Check if provider already exists (prevent duplicate registration)
         const existingProvider = await prisma.serviceProviderDetails.findUnique({ where: { provider_email } });
@@ -106,9 +644,7 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
         });
         if (existingPhoneProvider) {
             return res.status(400).json({ message: 'Phone number is already registered with another provider account' });
-        }  
-        
-
+        }
 
         // Parse certificate data if it's JSON
         let parsedCertificateNames, parsedCertificateNumbers, parsedExpiryDates;
@@ -138,19 +674,13 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
         console.log('Parsed experiences:', parsedExperiences);
         console.log('Is parsedProfessions an array?', Array.isArray(parsedProfessions));
 
-        // Since email is already verified in step 1, we skip OTP verification here
-        // Only verify OTP if it's not a dummy value (for backward compatibility)
-        if (otp !== '123456') {
-            const verificationResult = await verifyOTP(provider_email, otp);
-            if (!verificationResult.success) {
-                return res.status(400).json({ message: verificationResult.message });
-            }
-        }
-
         // Handle file uploads to Cloudinary
         const profilePhotoFile = req.files && req.files['provider_profile_photo'] ? req.files['provider_profile_photo'][0] : null;
         const validIdFile = req.files && req.files['provider_valid_id'] ? req.files['provider_valid_id'][0] : null;
-        const certificateFiles = req.files && req.files['certificateFile'] ? req.files['certificateFile'] : [];
+        // Support both 'certificateFile' and 'certificate_images' field names
+        const certificateFiles = req.files && (req.files['certificateFile'] || req.files['certificate_images']) 
+            ? (req.files['certificateFile'] || req.files['certificate_images']) 
+            : [];
 
         let provider_profile_photo = null;
         let provider_valid_id = null;
@@ -210,6 +740,16 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
 
                 if (certificateName && certificateNumber && certificateFile) {
                     try {
+                        // Check if certificate number already exists
+                        const existingCert = await prisma.certificate.findUnique({
+                            where: { certificate_number: certificateNumber }
+                        });
+
+                        if (existingCert) {
+                            console.log(`Skipping certificate ${certificateNumber} - already exists`);
+                            continue; // Skip this certificate
+                        }
+
                         // Upload certificate to Cloudinary
                         const certificateUrl = await uploadToCloudinary(
                             certificateFile.buffer, 
@@ -250,14 +790,18 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
                 console.log(`Processing profession ${i}:`, profession);
                 console.log(`Processing experience ${i}:`, experience);
                 
-                if (profession && profession.trim()) {
+                // Ensure profession is a string and not empty
+                const professionStr = typeof profession === 'string' ? profession : String(profession);
+                const experienceStr = typeof experience === 'string' ? experience : String(experience);
+                
+                if (professionStr && professionStr.trim()) {
                     try {
                         console.log('Creating profession in database...');
                         const providerProfession = await prisma.providerProfession.create({
                             data: {
                                 provider_id: newProvider.provider_id,
-                                profession: profession.trim(),
-                                experience: experience ? experience.trim() : '0 years'
+                                profession: professionStr.trim(),
+                                experience: experienceStr ? experienceStr.trim() : '0 years'
                             }
                         });
                         console.log('Profession created successfully:', providerProfession);
@@ -274,8 +818,10 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
             console.log('No professions to process or not an array');
         }
         
-        console.log('Final createdProfessions:', createdProfessions);// Delete the used OTP
-        await cleanupOTP(provider_email);
+        console.log('Final createdProfessions:', createdProfessions);
+        
+        // Delete the used OTP record
+        await prisma.oTPVerification.deleteMany({ where: { email: provider_email } });
 
         // Send registration success email
         await sendRegistrationSuccessEmail(provider_email, provider_first_name, provider_userName);
@@ -309,6 +855,9 @@ export const verifyProviderOTPAndRegister = async (req, res) => {
         res.status(500).json({ message: 'Server error during provider registration' });
     }
 };
+
+// Legacy endpoint for backward compatibility - kept for existing integrations
+export const verifyProviderOTPAndRegister = registerServiceProvider;
 
 // Service provider login
 export const providerLogin = async (req, res) => {
@@ -375,17 +924,282 @@ export const providerLogin = async (req, res) => {
     }
 };
 
+/**
+ * @swagger
+ * /auth/provider/forgot-password:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Step 1 - Request OTP for password reset
+ *     description: Sends a 6-digit OTP to provider's email for password reset. Limited to 3 attempts per 30 minutes.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_email
+ *             properties:
+ *               provider_email:
+ *                 type: string
+ *                 format: email
+ *                 example: "provider@example.com"
+ *     responses:
+ *       200:
+ *         description: OTP sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Password reset OTP sent to your email"
+ *                 attemptsLeft:
+ *                   type: integer
+ *                   example: 2
+ *       400:
+ *         description: Provider not found
+ *       429:
+ *         description: Too many attempts
+ *       500:
+ *         description: Server error
+ */
 // PROVIDER: Step 1 - Request OTP for forgot password
 export const requestProviderForgotPasswordOTP = async (req, res) => {
-    await forgotrequestOTP({
-        email: req.body.provider_email,
-        userType: 'provider',
-        existsCheck: async (email) => await prisma.serviceProviderDetails.findUnique({ where: { provider_email: email } }),
-        existsErrorMsg: 'Provider not found'
-    }, res);
+    const { provider_email } = req.body;
+    
+    if (!provider_email) {
+        return res.status(400).json({ message: 'Email is required' });
+    }
+    
+    try {
+        // Check rate limiting (3 attempts, 30-minute cooldown)
+        const rateLimitCheck = await checkForgotPasswordRateLimit(provider_email);
+        if (!rateLimitCheck.allowed) {
+            return res.status(429).json({ 
+                message: rateLimitCheck.message,
+                remainingMinutes: rateLimitCheck.remainingMinutes
+            });
+        }
+        
+        // Check if provider exists
+        const provider = await prisma.serviceProviderDetails.findUnique({ 
+            where: { provider_email } 
+        });
+        if (!provider) {
+            return res.status(400).json({ message: 'No account found with this email' });
+        }
+        
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+        
+        // Store or update OTP
+        const existingOTP = await prisma.oTPVerification.findFirst({ 
+            where: { email: provider_email } 
+        });
+        
+        if (existingOTP) {
+            await prisma.oTPVerification.updateMany({
+                where: { email: provider_email },
+                data: {
+                    otp,
+                    expires_at: expiresAt,
+                    verified: false
+                }
+            });
+        } else {
+            await prisma.oTPVerification.create({
+                data: {
+                    email: provider_email,
+                    otp,
+                    expires_at: expiresAt,
+                    verified: false
+                }
+            });
+        }
+        
+        // Send OTP email
+        await sendOTPEmail(provider_email, otp, 'password reset');
+        
+        // Record attempt
+        recordForgotPasswordAttempt(provider_email);
+        
+        res.status(200).json({ 
+            message: 'Password reset OTP sent to your email',
+            attemptsLeft: rateLimitCheck.attemptsLeft - 1
+        });
+        
+    } catch (err) {
+        console.error('Provider forgot password OTP error:', err);
+        res.status(500).json({ message: 'Error processing password reset request' });
+    }
 };
 
-// PROVIDER: Step 2 - Verify OTP and reset password
+/**
+ * @swagger
+ * /auth/provider/verify-forgot-password:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Step 2 - Verify OTP for password reset
+ *     description: Verifies the OTP code sent to provider's email
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_email
+ *               - otp
+ *             properties:
+ *               provider_email:
+ *                 type: string
+ *                 format: email
+ *                 example: "provider@example.com"
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: OTP verified successfully
+ *       400:
+ *         description: Invalid or expired OTP
+ *       500:
+ *         description: Server error
+ */
+// PROVIDER: Step 2 - Verify OTP (separate step)
+export const verifyProviderForgotPasswordOTP = async (req, res) => {
+    const { provider_email, otp } = req.body;
+    
+    if (!provider_email || !otp) {
+        return res.status(400).json({ message: 'Email and OTP are required' });
+    }
+    
+    try {
+        // Find OTP record
+        const otpRecord = await prisma.oTPVerification.findFirst({ 
+            where: { email: provider_email }
+        });
+        
+        if (!otpRecord) {
+            return res.status(400).json({ message: 'No OTP found. Please request a new one.' });
+        }
+        
+        // Check if OTP is expired
+        if (new Date() > new Date(otpRecord.expires_at)) {
+            return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+        }
+        
+        // Verify OTP
+        if (otpRecord.otp !== otp) {
+            return res.status(400).json({ message: 'Invalid OTP. Please try again.' });
+        }
+        
+        // Mark as verified
+        await prisma.oTPVerification.updateMany({
+            where: { email: provider_email },
+            data: { verified: true }
+        });
+        
+        res.status(200).json({ 
+            message: 'OTP verified. You can now reset your password.',
+            verified: true
+        });
+        
+    } catch (err) {
+        console.error('Verify provider forgot password OTP error:', err);
+        res.status(500).json({ message: 'Error verifying OTP' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/provider/reset-password:
+ *   post:
+ *     tags:
+ *       - Service Provider Authentication
+ *     summary: Step 3 - Reset password
+ *     description: Resets provider password after OTP verification
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - provider_email
+ *               - newPassword
+ *             properties:
+ *               provider_email:
+ *                 type: string
+ *                 format: email
+ *                 example: "provider@example.com"
+ *               newPassword:
+ *                 type: string
+ *                 format: password
+ *                 example: "NewSecurePass123!"
+ *     responses:
+ *       200:
+ *         description: Password reset successfully
+ *       400:
+ *         description: OTP not verified or provider not found
+ *       500:
+ *         description: Server error
+ */
+// PROVIDER: Step 3 - Reset password after OTP verification
+export const resetPasswordProvider = async (req, res) => {
+    const { provider_email, newPassword } = req.body;
+    
+    if (!provider_email || !newPassword) {
+        return res.status(400).json({ message: 'Email and new password are required' });
+    }
+    
+    try {
+        // Check if OTP was verified
+        const otpRecord = await prisma.oTPVerification.findFirst({ 
+            where: { email: provider_email }
+        });
+        
+        if (!otpRecord || !otpRecord.verified) {
+            return res.status(400).json({ message: 'Please verify your OTP first' });
+        }
+        
+        // Check if provider exists
+        const provider = await prisma.serviceProviderDetails.findUnique({ 
+            where: { provider_email } 
+        });
+        if (!provider) {
+            return res.status(400).json({ message: 'Provider not found' });
+        }
+        
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        
+        // Update password
+        await prisma.serviceProviderDetails.update({
+            where: { provider_email },
+            data: { provider_password: hashedPassword }
+        });
+        
+        // Delete OTP record
+        await prisma.oTPVerification.deleteMany({ where: { email: provider_email } });
+        
+        // Reset rate limiting for this email
+        resetForgotPasswordAttempts(provider_email);
+        
+        res.status(200).json({ message: 'Password reset successfully' });
+        
+    } catch (err) {
+        console.error('Reset provider password error:', err);
+        res.status(500).json({ message: 'Error resetting password' });
+    }
+};
+
+// LEGACY: Combined Step 2 - Verify OTP and reset password (for backward compatibility)
 export const verifyProviderForgotPasswordOTPAndReset = async (req, res) => {
     await verifyOTPAndResetPassword({
         email: req.body.provider_email,
@@ -848,16 +1662,225 @@ export const providerResetPassword = async (req, res) => {
 // Get provider profile
 export const getProviderProfile = async (req, res) => {
     try {
-        // Use the provider ID from the authentication middleware
-        const providerId = req.userId;
-        
-        if (!providerId) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Provider ID not found in session' 
+        // Extract provider ID from JWT token (decoded by authMiddleware)
+        const providerId = Number(req.userId);
+
+        if (!providerId || Number.isNaN(providerId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid token: Provider ID not found'
             });
         }
 
+        const provider = await prisma.serviceProviderDetails.findUnique({
+            where: { provider_id: providerId },
+            select: {
+                provider_id: true,
+                provider_first_name: true,
+                provider_last_name: true,
+                provider_userName: true,
+                provider_email: true,
+                provider_phone_number: true,
+                provider_profile_photo: true,
+                provider_valid_id: true,
+                provider_location: true,
+                provider_exact_location: true,
+                provider_uli: true,
+                provider_birthday: true,
+                provider_isVerified: true,
+                verification_status: true,
+                rejection_reason: true,
+                verification_submitted_at: true,
+                verification_reviewed_at: true,
+                provider_rating: true,
+                provider_isActivated: true,
+                created_at: true,
+                provider_professions: {
+                    select: {
+                        id: true,
+                        profession: true,
+                        experience: true
+                    },
+                    orderBy: {
+                        id: 'asc'
+                    }
+                },
+                provider_certificates: {
+                    select: {
+                        certificate_id: true,
+                        certificate_name: true,
+                        certificate_number: true,
+                        certificate_file_path: true,
+                        expiry_date: true,
+                        certificate_status: true,
+                        created_at: true
+                    }
+                },
+                provider_services: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_description: true,
+                        service_startingprice: true,
+                        servicelisting_isActive: true
+                    },
+                    orderBy: {
+                        service_id: 'desc'
+                    },
+                    take: 5
+                }
+            }
+        });
+
+        if (!provider) {
+            return res.status(404).json({
+                success: false,
+                message: 'Provider not found'
+            });
+        }
+
+        const profileData = {
+            provider_id: provider.provider_id,
+            first_name: provider.provider_first_name,
+            last_name: provider.provider_last_name,
+            full_name: `${provider.provider_first_name} ${provider.provider_last_name}`.trim(),
+            userName: provider.provider_userName,
+            email: provider.provider_email,
+            phone_number: provider.provider_phone_number,
+            profile_photo: provider.provider_profile_photo,
+            valid_id: provider.provider_valid_id,
+            location: provider.provider_location,
+            exact_location: provider.provider_exact_location,
+            uli: provider.provider_uli,
+            birthday: provider.provider_birthday,
+            is_verified: provider.provider_isVerified,
+            verification_status: provider.verification_status,
+            rejection_reason: provider.rejection_reason,
+            verification_submitted_at: provider.verification_submitted_at,
+            verification_reviewed_at: provider.verification_reviewed_at,
+            rating: provider.provider_rating,
+            is_activated: provider.provider_isActivated,
+            created_at: provider.created_at,
+            professions: provider.provider_professions.map((profession) => ({
+                id: profession.id,
+                profession: profession.profession,
+                experience: profession.experience
+            })),
+            certificates: provider.provider_certificates.map((certificate) => ({
+                certificate_id: certificate.certificate_id,
+                certificate_name: certificate.certificate_name,
+                certificate_number: certificate.certificate_number,
+                certificate_file_path: certificate.certificate_file_path,
+                expiry_date: certificate.expiry_date,
+                certificate_status: certificate.certificate_status,
+                status: certificate.certificate_status,
+                created_at: certificate.created_at
+            })),
+            recent_services: provider.provider_services.map((service) => ({
+                service_id: service.service_id,
+                service_title: service.service_title,
+                service_description: service.service_description,
+                service_startingprice: service.service_startingprice,
+                is_active: service.servicelisting_isActive
+            })),
+            totals: {
+                professions: provider.provider_professions.length,
+                certificates: provider.provider_certificates.length,
+                recent_services: provider.provider_services.length
+            }
+        };
+
+        return res.status(200).json({
+            success: true,
+            message: 'Provider profile retrieved successfully',
+            data: profileData
+        });
+    } catch (error) {
+        console.error('Error fetching provider profile:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/profile-detailed:
+ *   get:
+ *     tags:
+ *       - Service Provider Profile
+ *     summary: Get detailed provider profile (JWT authenticated)
+ *     description: Retrieve detailed service provider information including ratings, certifications, and professions. Uses JWT token to identify the provider.
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Provider profile retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Provider profile retrieved successfully"
+ *                 provider:
+ *                   type: object
+ *                   properties:
+ *                     provider_id:
+ *                       type: integer
+ *                     provider_first_name:
+ *                       type: string
+ *                     provider_last_name:
+ *                       type: string
+ *                     provider_userName:
+ *                       type: string
+ *                     provider_email:
+ *                       type: string
+ *                     provider_phone_number:
+ *                       type: string
+ *                     provider_profile_photo:
+ *                       type: string
+ *                     provider_rating:
+ *                       type: number
+ *                     provider_location:
+ *                       type: string
+ *                     provider_uli:
+ *                       type: string
+ *                     provider_isVerified:
+ *                       type: boolean
+ *                     verification_status:
+ *                       type: string
+ *                     created_at:
+ *                       type: string
+ *                     certificates:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     professions:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     ratings_count:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized - invalid or missing token
+ *       404:
+ *         description: Provider not found
+ *       500:
+ *         description: Server error
+ */
+// Get detailed provider profile using JWT token
+export const getProviderProfileById = async (req, res) => {
+    const providerId = req.userId; // From JWT token via authMiddleware
+
+    if (!providerId) {
+        return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    try {
         const provider = await prisma.serviceProviderDetails.findUnique({
             where: { provider_id: parseInt(providerId) },
             select: {
@@ -868,12 +1891,56 @@ export const getProviderProfile = async (req, res) => {
                 provider_email: true,
                 provider_phone_number: true,
                 provider_profile_photo: true,
+                provider_valid_id: true,
                 provider_isVerified: true,
+                verification_status: true,
+                rejection_reason: true,
+                verification_submitted_at: true,
+                verification_reviewed_at: true,
                 provider_rating: true,
                 provider_location: true,
+                provider_exact_location: true,
                 provider_uli: true,
+                provider_birthday: true,
                 created_at: true,
-                provider_isActivated: true
+                provider_isActivated: true,
+                provider_certificates: {
+                    select: {
+                        certificate_id: true,
+                        certificate_name: true,
+                        certificate_number: true,
+                        certificate_file_path: true,
+                        expiry_date: true
+                    }
+                },
+                provider_professions: {
+                    select: {
+                        id: true,
+                        profession: true,
+                        experience: true
+                    }
+                },
+                provider_ratings: {
+                    select: {
+                        id: true,
+                        rating_value: true,
+                        rating_comment: true,
+                        rating_photo: true,
+                        created_at: true,
+                        user: {
+                            select: {
+                                user_id: true,
+                                first_name: true,
+                                last_name: true,
+                                profile_photo: true
+                            }
+                        }
+                    },
+                    orderBy: {
+                        created_at: 'desc'
+                    },
+                    take: 10 // Latest 10 ratings
+                }
             }
         });
 
@@ -881,9 +1948,159 @@ export const getProviderProfile = async (req, res) => {
             return res.status(404).json({ message: 'Provider not found' });
         }
 
-        res.status(200).json(provider);
+        // Calculate ratings statistics
+        const ratingsCount = await prisma.rating.count({
+            where: { provider_id: parseInt(providerId) }
+        });
+
+        res.status(200).json({
+            message: 'Provider profile retrieved successfully',
+            provider: {
+                ...provider,
+                ratings_count: ratingsCount,
+                certificates: provider.provider_certificates,
+                professions: provider.provider_professions,
+                recent_ratings: provider.provider_ratings
+            }
+        });
+    } catch (err) {
+        console.error('Get provider profile error:', err);
+        res.status(500).json({ message: 'Server error retrieving provider profile' });
+    }
+};
+
+/**
+ * @swagger
+ * /auth/availability/date:
+ *   put:
+ *     tags:
+ *       - Service Provider Availability
+ *     summary: Update provider availability for a specific date
+ *     description: Change availability status (active/inactive) for a specific date. Providers can mark themselves unavailable for specific dates.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - date
+ *               - isActive
+ *             properties:
+ *               date:
+ *                 type: string
+ *                 format: date
+ *                 example: "2025-10-15"
+ *                 description: Date to update availability (YYYY-MM-DD)
+ *               isActive:
+ *                 type: boolean
+ *                 example: false
+ *                 description: Set to false to mark as unavailable, true for available
+ *               dayOfWeek:
+ *                 type: string
+ *                 example: "Monday"
+ *                 description: Optional - Day of week (auto-detected if not provided)
+ *     responses:
+ *       200:
+ *         description: Availability updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Availability for 2025-10-15 (Monday) updated successfully"
+ *                 date:
+ *                   type: string
+ *                 dayOfWeek:
+ *                   type: string
+ *                 isActive:
+ *                   type: boolean
+ *                 availability:
+ *                   type: object
+ *       400:
+ *         description: Bad request - missing or invalid parameters
+ *       401:
+ *         description: Unauthorized - authentication required
+ *       404:
+ *         description: Provider or availability not found
+ *       500:
+ *         description: Server error
+ */
+// Update provider availability for a specific date
+export const updateAvailabilityByDate = async (req, res) => {
+    try {
+        const providerId = req.userId; // From auth middleware
+        const { date, isActive, dayOfWeek } = req.body;
+
+        // Validate input
+        if (!date) {
+            return res.status(400).json({ message: 'Date is required (format: YYYY-MM-DD)' });
+        }
+
+        if (typeof isActive !== 'boolean') {
+            return res.status(400).json({ message: 'isActive must be a boolean (true or false)' });
+        }
+
+        // Parse and validate date
+        const targetDate = new Date(date);
+        if (isNaN(targetDate.getTime())) {
+            return res.status(400).json({ message: 'Invalid date format. Use YYYY-MM-DD' });
+        }
+
+        // Get day of week from date
+        const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const calculatedDayOfWeek = daysOfWeek[targetDate.getDay()];
+        const finalDayOfWeek = dayOfWeek || calculatedDayOfWeek;
+
+        // Check if provider exists
+        const provider = await prisma.serviceProviderDetails.findUnique({
+            where: { provider_id: parseInt(providerId) }
+        });
+
+        if (!provider) {
+            return res.status(404).json({ message: 'Provider not found' });
+        }
+
+        // Find availability for this day of week
+        const availability = await prisma.availability.findFirst({
+            where: {
+                provider_id: parseInt(providerId),
+                dayOfWeek: finalDayOfWeek
+            }
+        });
+
+        if (!availability) {
+            return res.status(404).json({ 
+                message: `No availability found for ${finalDayOfWeek}. Please create availability first.`,
+                dayOfWeek: finalDayOfWeek
+            });
+        }
+
+        // Update availability status
+        const updatedAvailability = await prisma.availability.update({
+            where: { availability_id: availability.availability_id },
+            data: { availability_isActive: isActive }
+        });
+
+        res.status(200).json({
+            message: `Availability for ${date} (${finalDayOfWeek}) updated successfully`,
+            date: date,
+            dayOfWeek: finalDayOfWeek,
+            isActive: isActive,
+            availability: {
+                availability_id: updatedAvailability.availability_id,
+                dayOfWeek: updatedAvailability.dayOfWeek,
+                startTime: updatedAvailability.startTime,
+                endTime: updatedAvailability.endTime,
+                availability_isActive: updatedAvailability.availability_isActive
+            }
+        });
     } catch (error) {
-        console.error('Error fetching provider profile:', error);
+        console.error('Error updating availability by date:', error);
         res.status(500).json({ message: 'Internal server error' });
     }
 };
@@ -1125,7 +2342,15 @@ export const getProviderBookings = async (req, res) => {
                         first_name: true,
                         last_name: true,
                         email: true,
-                        phone_number: true
+                        phone_number: true,
+                        exact_location: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
                     }
                 }
             },
@@ -1162,7 +2387,18 @@ export const getProviderActivity = async (req, res) => {
             where: { provider_id: parseInt(providerId) },
             include: {
                 customer: {
-                    select: { first_name: true, last_name: true }
+                    select: { 
+                        first_name: true, 
+                        last_name: true,
+                        exact_location: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
                 }
             },
             orderBy: { created_at: 'desc' },
@@ -1764,13 +3000,43 @@ export const updateAppointmentStatusProvider = async (req, res) => {
                         service_title: true,
                         service_description: true
                     }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_phone_number: true
+                    }
                 }
             }
         });
 
+        // Send email notification for 'on the way' and 'in-progress' status
+        if (status === 'on the way' || status === 'in-progress') {
+            try {
+                await sendAppointmentStatusUpdateEmail(updatedAppointment.customer.email, {
+                    customerName: `${updatedAppointment.customer.first_name} ${updatedAppointment.customer.last_name}`,
+                    providerName: `${updatedAppointment.serviceProvider.provider_first_name} ${updatedAppointment.serviceProvider.provider_last_name}`,
+                    providerPhone: updatedAppointment.serviceProvider.provider_phone_number,
+                    serviceTitle: updatedAppointment.service.service_title,
+                    scheduledDate: updatedAppointment.scheduled_date,
+                    appointmentId: updatedAppointment.appointment_id,
+                    newStatus: status,
+                    statusMessage: status === 'on the way' 
+                        ? 'Your service provider is heading to your location. Please be ready!' 
+                        : 'Your service provider has started working on your request.'
+                });
+                console.log(`✅ Status update email sent to ${updatedAppointment.customer.email} for status: ${status}`);
+            } catch (emailError) {
+                // Log error but don't fail the status update
+                console.error('❌ Failed to send status update email:', emailError);
+            }
+        }
+
         res.status(200).json({
             success: true,
             message: `Appointment status updated to ${status}`,
+            emailSent: (status === 'on the way' || status === 'in-progress'),
             data: updatedAppointment
         });
     } catch (error) {
@@ -2149,12 +3415,6 @@ export const getAllServiceListings = async (req, res) => {
                 },
                 specific_services: {
                     include: {
-                        category: {
-                            select: {
-                                category_id: true,
-                                category_name: true
-                            }
-                        },
                         covered_by_certificates: {
                             include: {
                                 certificate: {
@@ -2206,10 +3466,6 @@ export const getAllServiceListings = async (req, res) => {
                 provider_profile_photo: listing.serviceProvider.provider_profile_photo,
                 provider_member_since: listing.serviceProvider.created_at
             },
-            categories: listing.specific_services.map(service => ({
-                category_id: service.category.category_id,
-                category_name: service.category.category_name
-            })),
             certificates: listing.specific_services.flatMap(service => 
                 service.covered_by_certificates.map(cert => ({
                     certificate_id: cert.certificate.certificate_id,
@@ -2290,13 +3546,10 @@ export const getServiceListingsByTitle = async (req, res) => {
                     }
                 },
                 specific_services: {
-                    include: {
-                        category: {
-                            select: {
-                                category_id: true,
-                                category_name: true
-                            }
-                        }
+                    select: {
+                        specific_service_id: true,
+                        specific_service_title: true,
+                        specific_service_description: true
                     }
                 }
             },
@@ -2329,10 +3582,6 @@ export const getServiceListingsByTitle = async (req, res) => {
                 provider_profile_photo: listing.serviceProvider.provider_profile_photo,
                 provider_member_since: listing.serviceProvider.created_at
             },
-            categories: listing.specific_services.map(service => ({
-                category_id: service.category.category_id,
-                category_name: service.category.category_name
-            })),
             specific_services: listing.specific_services.map(service => ({
                 specific_service_id: service.specific_service_id,
                 specific_service_title: service.specific_service_title,
@@ -2362,8 +3611,6 @@ export const getServiceListingsByTitle = async (req, res) => {
 export const getProviderProfessions = async (req, res) => {
     try {
         const { providerId } = req.params;
-        
-        console.log('Getting professions for provider ID:', providerId);
         
         // Get provider details with professions
         const provider = await prisma.serviceProviderDetails.findUnique({
@@ -2401,8 +3648,7 @@ export const getProviderProfessions = async (req, res) => {
                 professions: provider.provider_professions.map(prof => ({
                     id: prof.id,
                     profession: prof.profession,
-                    experience: prof.experience,
-                    created_at: prof.created_at
+                    experience: prof.experience
                 }))
             }
         });
@@ -2420,8 +3666,16 @@ export const getProviderProfessions = async (req, res) => {
 // Get provider details (for the authenticated provider)
 export const getProviderDetails = async (req, res) => {
     try {
-        const providerId = req.userId; // From JWT token
-        
+        // Extract provider ID from JWT token (decoded by authMiddleware)
+        const providerId = Number(req.userId);
+
+        if (!providerId || Number.isNaN(providerId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid token: Provider ID not found'
+            });
+        }
+
         console.log('Getting details for provider ID:', providerId);
         
         // Get provider details with all related information
@@ -2433,14 +3687,14 @@ export const getProviderDetails = async (req, res) => {
                         id: 'asc'
                     }
                 },
-                certificates: {
+                provider_certificates: {
                     select: {
                         certificate_id: true,
                         certificate_name: true,
                         certificate_number: true,
                         certificate_file_path: true,
                         expiry_date: true,
-                        status: true,
+                        certificate_status: true,
                         created_at: true
                     }
                 },
@@ -2450,11 +3704,10 @@ export const getProviderDetails = async (req, res) => {
                         service_title: true,
                         service_description: true,
                         service_startingprice: true,
-                        servicelisting_isActive: true,
-                        created_at: true
+                        servicelisting_isActive: true
                     },
                     orderBy: {
-                        created_at: 'desc'
+                        service_id: 'desc'
                     },
                     take: 5 // Get latest 5 services
                 }
@@ -2503,16 +3756,16 @@ export const getProviderDetails = async (req, res) => {
                 professions: provider.provider_professions.map(prof => ({
                     id: prof.id,
                     profession: prof.profession,
-                    experience: prof.experience,
-                    created_at: prof.created_at
+                    experience: prof.experience
                 })),
-                certificates: provider.certificates.map(cert => ({
+                certificates: provider.provider_certificates.map(cert => ({
                     certificate_id: cert.certificate_id,
                     certificate_name: cert.certificate_name,
                     certificate_number: cert.certificate_number,
                     certificate_file_path: cert.certificate_file_path,
                     expiry_date: cert.expiry_date,
-                    status: cert.status,
+                    certificate_status: cert.certificate_status,
+                    status: cert.certificate_status,
                     created_at: cert.created_at
                 })),
                 recent_services: provider.provider_services.map(service => ({
@@ -2520,13 +3773,12 @@ export const getProviderDetails = async (req, res) => {
                     service_title: service.service_title,
                     service_description: service.service_description,
                     service_startingprice: service.service_startingprice,
-                    is_active: service.servicelisting_isActive,
-                    created_at: service.created_at
+                    is_active: service.servicelisting_isActive
                 })),
                 
                 // Summary Statistics
                 total_professions: provider.provider_professions.length,
-                total_certificates: provider.certificates.length,
+                total_certificates: provider.provider_certificates.length,
                 total_services: provider.provider_services.length
             }
         });
@@ -2693,4 +3945,218 @@ export const updateProviderDetails = async (req, res) => {
         });
     }
 };
+
+/**
+ * Step 1: Request OTP for provider profile update
+ * Sends OTP to provider's current email
+ */
+export const requestProviderProfileEditOTP = async (req, res) => {
+    try {
+        const providerId = req.userId; // From auth middleware
+
+        // Get provider's current email
+        const provider = await prisma.serviceProviderDetails.findUnique({
+            where: { provider_id: providerId },
+            select: { provider_email: true, provider_first_name: true }
+        });
+
+        if (!provider) {
+            return res.status(404).json({
+                success: false,
+                message: 'Provider not found'
+            });
+        }
+
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        // Store OTP in database
+        await prisma.oTPVerification.create({
+            data: {
+                email: provider.provider_email,
+                otp: otp,
+                expires_at: expiresAt
+            }
+        });
+
+        // Send OTP via email
+        await sendOTPEmail(provider.provider_email, otp);
+
+        res.status(200).json({
+            success: true,
+            message: 'OTP sent to your email. Please verify to proceed with profile update.',
+            email: provider.provider_email.replace(/(.{2})(.*)(@.*)/, '$1***$3') // Masked email
+        });
+
+    } catch (error) {
+        console.error('Error requesting provider profile update OTP:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to send OTP',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Step 2: Verify OTP and update provider profile
+ * Updates provider_phone_number, provider_email, provider_location, and exact_location
+ */
+export const verifyOTPAndUpdateProviderProfile = async (req, res) => {
+    try {
+        const providerId = req.userId; // From auth middleware
+        const { otp, provider_phone_number, provider_email, provider_location, exact_location } = req.body;
+
+        // Validate OTP is provided
+        if (!otp) {
+            return res.status(400).json({
+                success: false,
+                message: 'OTP is required'
+            });
+        }
+
+        // Validate at least one field is provided for update
+        if (!provider_phone_number && !provider_email && !provider_location && !exact_location) {
+            return res.status(400).json({
+                success: false,
+                message: 'At least one field (provider_phone_number, provider_email, provider_location, or exact_location) is required'
+            });
+        }
+
+        // Get provider's current email
+        const provider = await prisma.serviceProviderDetails.findUnique({
+            where: { provider_id: providerId }
+        });
+
+        if (!provider) {
+            return res.status(404).json({
+                success: false,
+                message: 'Provider not found'
+            });
+        }
+
+        // Verify OTP
+        const verificationResult = await verifyOTP(provider.provider_email, otp);
+
+        if (!verificationResult.success) {
+            return res.status(400).json({
+                success: false,
+                message: verificationResult.message
+            });
+        }
+
+        // Check if email is being changed and if it's already taken
+        if (provider_email && provider_email !== provider.provider_email) {
+            const emailExists = await prisma.serviceProviderDetails.findFirst({
+                where: { 
+                    provider_email: provider_email,
+                    provider_id: { not: providerId }
+                }
+            });
+
+            if (emailExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Email is already registered to another provider'
+                });
+            }
+
+            // Also check in customer table
+            const customerEmailExists = await prisma.user.findFirst({
+                where: { email: provider_email }
+            });
+
+            if (customerEmailExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Email is already registered as a customer'
+                });
+            }
+        }
+
+        // Check if phone number is being changed and if it's already taken
+        if (provider_phone_number && provider_phone_number !== provider.provider_phone_number) {
+            const phoneExists = await prisma.serviceProviderDetails.findFirst({
+                where: { 
+                    provider_phone_number: provider_phone_number,
+                    provider_id: { not: providerId }
+                }
+            });
+
+            if (phoneExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Phone number is already registered to another provider'
+                });
+            }
+
+            // Also check in customer table
+            const customerPhoneExists = await prisma.user.findFirst({
+                where: { phone_number: provider_phone_number }
+            });
+
+            if (customerPhoneExists) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Phone number is already registered as a customer'
+                });
+            }
+        }
+
+        // Prepare update data
+        const updateData = {};
+
+        if (provider_phone_number) {
+            updateData.provider_phone_number = provider_phone_number;
+        }
+
+        if (provider_email) {
+            updateData.provider_email = provider_email;
+        }
+
+        if (provider_location) {
+            updateData.provider_location = provider_location;
+        }
+
+        if (exact_location) {
+            updateData.exact_location = exact_location;
+        }
+
+        // Update provider profile
+        const updatedProvider = await prisma.serviceProviderDetails.update({
+            where: { provider_id: providerId },
+            data: updateData,
+            select: {
+                provider_id: true,
+                provider_first_name: true,
+                provider_last_name: true,
+                provider_userName: true,
+                provider_email: true,
+                provider_phone_number: true,
+                provider_location: true,
+                exact_location: true,
+                provider_profile_photo: true
+            }
+        });
+
+        // Clean up used OTP
+        await cleanupOTP(provider.provider_email);
+
+        res.status(200).json({
+            success: true,
+            message: 'Provider profile updated successfully',
+            data: updatedProvider
+        });
+
+    } catch (error) {
+        console.error('Error updating provider profile:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update provider profile',
+            error: error.message
+        });
+    }
+};
+
 

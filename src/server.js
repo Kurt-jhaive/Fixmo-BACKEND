@@ -47,16 +47,40 @@ app.use(cors({
 }));
 
 // Session configuration
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'your-session-secret-key',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: false, // Set to true in production with HTTPS
-    httpOnly: true,
-    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days (extended from 24 hours)
+// Note: Sessions are primarily used for web dashboard. Mobile apps use JWT tokens.
+// For Vercel/serverless deployment, consider using a proper session store like:
+// - Vercel KV (@vercel/kv)
+// - Redis (connect-redis)
+// - MongoDB (connect-mongodb-session)
+// 
+// For now, keeping MemoryStore for development, but it's NOT recommended for production
+if (process.env.NODE_ENV !== 'production') {
+  // Development: Use MemoryStore (warning expected)
+  app.use(session({
+    secret: process.env.SESSION_SECRET || 'your-session-secret-key',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: false,
+      httpOnly: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    }
+  }));
+  
+  // Log only once
+  if (!global.__sessionWarningLogged) {
+    console.log('ℹ️  Development mode: Using MemoryStore for sessions (JWT also available)');
+    global.__sessionWarningLogged = true;
   }
-}));
+} else {
+  // Production: Disable sessions or use proper store
+  // Since you're using JWT for mobile, sessions can be optional
+  // Add a proper session store here if needed for web dashboard
+  if (!global.__sessionWarningLogged) {
+    console.warn('⚠️  Sessions disabled in production. Using JWT authentication only.');
+    global.__sessionWarningLogged = true;
+  }
+}
 
 
 
@@ -82,6 +106,15 @@ app.get('/', (req, res) => {
       documentation: '/api-docs',
       admin: '/admin',
       uploads: '/uploads/*'
+    }
+  });
+});
+
+// Favicon handler - prevent 404 errors
+app.get('/favicon.ico', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'favicon.svg'), (err) => {
+    if (err) {
+      res.status(204).end(); // No content if favicon doesn't exist
     }
   });
 });
