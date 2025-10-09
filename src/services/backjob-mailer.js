@@ -1,5 +1,13 @@
 import nodemailer from 'nodemailer';
 
+// Debug logging for email configuration
+console.log('📧 Backjob Email Configuration:', {
+    host: process.env.MAILER_HOST,
+    port: parseInt(process.env.MAILER_PORT) || 587,
+    secure: process.env.MAILER_PORT === '465',
+    user: process.env.MAILER_USER ? '✓ Set' : '✗ Missing'
+});
+
 // Use port 587 with STARTTLS for better Railway compatibility
 const transporter = nodemailer.createTransport({
     host: process.env.MAILER_HOST,
