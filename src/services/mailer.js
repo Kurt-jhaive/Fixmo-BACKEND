@@ -1,13 +1,20 @@
 import nodemailer from 'nodemailer';
 
+// Use port 587 with STARTTLS for better Railway compatibility
 const transporter = nodemailer.createTransport({
     host: process.env.MAILER_HOST,
-    port: process.env.MAILER_PORT,
-    secure: process.env.MAILER_SECURE === 'true', // true for 465, false for other ports
+    port: parseInt(process.env.MAILER_PORT) || 587, // Default to 587 for Railway
+    secure: process.env.MAILER_PORT === '465', // true only for port 465
     auth: {
         user: process.env.MAILER_USER,
         pass: process.env.MAILER_PASS
-    }
+    },
+    tls: {
+        rejectUnauthorized: false // Allow self-signed certificates if needed
+    },
+    connectionTimeout: 10000, // 10 seconds
+    greetingTimeout: 10000,
+    socketTimeout: 10000
 });
 
 export const sendOTPEmail = async (to, otp) => {
