@@ -1,29 +1,44 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
-// Debug logging for email configuration
-console.log('📧 Backjob Email Configuration:', {
-    host: process.env.MAILER_HOST,
-    port: parseInt(process.env.MAILER_PORT) || 587,
-    secure: process.env.MAILER_PORT === '465',
-    user: process.env.MAILER_USER ? '✓ Set' : '✗ Missing'
+// Initialize Resend with API key
+const resend = new Resend(process.env.resend_API_KEY);
+
+// Resend requires a verified domain. Use Resend's default or your verified domain
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Fixmo <onboarding@resend.dev>';
+
+console.log('📧 Backjob Email Configuration: Using Resend API', {
+    apiKeySet: process.env.resend_API_KEY ? '✓ Set' : '✗ Missing',
+    fromEmail: FROM_EMAIL
 });
 
-// Use port 587 with STARTTLS for better Railway compatibility
-const transporter = nodemailer.createTransport({
-    host: process.env.MAILER_HOST,
-    port: parseInt(process.env.MAILER_PORT) || 587, // Default to 587 for Railway
-    secure: process.env.MAILER_PORT === '465', // true only for port 465
-    auth: {
-        user: process.env.MAILER_USER,
-        pass: process.env.MAILER_PASS
-    },
-    tls: {
-        rejectUnauthorized: false // Allow self-signed certificates if needed
-    },
-    connectionTimeout: 10000, // 10 seconds
-    greetingTimeout: 10000,
-    socketTimeout: 10000
-});
+// Helper function to send email via Resend
+const sendEmailViaResend = async ({ to, subject, html, text }) => {
+    try {
+        const data = await resend.emails.send({
+            from: FROM_EMAIL,
+            to: [to],
+            subject,
+            html: html || `<pre>${text}</pre>`
+        });
+        console.log('✅ Backjob email sent successfully:', { to, subject });
+        return data;
+    } catch (error) {
+        console.error('❌ Resend email error:', error);
+        throw error;
+    }
+};
+
+// Compatibility layer: Create a transporter-like object for existing code
+const transporter = {
+    sendMail: async (mailOptions) => {
+        return sendEmailViaResend({
+            to: mailOptions.to,
+            subject: mailOptions.subject,
+            html: mailOptions.html,
+            text: mailOptions.text
+        });
+    }
+};
 
 // BACKJOB EMAIL FUNCTIONS
 
