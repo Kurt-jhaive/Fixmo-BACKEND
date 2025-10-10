@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { handleAppointmentWarranty } from '../services/conversationWarrantyService.js';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
+import notificationService from '../services/notificationService.js';
 
 const prisma = new PrismaClient();
 
@@ -436,6 +437,28 @@ export const createAppointment = async (req, res) => {
             // Don't fail the appointment creation if email fails
         }
 
+        // Send push notifications to both customer and provider
+        try {
+            // Notify customer about new booking
+            notificationService.sendBookingUpdateNotification(
+                appointment.appointment_id,
+                'confirmed',
+                'customer'
+            ).catch(err => console.error('Failed to send customer notification:', err));
+
+            // Notify provider about new booking
+            notificationService.sendBookingUpdateNotification(
+                appointment.appointment_id,
+                'confirmed',
+                'provider'
+            ).catch(err => console.error('Failed to send provider notification:', err));
+            
+            console.log('✅ Push notifications sent to customer and provider');
+        } catch (notifError) {
+            console.error('❌ Error sending push notifications:', notifError);
+            // Don't fail the appointment creation if notification fails
+        }
+
         res.status(201).json({
             success: true,
             message: 'Appointment created successfully',
@@ -796,6 +819,65 @@ export const updateAppointmentStatus = async (req, res) => {
                 console.error('❌ Error sending completion emails:', emailError);
                 // Don't fail the status update if email fails
             }
+
+            // Send push notifications for completion
+            try {
+                // Notify customer about completion
+                notificationService.sendBookingUpdateNotification(
+                    updatedAppointment.appointment_id,
+                    'completed',
+                    'customer'
+                ).catch(err => console.error('Failed to send customer notification:', err));
+
+                // Notify provider about completion with special message
+                notificationService.sendServiceCompletedNotification(
+                    updatedAppointment.provider_id,
+                    updatedAppointment.appointment_id
+                ).catch(err => console.error('Failed to send provider completion notification:', err));
+
+                // Send rating reminder to customer after 5 seconds
+                setTimeout(() => {
+                    notificationService.sendRatingReminderNotification(
+                        updatedAppointment.appointment_id
+                    ).catch(err => console.error('Failed to send rating reminder:', err));
+                }, 5000);
+
+                console.log('✅ Push notifications sent for completion');
+            } catch (notifError) {
+                console.error('❌ Error sending push notifications:', notifError);
+            }
+        }
+
+        // Send push notifications for other status changes
+        if (status !== 'completed') {
+            try {
+                const statusMap = {
+                    'scheduled': 'confirmed',
+                    'On the Way': 'confirmed',
+                    'in-progress': 'confirmed',
+                    'in-warranty': 'completed',
+                    'finished': 'completed'
+                };
+                
+                const notificationStatus = statusMap[status] || 'confirmed';
+
+                // Notify both customer and provider
+                notificationService.sendBookingUpdateNotification(
+                    updatedAppointment.appointment_id,
+                    notificationStatus,
+                    'customer'
+                ).catch(err => console.error('Failed to send customer notification:', err));
+
+                notificationService.sendBookingUpdateNotification(
+                    updatedAppointment.appointment_id,
+                    notificationStatus,
+                    'provider'
+                ).catch(err => console.error('Failed to send provider notification:', err));
+
+                console.log('✅ Push notifications sent for status update');
+            } catch (notifError) {
+                console.error('❌ Error sending push notifications:', notifError);
+            }
         }
 
         res.status(200).json({
@@ -935,6 +1017,28 @@ export const cancelAppointment = async (req, res) => {
             
         } catch (emailError) {
             console.error('❌ Error sending cancellation emails:', emailError);
+            // Don't fail the cancellation if email fails
+        }
+
+        // Send push notifications for cancellation
+        try {
+            // Notify customer about cancellation
+            notificationService.sendBookingUpdateNotification(
+                updatedAppointment.appointment_id,
+                'cancelled',
+                'customer'
+            ).catch(err => console.error('Failed to send customer notification:', err));
+
+            // Notify provider about cancellation
+            notificationService.sendBookingUpdateNotification(
+                updatedAppointment.appointment_id,
+                'cancelled',
+                'provider'
+            ).catch(err => console.error('Failed to send provider notification:', err));
+
+            console.log('✅ Push notifications sent for cancellation');
+        } catch (notifError) {
+            console.error('❌ Error sending push notifications:', notifError);
             // Don't fail the cancellation if email fails
         }
 
@@ -2439,10 +2543,49 @@ export const updateBackjobStatus = async (req, res) => {
         const updatedBackjob = await prisma.backjobApplication.update({
             where: { backjob_id: backjob.backjob_id },
             data: { status: newStatus, admin_notes: admin_notes || null },
+            include: {
+                appointment: {
+                    include: {
+                        customer: true,
+                        serviceProvider: true,
+                        service: true
+                    }
+                }
+            }
         });
 
         if (appointmentUpdate) {
             await prisma.appointment.update({ where: { appointment_id: backjob.appointment_id }, data: appointmentUpdate });
+        }
+
+        // Send push notifications
+        try {
+            if (newStatus === 'approved') {
+                // Notify provider about backjob assignment
+                await notificationService.sendBackjobAssignmentNotification(
+                    updatedBackjob.appointment.provider_id,
+                    updatedBackjob.appointment_id,
+                    'warranty repair'
+                );
+                
+                // Notify customer that backjob was approved
+                await notificationService.sendBackjobStatusNotification(
+                    updatedBackjob.backjob_id,
+                    'approved'
+                );
+                
+                console.log('✅ Backjob approval notifications sent');
+            } else if (newStatus === 'cancelled-by-admin' || newStatus === 'cancelled-by-user') {
+                // Notify customer about cancellation
+                await notificationService.sendBackjobStatusNotification(
+                    updatedBackjob.backjob_id,
+                    newStatus
+                );
+                
+                console.log('✅ Backjob cancellation notification sent');
+            }
+        } catch (notifError) {
+            console.error('❌ Error sending backjob notifications:', notifError);
         }
 
         return res.status(200).json({ success: true, message: 'Backjob updated', data: updatedBackjob });

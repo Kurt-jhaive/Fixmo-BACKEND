@@ -274,3 +274,21 @@ model BackjobApplication {
 
   @@index([appointment_id])
 }
+
+// Push Notification Tokens
+model PushToken {
+  id                Int      @id @default(autoincrement())
+  user_id           Int
+  user_type         String   // 'customer' or 'provider'
+  expo_push_token   String   @unique
+  device_platform   String?  // 'ios' or 'android'
+  device_name       String?
+  device_os_version String?
+  is_active         Boolean  @default(true)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+  last_used_at      DateTime @default(now())
+
+  @@index([user_id, user_type])
+  @@index([expo_push_token, is_active])
+}

@@ -13,6 +13,7 @@ import {
     sendAdminInvitationEmail,
     sendAdminPasswordResetEmail
 } from '../services/mailer.js';
+import notificationService from '../services/notificationService.js';
 
 const prisma = new PrismaClient();
 
@@ -774,6 +775,18 @@ class AdminController {
                 // Don't fail the approval if email fails
             }
 
+            // Send push notification to provider
+            try {
+                await notificationService.sendCertificateVerificationNotification(
+                    certificate.provider_id,
+                    certificate.certificate_name || 'Certificate',
+                    'approved'
+                );
+                console.log('✅ Certificate approval notification sent to provider');
+            } catch (notifError) {
+                console.error('❌ Error sending certificate approval notification:', notifError);
+            }
+
             res.json({ message: 'Certificate approved successfully', certificate });
         } catch (error) {
             console.error('Error approving certificate:', error);
@@ -812,6 +825,19 @@ class AdminController {
             } catch (emailError) {
                 console.error('Error sending certificate rejection email:', emailError);
                 // Don't fail the rejection if email fails
+            }
+
+            // Send push notification to provider
+            try {
+                await notificationService.sendCertificateVerificationNotification(
+                    certificate.provider_id,
+                    certificate.certificate_name || 'Certificate',
+                    'rejected',
+                    reason
+                );
+                console.log('✅ Certificate rejection notification sent to provider');
+            } catch (notifError) {
+                console.error('❌ Error sending certificate rejection notification:', notifError);
             }
 
             res.json({ message: 'Certificate rejected successfully', certificate });

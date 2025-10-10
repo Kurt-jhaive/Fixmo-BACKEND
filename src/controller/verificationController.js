@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { sendEmail } from '../services/mailer.js';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
+import notificationService from '../services/notificationService.js';
 
 const prisma = new PrismaClient();
 
@@ -155,6 +156,18 @@ export const approveCustomerVerification = async (req, res) => {
             console.error('Failed to send approval email:', emailError);
         }
 
+        // Send push notification
+        try {
+            notificationService.sendVerificationStatusNotification(
+                parseInt(user_id),
+                'customer',
+                'approved'
+            ).catch(err => console.error('Failed to send verification notification:', err));
+            console.log('✅ Push notification sent for customer verification approval');
+        } catch (notifError) {
+            console.error('❌ Error sending push notification:', notifError);
+        }
+
         res.status(200).json({
             success: true,
             message: 'Customer verification approved successfully',
@@ -227,6 +240,18 @@ export const approveProviderVerification = async (req, res) => {
             });
         } catch (emailError) {
             console.error('Failed to send approval email:', emailError);
+        }
+
+        // Send push notification
+        try {
+            notificationService.sendVerificationStatusNotification(
+                parseInt(provider_id),
+                'provider',
+                'approved'
+            ).catch(err => console.error('Failed to send verification notification:', err));
+            console.log('✅ Push notification sent for provider verification approval');
+        } catch (notifError) {
+            console.error('❌ Error sending push notification:', notifError);
         }
 
         res.status(200).json({
@@ -315,6 +340,18 @@ export const rejectCustomerVerification = async (req, res) => {
             console.error('Failed to send rejection email:', emailError);
         }
 
+        // Send push notification
+        try {
+            notificationService.sendVerificationStatusNotification(
+                parseInt(user_id),
+                'customer',
+                'rejected'
+            ).catch(err => console.error('Failed to send verification notification:', err));
+            console.log('✅ Push notification sent for customer verification rejection');
+        } catch (notifError) {
+            console.error('❌ Error sending push notification:', notifError);
+        }
+
         res.status(200).json({
             success: true,
             message: 'Customer verification rejected successfully',
@@ -399,6 +436,18 @@ export const rejectProviderVerification = async (req, res) => {
             });
         } catch (emailError) {
             console.error('Failed to send rejection email:', emailError);
+        }
+
+        // Send push notification
+        try {
+            notificationService.sendVerificationStatusNotification(
+                parseInt(provider_id),
+                'provider',
+                'rejected'
+            ).catch(err => console.error('Failed to send verification notification:', err));
+            console.log('✅ Push notification sent for provider verification rejection');
+        } catch (notifError) {
+            console.error('❌ Error sending push notification:', notifError);
         }
 
         res.status(200).json({
