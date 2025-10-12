@@ -3,6 +3,10 @@
 # dependencies
 node_modules/
 
+# environment variables
+.env
+.env*.local
+
 # uploads (local file storage - not for production)
 /uploads
 
@@ -18,10 +22,6 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
-.env
-
 # typescript
 *.tsbuildinfo
 
@@ -29,4 +29,3 @@ app-example
 
 # Vercel
 .vercel
-.env
