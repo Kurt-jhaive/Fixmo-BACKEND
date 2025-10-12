@@ -293,3 +293,28 @@ model PushToken {
   @@index([user_id, user_type])
   @@index([expo_push_token, is_active])
 }
+
+// Report System - Users can report issues/concerns to admin
+model Report {
+  report_id         Int      @id @default(autoincrement())
+  reporter_name     String
+  reporter_email    String
+  reporter_phone    String?
+  reporter_type     String?  // 'customer', 'provider', 'guest'
+  user_id           Int?     // Optional: link to User if authenticated
+  report_type       String   // 'bug', 'complaint', 'feedback', 'account_issue', 'payment_issue', 'provider_issue', 'safety_concern', 'other'
+  subject           String
+  description       String   @db.Text
+  attachment_urls   Json?    // Array of file URLs if user uploads screenshots/evidence
+  priority          String   @default("normal") // 'low', 'normal', 'high', 'urgent'
+  status            String   @default("pending") // 'pending', 'in_progress', 'resolved', 'closed'
+  admin_notes       String?  @db.Text
+  resolved_at       DateTime?
+  resolved_by       Int?     // Admin ID who resolved it
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  @@index([status])
+  @@index([report_type])
+  @@index([reporter_email])
+}
