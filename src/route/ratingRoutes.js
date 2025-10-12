@@ -53,10 +53,9 @@ router.get('/provider/:providerId', getProviderRatings);
 router.get('/provider/rateable-appointments', requireAuth('provider'), getProviderRateableAppointments);
 
 // POST /api/ratings/provider/rate-customer - Create a new rating (Provider rates customer)
-// Supports optional photo upload for review proof
+// Note: Providers can only provide rating value and optional comment (no photo upload)
 router.post('/provider/rate-customer', 
     requireAuth('provider'), 
-    uploadRatingPhoto.single('rating_photo'), 
     createProviderRatingForCustomer
 );
 

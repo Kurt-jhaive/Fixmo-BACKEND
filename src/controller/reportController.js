@@ -1,4 +1,5 @@
 import prisma from '../prismaclient.js';
+import { uploadToCloudinary } from '../services/cloudinaryService.js';
 
 // Submit a new report
 export const submitReport = async (req, res) => {
@@ -8,10 +9,11 @@ export const submitReport = async (req, res) => {
             reporter_email,
             reporter_phone,
             reporter_type,
+            provider_id,
+            appointment_id,
             report_type,
             subject,
             description,
-            attachment_urls,
             priority
         } = req.body;
 
@@ -60,6 +62,28 @@ export const submitReport = async (req, res) => {
             });
         }
 
+        // Handle image uploads to Cloudinary (optional)
+        let attachment_urls = null;
+        if (req.files && req.files.length > 0) {
+            try {
+                const uploadPromises = req.files.map(file => 
+                    uploadToCloudinary(
+                        file.buffer,
+                        'fixmo/reports',
+                        `report_${Date.now()}_${file.originalname}`
+                    )
+                );
+                attachment_urls = await Promise.all(uploadPromises);
+                console.log(`✅ Uploaded ${attachment_urls.length} images to Cloudinary`);
+            } catch (uploadError) {
+                console.error('❌ Error uploading images to Cloudinary:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Error uploading images. Please try again.'
+                });
+            }
+        }
+
         // Get user_id if authenticated
         const user_id = req.userId || null;
 
@@ -71,6 +95,8 @@ export const submitReport = async (req, res) => {
                 reporter_phone: reporter_phone || null,
                 reporter_type: reporter_type || 'guest',
                 user_id,
+                provider_id: provider_id ? parseInt(provider_id) : null,
+                appointment_id: appointment_id ? parseInt(appointment_id) : null,
                 report_type,
                 subject,
                 description,
@@ -93,6 +119,8 @@ export const submitReport = async (req, res) => {
                 reporter_email: report.reporter_email,
                 reporter_phone: report.reporter_phone,
                 reporter_type: report.reporter_type,
+                provider_id: report.provider_id,
+                appointment_id: report.appointment_id,
                 report_type: report.report_type,
                 subject: report.subject,
                 description: report.description,
@@ -124,10 +152,13 @@ export const submitReport = async (req, res) => {
             data: {
                 report_id: report.report_id,
                 reporter_email: report.reporter_email,
+                provider_id: report.provider_id,
+                appointment_id: report.appointment_id,
                 report_type: report.report_type,
                 subject: report.subject,
                 priority: report.priority,
                 status: report.status,
+                has_attachments: !!attachment_urls,
                 created_at: report.created_at
             }
         });

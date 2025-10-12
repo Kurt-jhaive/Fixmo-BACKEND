@@ -4,7 +4,7 @@ import { Resend } from 'resend';
 const resend = new Resend(process.env.resend_API_KEY);
 
 // Admin email for receiving reports
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@fixmo.com';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'ipafixmo@gmail.com';
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'Fixmo <onboarding@resend.dev>';
 
 console.log('📧 Report Email Configuration:', {
@@ -83,6 +83,8 @@ export const sendReportToAdmin = async (reportDetails) => {
         reporter_email,
         reporter_phone,
         reporter_type,
+        provider_id,
+        appointment_id,
         report_type,
         subject,
         description,
@@ -193,9 +195,21 @@ export const sendReportToAdmin = async (reportDetails) => {
                             </tr>
                             ` : ''}
                             ${reporter_type ? `
-                            <tr>
+                            <tr style="border-bottom: 1px solid #bee5eb;">
                                 <td style="padding: 10px 0; font-weight: bold; color: #0c5460;">User Type:</td>
                                 <td style="padding: 10px 0; color: #0c5460;">${reporter_type.toUpperCase()}</td>
+                            </tr>
+                            ` : ''}
+                            ${provider_id ? `
+                            <tr style="border-bottom: 1px solid #bee5eb;">
+                                <td style="padding: 10px 0; font-weight: bold; color: #0c5460;">Provider ID:</td>
+                                <td style="padding: 10px 0; color: #0c5460;">#${provider_id}</td>
+                            </tr>
+                            ` : ''}
+                            ${appointment_id ? `
+                            <tr>
+                                <td style="padding: 10px 0; font-weight: bold; color: #0c5460;">Booking ID:</td>
+                                <td style="padding: 10px 0; color: #0c5460;">#${appointment_id}</td>
                             </tr>
                             ` : ''}
                         </table>

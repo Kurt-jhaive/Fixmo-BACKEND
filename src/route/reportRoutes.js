@@ -1,4 +1,5 @@
 import express from 'express';
+import multer from 'multer';
 import {
     submitReport,
     getAllReports,
@@ -11,12 +12,30 @@ import { adminAuthMiddleware } from '../middleware/adminAuthMiddleware.js';
 
 const router = express.Router();
 
+// Configure multer for file uploads (max 5 images)
+const storage = multer.memoryStorage();
+const upload = multer({
+    storage: storage,
+    limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB per file
+        files: 5 // Maximum 5 files
+    },
+    fileFilter: (req, file, cb) => {
+        // Only allow image files
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only image files are allowed'), false);
+        }
+    }
+});
+
 /**
  * @route   POST /api/reports
- * @desc    Submit a new report (public - no auth required)
+ * @desc    Submit a new report with optional image attachments (public - no auth required)
  * @access  Public
  */
-router.post('/', submitReport);
+router.post('/', upload.array('images', 5), submitReport);
 
 /**
  * @route   GET /api/reports/statistics

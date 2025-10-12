@@ -1094,6 +1094,7 @@ export const adminCancelAppointment = async (req, res) => {
     try {
         const { appointmentId } = req.params;
         const { cancellation_reason, admin_notes } = req.body;
+        const adminId = req.userId; // Get admin ID from auth middleware
 
         if (!cancellation_reason) {
             return res.status(400).json({
@@ -1154,7 +1155,8 @@ export const adminCancelAppointment = async (req, res) => {
             where: { appointment_id: parseInt(appointmentId) },
             data: { 
                 appointment_status: 'cancelled',
-                cancellation_reason: cancellation_reason
+                cancellation_reason: cancellation_reason,
+                cancelled_by_admin_id: adminId
             },
             include: {
                 customer: {
@@ -3017,18 +3019,20 @@ export const getAppointmentsNeedingRatings = async (req, res) => {
         const skip = (parseInt(page) - 1) * parseInt(limit);
         const take = parseInt(limit);
 
-        let whereClause = {
-            appointment_status: 'completed'
-        };
+        let whereClause = {};
 
         // Automatically filter based on authenticated user's type
         if (req.userType === 'customer') {
+            // Customers can rate completed appointments
             whereClause.customer_id = userId;
+            whereClause.appointment_status = 'completed';
         } else if (req.userType === 'provider') {
+            // Providers can rate customers on completed appointments
             whereClause.provider_id = userId;
+            whereClause.appointment_status = 'completed';
         }
 
-        // Get all completed appointments for the user to filter unrated ones
+        // Get all relevant appointments for the user to filter unrated ones
         const appointmentsRaw = await prisma.appointment.findMany({
             where: whereClause,
             include: {
