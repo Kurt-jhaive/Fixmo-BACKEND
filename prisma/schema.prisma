@@ -258,13 +258,14 @@ model BackjobApplication {
   appointment_id           Int
   customer_id              Int
   provider_id              Int
-  status                   String                 @default("pending") // pending, approved, disputed, cancelled-by-admin, cancelled-by-user, cancelled-by-customer, rescheduled
+  status                   String                 @default("pending") // pending, approved, disputed, cancelled-by-admin, cancelled-by-user, cancelled-by-customer, rescheduled, completed
   reason                   String
   evidence                 Json?
   provider_dispute_reason  String?
   provider_dispute_evidence Json?
   customer_cancellation_reason String?
   admin_notes              String?
+  resolved_at              DateTime?              // Timestamp when backjob was resolved (completed/disputed/cancelled)
   created_at               DateTime               @default(now())
   updated_at               DateTime               @updatedAt
 

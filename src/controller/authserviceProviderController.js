@@ -3308,35 +3308,61 @@ export const finishAppointment = async (req, res) => {
             });
         }
 
-        const updatedAppointment = await prisma.appointment.update({
-            where: { appointment_id: parseInt(appointmentId) },
-            data: { 
-                appointment_status: 'finished',
-                final_price: parseFloat(final_price)
-            },
-            include: {
-                customer: {
-                    select: {
-                        user_id: true,
-                        first_name: true,
-                        last_name: true,
-                        email: true,
-                        phone_number: true
-                    }
+        // If this appointment was rescheduled from a backjob, mark the backjob as completed
+        const activeBackjob = await prisma.backjobApplication.findFirst({
+            where: {
+                appointment_id: parseInt(appointmentId),
+                status: 'approved'
+            }
+        });
+
+        // Use transaction to update both appointment and backjob atomically
+        const result = await prisma.$transaction(async (tx) => {
+            // Update appointment status
+            const updatedAppointment = await tx.appointment.update({
+                where: { appointment_id: parseInt(appointmentId) },
+                data: { 
+                    appointment_status: 'finished',
+                    final_price: parseFloat(final_price)
                 },
-                service: {
-                    select: {
-                        service_title: true,
-                        service_description: true
+                include: {
+                    customer: {
+                        select: {
+                            user_id: true,
+                            first_name: true,
+                            last_name: true,
+                            email: true,
+                            phone_number: true
+                        }
+                    },
+                    service: {
+                        select: {
+                            service_title: true,
+                            service_description: true
+                        }
                     }
                 }
+            });
+
+            // If there's an active backjob, mark it as completed
+            if (activeBackjob) {
+                await tx.backjobApplication.update({
+                    where: { backjob_id: activeBackjob.backjob_id },
+                    data: { 
+                        status: 'completed',
+                        resolved_at: new Date()
+                    }
+                });
+                console.log(`✅ Marked backjob ${activeBackjob.backjob_id} as completed after appointment finished`);
             }
+
+            return updatedAppointment;
         });
 
         res.status(200).json({
             success: true,
             message: 'Appointment finished with final price',
-            data: updatedAppointment
+            data: result
         });
     } catch (error) {
         console.error('Error finishing appointment:', error);
