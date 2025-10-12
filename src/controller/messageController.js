@@ -9,6 +9,7 @@ import {
     getActiveWarrantyExpiry,
     checkAppointmentStatus 
 } from '../services/conversationWarrantyService.js';
+import notificationService from '../services/notificationService.js';
 
 const prisma = new PrismaClient();
 
@@ -280,7 +281,6 @@ class MessageController {
         try {
             const { conversationId } = req.params;
             const userId = req.userId;
-            const userType = req.userType || req.body.userType;
             const { content, messageType = 'text', replyToId = null } = req.body;
 
             if (!content) {
@@ -290,7 +290,7 @@ class MessageController {
                 });
             }
 
-            // Verify conversation access
+            // Verify conversation access and determine user type FROM THE CONVERSATION
             const conversation = await prisma.conversation.findUnique({
                 where: { conversation_id: parseInt(conversationId) }
             });
@@ -302,6 +302,14 @@ class MessageController {
                     message: 'Conversation not found or access denied'
                 });
             }
+
+            // IMPORTANT: Determine userType based on conversation, not from request
+            // This ensures we always identify the sender correctly
+            const userType = conversation.customer_id === userId ? 'customer' : 'provider';
+            
+            console.log(`\n💬 Message from User ID ${userId} in conversation ${conversationId}`);
+            console.log(`👤 User role in this conversation: ${userType}`);
+            console.log(`📋 Conversation: customer_id=${conversation.customer_id}, provider_id=${conversation.provider_id}\n`);
 
             // Check if conversation is still active and within warranty period
             if (conversation.status !== 'active') {
@@ -388,6 +396,47 @@ class MessageController {
                 const otherUserId = conversation.customer_id === userId ? conversation.provider_id : conversation.customer_id;
                 console.log(`📱 Push notification: New message in conversation ${conversationId}`);
                 console.log(`💬 Message sent in conversation ${conversationId} by user ${userId}`);
+            }
+
+            // Send push notification to the recipient
+            try {
+                console.log(`\n📱 Preparing push notification for message in conversation ${conversationId}`);
+                console.log(`👤 Sender: ${userType} (ID: ${userId})`);
+                
+                // Get sender name
+                let senderName = '';
+                if (userType === 'customer') {
+                    const customer = await prisma.user.findUnique({
+                        where: { user_id: userId },
+                        select: { first_name: true, last_name: true }
+                    });
+                    senderName = customer ? `${customer.first_name} ${customer.last_name}` : 'Someone';
+                } else {
+                    const provider = await prisma.serviceProviderDetails.findUnique({
+                        where: { provider_id: userId },
+                        select: { provider_first_name: true, provider_last_name: true }
+                    });
+                    senderName = provider ? `${provider.provider_first_name} ${provider.provider_last_name}` : 'Provider';
+                }
+
+                console.log(`📝 Sender name: ${senderName}`);
+
+                // Get message preview (first 100 characters)
+                const messagePreview = content.substring(0, 100);
+
+                // Send notification with sender information
+                notificationService.sendNewMessageNotification(
+                    parseInt(conversationId),
+                    userId,           // senderId
+                    userType,         // senderType
+                    senderName,       // senderName
+                    messagePreview    // messagePreview
+                ).catch(err => console.error('❌ Failed to send message notification:', err));
+
+                console.log('✅ Push notification request sent for new message\n');
+            } catch (notifError) {
+                console.error('❌ Error sending push notification:', notifError);
+                // Don't fail the message sending if notification fails
             }
 
             res.status(201).json({
@@ -848,6 +897,128 @@ class MessageController {
             res.status(500).json({
                 success: false,
                 message: 'Error uploading file'
+            });
+        }
+    }
+
+    /**
+     * Refresh conversation statuses based on active appointments
+     * Reopen conversations that have active appointments but are marked as closed
+     */
+    async refreshConversationStatuses(req, res) {
+        try {
+            console.log('🔄 Refreshing conversation statuses...');
+
+            // Get all conversations
+            const conversations = await prisma.conversation.findMany({
+                include: {
+                    customer: {
+                        select: {
+                            user_id: true,
+                            first_name: true,
+                            last_name: true
+                        }
+                    },
+                    provider: {
+                        select: {
+                            provider_id: true,
+                            provider_first_name: true,
+                            provider_last_name: true
+                        }
+                    }
+                }
+            });
+
+            let reopenedCount = 0;
+            let closedCount = 0;
+            const updates = [];
+
+            for (const conv of conversations) {
+                try {
+                    // Check appointment status
+                    const status = await checkAppointmentStatus(conv.customer_id, conv.provider_id);
+                    
+                    const shouldBeActive = status.canMessage;
+                    const isCurrentlyActive = conv.status === 'active';
+
+                    if (shouldBeActive && !isCurrentlyActive) {
+                        // Reopen closed conversation that has active appointments
+                        await prisma.conversation.update({
+                            where: { conversation_id: conv.conversation_id },
+                            data: {
+                                status: 'active',
+                                updated_at: new Date()
+                            }
+                        });
+                        reopenedCount++;
+                        updates.push({
+                            conversation_id: conv.conversation_id,
+                            action: 'reopened',
+                            reason: 'Has active appointments',
+                            customer: `${conv.customer.first_name} ${conv.customer.last_name}`,
+                            provider: `${conv.provider.provider_first_name} ${conv.provider.provider_last_name}`,
+                            appointmentStatus: status.appointmentStatus
+                        });
+                        console.log(`✅ Reopened conversation ${conv.conversation_id}`);
+                    } else if (!shouldBeActive && isCurrentlyActive) {
+                        // Close active conversation with no active appointments
+                        await prisma.conversation.update({
+                            where: { conversation_id: conv.conversation_id },
+                            data: {
+                                status: 'closed',
+                                updated_at: new Date()
+                            }
+                        });
+                        closedCount++;
+                        updates.push({
+                            conversation_id: conv.conversation_id,
+                            action: 'closed',
+                            reason: 'No active appointments',
+                            customer: `${conv.customer.first_name} ${conv.customer.last_name}`,
+                            provider: `${conv.provider.provider_first_name} ${conv.provider.provider_last_name}`,
+                            appointmentStatus: status.appointmentStatus
+                        });
+                        console.log(`🔒 Closed conversation ${conv.conversation_id}`);
+                    }
+                } catch (error) {
+                    console.error(`❌ Error checking conversation ${conv.conversation_id}:`, error);
+                }
+            }
+
+            // Also update expired warranties
+            const expiredWarranties = await prisma.appointment.updateMany({
+                where: {
+                    appointment_status: 'in-warranty',
+                    warranty_expires_at: {
+                        lt: new Date()
+                    }
+                },
+                data: {
+                    appointment_status: 'completed',
+                    completed_at: new Date()
+                }
+            });
+
+            console.log('✅ Conversation refresh complete');
+
+            res.json({
+                success: true,
+                message: 'Conversation statuses refreshed',
+                data: {
+                    totalConversations: conversations.length,
+                    reopened: reopenedCount,
+                    closed: closedCount,
+                    expiredWarrantiesUpdated: expiredWarranties.count,
+                    updates: updates
+                }
+            });
+
+        } catch (error) {
+            console.error('Error refreshing conversation statuses:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error refreshing conversation statuses',
+                error: error.message
             });
         }
     }

@@ -604,14 +604,14 @@ export const createProviderRatingForCustomer = async (req, res) => {
                 appointment_id: parseInt(appointment_id),
                 customer_id: parseInt(customer_id),
                 provider_id: provider_id,
-                appointment_status: 'finished' // Only allow rating finished appointments (settled but not completed)
+                appointment_status: 'completed' // Only allow rating completed appointments (same as can-rate endpoint)
             }
         });
 
         if (!appointment) {
             return res.status(404).json({
                 success: false,
-                message: 'Appointment not found or not finished, or you are not authorized to rate this appointment'
+                message: 'Appointment not found or not completed, or you are not authorized to rate this appointment'
             });
         }
 
@@ -631,31 +631,14 @@ export const createProviderRatingForCustomer = async (req, res) => {
             });
         }
 
-        // Handle photo upload to Cloudinary if provided
-        let rating_photo = null;
-        if (req.file) {
-            try {
-                rating_photo = await uploadToCloudinary(
-                    req.file.buffer, 
-                    'fixmo/rating-photos',
-                    `provider_rating_${appointment_id}_${Date.now()}`
-                );
-                console.log('Provider rating photo uploaded to Cloudinary:', rating_photo);
-            } catch (uploadError) {
-                console.error('Error uploading provider rating photo to Cloudinary:', uploadError);
-                return res.status(500).json({
-                    success: false,
-                    message: 'Error uploading rating photo. Please try again.'
-                });
-            }
-        }
-
-        // Create the rating
+        // Note: Providers cannot upload photos when rating customers (only rating value and optional comment)
+        
+        // Create the rating (no photo support for provider ratings)
         const newRating = await prisma.rating.create({
             data: {
                 rating_value: ratingNum,
                 rating_comment: rating_comment || null,
-                rating_photo: rating_photo,
+                rating_photo: null, // Providers cannot upload photos
                 appointment_id: parseInt(appointment_id),
                 user_id: parseInt(customer_id),
                 provider_id: provider_id,

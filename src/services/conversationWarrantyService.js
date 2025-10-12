@@ -316,13 +316,13 @@ export const getActiveWarrantyExpiry = async (customerId, providerId) => {
  */
 export const checkAppointmentStatus = async (customerId, providerId) => {
     try {
-        // Find the most recent appointment between customer and provider
-        const appointment = await prisma.appointment.findFirst({
+        // Find ALL appointments between customer and provider (not just most recent)
+        const appointments = await prisma.appointment.findMany({
             where: {
                 customer_id: customerId,
                 provider_id: providerId,
                 appointment_status: { 
-                    not: 'cancelled' // Allow any status except cancelled
+                    not: 'cancelled' // Exclude cancelled appointments
                 }
             },
             orderBy: { created_at: 'desc' },
@@ -336,65 +336,79 @@ export const checkAppointmentStatus = async (customerId, providerId) => {
             }
         });
 
-        if (!appointment) {
+        if (!appointments || appointments.length === 0) {
             return { 
                 hasAppointment: false, 
                 isCompleted: true, 
                 isExpired: true,
-                canMessage: false
+                canMessage: false,
+                appointmentStatus: 'none'
             };
         }
 
         const now = new Date();
-        let isExpired = false;
-        let needsUpdate = false;
         
-        // Allow messaging for non-cancelled and non-completed appointments
-        const canMessage = !['cancelled', 'completed'].includes(appointment.appointment_status);
-
-        // Check if warranty has expired for in-warranty appointments
-        if (appointment.appointment_status === 'in-warranty') {
-            if (appointment.warranty_expires_at) {
-                isExpired = now > new Date(appointment.warranty_expires_at);
-                
-                // Auto-update expired in-warranty appointments to completed
-                if (isExpired) {
-                    needsUpdate = true;
-                }
-            } else if (appointment.warranty_days && appointment.finished_at) {
-                // Calculate expiry if not set but we have the data
-                const finishedDate = new Date(appointment.finished_at);
-                const calculatedExpiry = new Date(finishedDate);
-                calculatedExpiry.setDate(calculatedExpiry.getDate() + appointment.warranty_days);
-                
-                isExpired = now > calculatedExpiry;
-                
-                // Update the appointment with calculated expiry and status if expired
-                if (isExpired) {
-                    needsUpdate = true;
-                } else {
-                    // Set the calculated expiry even if not expired yet
-                    await prisma.appointment.update({
-                        where: { appointment_id: appointment.appointment_id },
-                        data: { warranty_expires_at: calculatedExpiry }
-                    });
-                    appointment.warranty_expires_at = calculatedExpiry;
+        // Check if ANY appointment is active (not completed)
+        const activeStatuses = ['scheduled', 'confirmed', 'On the Way', 'in-progress', 'finished', 'in-warranty', 'backjob'];
+        const hasActiveAppointment = appointments.some(apt => activeStatuses.includes(apt.appointment_status));
+        
+        // Check if ANY appointment has active warranty and update expired ones
+        let hasActiveWarranty = false;
+        for (const apt of appointments) {
+            if (apt.appointment_status === 'in-warranty') {
+                if (apt.warranty_expires_at) {
+                    const isExpired = now > new Date(apt.warranty_expires_at);
+                    
+                    if (isExpired) {
+                        await prisma.appointment.update({
+                            where: { appointment_id: apt.appointment_id },
+                            data: { 
+                                appointment_status: 'completed',
+                                completed_at: now
+                            }
+                        });
+                        console.log(`🔄 Auto-updated appointment ${apt.appointment_id} from in-warranty to completed (warranty expired)`);
+                    } else {
+                        hasActiveWarranty = true;
+                    }
+                } else if (apt.warranty_days && apt.finished_at) {
+                    const finishedDate = new Date(apt.finished_at);
+                    const calculatedExpiry = new Date(finishedDate);
+                    calculatedExpiry.setDate(calculatedExpiry.getDate() + apt.warranty_days);
+                    
+                    const isExpired = now > calculatedExpiry;
+                    
+                    if (isExpired) {
+                        await prisma.appointment.update({
+                            where: { appointment_id: apt.appointment_id },
+                            data: { 
+                                appointment_status: 'completed',
+                                completed_at: now,
+                                warranty_expires_at: calculatedExpiry
+                            }
+                        });
+                        console.log(`🔄 Auto-updated appointment ${apt.appointment_id} from in-warranty to completed (warranty expired)`);
+                    } else {
+                        await prisma.appointment.update({
+                            where: { appointment_id: apt.appointment_id },
+                            data: { warranty_expires_at: calculatedExpiry }
+                        });
+                        hasActiveWarranty = true;
+                    }
                 }
             }
         }
+        
+        // Conversation should remain open if there's ANY active appointment or active warranty
+        const canMessage = hasActiveAppointment || hasActiveWarranty;
+        
+        // Get the most recent appointment for display purposes
+        const appointment = appointments[0];
+        let isExpired = false;
 
-        // Update appointment status if needed
-        if (needsUpdate) {
-            await prisma.appointment.update({
-                where: { appointment_id: appointment.appointment_id },
-                data: { 
-                    appointment_status: 'completed',
-                    completed_at: now
-                }
-            });
-            
-            console.log(`🔄 Auto-updated appointment ${appointment.appointment_id} from in-warranty to completed (warranty expired)`);
-            appointment.appointment_status = 'completed';
+        // Check the most recent appointment's warranty status for display
+        if (appointment.appointment_status === 'in-warranty' && appointment.warranty_expires_at) {
+            isExpired = now > new Date(appointment.warranty_expires_at);
         }
 
         return {
@@ -404,7 +418,7 @@ export const checkAppointmentStatus = async (customerId, providerId) => {
             isInWarranty: appointment.appointment_status === 'in-warranty' && !isExpired,
             isExpired: isExpired || appointment.appointment_status === 'completed',
             warrantyExpiresAt: appointment.warranty_expires_at,
-            canMessage: canMessage // New field to indicate messaging availability
+            canMessage: canMessage // True if ANY appointment is active or has active warranty
         };
     } catch (error) {
         console.error('Error checking appointment status:', error);

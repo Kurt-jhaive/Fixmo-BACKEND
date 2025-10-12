@@ -1,0 +1,243 @@
+Table Name,Attribute Name,Data Type,Null,Default,Description,Sample Data
+User,user_id,Int,NO,[object Object],,1
+User,first_name,String,NO,,,"Kurt Jhaive "
+User,last_name,String,NO,,,"Saldi"
+User,email,String,NO,,,"saldikurtjhaive@gmail.com"
+User,phone_number,String,NO,,,"+639639809721"
+User,profile_photo,String,YES,,,"https://res.cloudinary.com/dcx1glkit/image/upload/v1759476627/fixmo/verification/customers/customer_profile_resubmit_1_1759476621874.jpg"
+User,valid_id,String,YES,,,"https://res.cloudinary.com/dcx1glkit/image/upload/v1759476625/fixmo/verification/customers/customer_id_resubmit_1_1759476619404.jpg"
+User,user_location,String,YES,,,"BARANGAY 656, INTRAMUROS, NATIONAL CAPITAL REGION - MANILA"
+User,created_at,DateTime,NO,[object Object],,"2025-09-13T15:30:36.565Z"
+User,is_verified,Boolean,NO,false,,true
+User,verification_status,String,NO,pending,,"approved"
+User,rejection_reason,String,YES,,,null
+User,verification_submitted_at,DateTime,YES,,,"2025-10-03T07:30:24.820Z"
+User,verification_reviewed_at,DateTime,YES,,,"2025-10-03T07:31:19.531Z"
+User,verified_by_admin_id,Int,YES,,,null
+User,deactivated_by_admin_id,Int,YES,,,null
+User,password,String,NO,,,"$2b$10$AJPq7bJY0aDzbTmgeICn4u8KUsayJhfBYEZLwZplB6VherQAQQbTC"
+User,userName,String,NO,,,"kurtjhaive25"
+User,is_activated,Boolean,NO,true,,true
+User,birthday,DateTime,YES,,,"2004-07-04T00:00:00.000Z"
+User,exact_location,String,YES,,,"14.5931372,120.9714012"
+User,user_reason,String,YES,,,"Harassment or abusive behavior"
+User,user_appointments,Appointment,NO,,,
+User,user_rating,Rating,NO,,,
+User,conversations,Conversation,NO,,,
+User,backjob_applications,BackjobApplication,NO,,,
+ServiceProviderDetails,provider_id,Int,NO,[object Object],,5
+ServiceProviderDetails,provider_first_name,String,NO,,,"Test"
+ServiceProviderDetails,provider_last_name,String,NO,,,"Provider"
+ServiceProviderDetails,provider_email,String,NO,,,"testprovider@example.com"
+ServiceProviderDetails,provider_phone_number,String,NO,,,"+639123431153"
+ServiceProviderDetails,provider_profile_photo,String,YES,,,"https://res.cloudinary.com/dcx1glkit/raw/upload/v1758534936/fixmo/provider-profiles/provider_profile_testprovider_example_com_1758534933690"
+ServiceProviderDetails,provider_valid_id,String,YES,,,"https://res.cloudinary.com/dcx1glkit/raw/upload/v1758534937/fixmo/provider-ids/provider_id_testprovider_example_com_1758534935349"
+ServiceProviderDetails,provider_isVerified,Boolean,NO,false,,true
+ServiceProviderDetails,verification_status,String,NO,pending,,"approved"
+ServiceProviderDetails,rejection_reason,String,YES,,,null
+ServiceProviderDetails,verification_submitted_at,DateTime,YES,,,null
+ServiceProviderDetails,verification_reviewed_at,DateTime,YES,,,"2025-10-03T08:38:59.348Z"
+ServiceProviderDetails,verified_by_admin_id,Int,YES,,,null
+ServiceProviderDetails,deactivated_by_admin_id,Int,YES,,,null
+ServiceProviderDetails,created_at,DateTime,NO,[object Object],,"2025-09-22T09:55:36.497Z"
+ServiceProviderDetails,provider_rating,Float,NO,0,,0
+ServiceProviderDetails,provider_location,String,YES,,,"Manila, Philippines"
+ServiceProviderDetails,provider_uli,String,NO,,,"ULI1758534931153"
+ServiceProviderDetails,provider_password,String,NO,,,"$2b$10$s.apJKGEedDrk3v139gzrOGYRTPGVtz.pePfxpMDSrpwM7OhppRaC"
+ServiceProviderDetails,provider_userName,String,NO,,,"testprovider1758534931153"
+ServiceProviderDetails,provider_isActivated,Boolean,NO,true,,true
+ServiceProviderDetails,provider_birthday,DateTime,YES,,,"1990-01-01T00:00:00.000Z"
+ServiceProviderDetails,provider_exact_location,String,YES,,,"Makati City"
+ServiceProviderDetails,provider_reason,String,YES,,,"Repeated violation of platform policies"
+ServiceProviderDetails,provider_appointments,Appointment,NO,,,
+ServiceProviderDetails,provider_availability,Availability,NO,,,
+ServiceProviderDetails,provider_certificates,Certificate,NO,,,
+ServiceProviderDetails,provider_ratings,Rating,NO,,,
+ServiceProviderDetails,provider_services,ServiceListing,NO,,,
+ServiceProviderDetails,conversations,Conversation,NO,,,
+ServiceProviderDetails,provider_professions,ProviderProfession,NO,,,
+ServiceProviderDetails,backjob_applications,BackjobApplication,NO,,,
+Certificate,certificate_id,Int,NO,[object Object],,2
+Certificate,certificate_name,String,NO,,,"Plumbing NCII"
+Certificate,certificate_file_path,String,NO,,,"https://res.cloudinary.com/dcx1glkit/image/upload/v1757846167/fixmo/customer-profiles/customer_profile_ejmercado0544_gmail_com_1757846164476.jpg"
+Certificate,expiry_date,DateTime,YES,,,null
+Certificate,provider_id,Int,NO,,,1
+Certificate,certificate_number,String,NO,,,"123456789"
+Certificate,certificate_status,String,NO,Pending,,"Approved"
+Certificate,created_at,DateTime,NO,[object Object],,"2025-09-15T13:13:34.472Z"
+Certificate,provider,ServiceProviderDetails,NO,,,
+Certificate,certificate_reason,String,YES,,,null
+Certificate,reviewed_by_admin_id,Int,YES,,,null
+Certificate,reviewed_at,DateTime,YES,,,null
+Certificate,CoveredService,CoveredService,NO,,,
+ServiceListing,service_id,Int,NO,[object Object],,4
+ServiceListing,service_title,String,NO,,,"PC Troubleshooting"
+ServiceListing,service_description,String,NO,,,"Network setup for MSMEs"
+ServiceListing,service_startingprice,Float,NO,,,5000
+ServiceListing,provider_id,Int,NO,,,4
+ServiceListing,servicelisting_isActive,Boolean,NO,true,,true
+ServiceListing,warranty,Int,YES,,,7
+ServiceListing,service_photos,ServicePhoto,NO,,,
+ServiceListing,appointments,Appointment,NO,,,
+ServiceListing,serviceProvider,ServiceProviderDetails,NO,,,
+ServiceListing,specific_services,SpecificService,NO,,,
+ServicePhoto,id,Int,NO,[object Object],,1
+ServicePhoto,imageUrl,String,NO,,,"https://res.cloudinary.com/dcx1glkit/image/upload/v1758483600/fixmo/service-photos/service_1_1758483597706_0.jpg"
+ServicePhoto,service,ServiceListing,NO,,,
+ServicePhoto,service_id,Int,NO,,,3
+ServicePhoto,uploadedAt,DateTime,NO,[object Object],,"2025-09-21T19:40:05.054Z"
+ServiceCategory,category_id,Int,NO,[object Object],,1
+ServiceCategory,category_name,String,NO,,,"Computer Services"
+ServiceCategory,specific_services,SpecificService,NO,,,
+ProviderProfession,id,Int,NO,[object Object],,1
+ProviderProfession,provider_id,Int,NO,,,1
+ProviderProfession,profession,String,NO,,,"Computer Technician"
+ProviderProfession,experience,String,NO,,,"6 years"
+ProviderProfession,provider,ServiceProviderDetails,NO,,,
+SpecificService,specific_service_id,Int,NO,[object Object],,2
+SpecificService,specific_service_title,String,NO,,,"Network Setup"
+SpecificService,specific_service_description,String,NO,,,"Network setup for MSMEs"
+SpecificService,service_id,Int,NO,,,4
+SpecificService,category_id,Int,NO,,,1
+SpecificService,covered_by_certificates,CoveredService,NO,,,
+SpecificService,category,ServiceCategory,NO,,,
+SpecificService,serviceListing,ServiceListing,NO,,,
+CoveredService,covered_service_id,Int,NO,[object Object],,1
+CoveredService,specific_service_id,Int,NO,,,1
+CoveredService,certificate_id,Int,NO,,,2
+CoveredService,certificate,Certificate,NO,,,
+CoveredService,specific_service,SpecificService,NO,,,
+Availability,availability_id,Int,NO,[object Object],,1
+Availability,dayOfWeek,String,NO,,,"Monday"
+Availability,startTime,String,NO,,,"8:00"
+Availability,endTime,String,NO,,,"23:00"
+Availability,provider_id,Int,NO,,,1
+Availability,availability_isActive,Boolean,NO,true,,true
+Availability,appointments,Appointment,NO,,,
+Availability,serviceProvider,ServiceProviderDetails,NO,,,
+Appointment,appointment_id,Int,NO,[object Object],,1
+Appointment,customer_id,Int,NO,,,1
+Appointment,provider_id,Int,NO,,,1
+Appointment,appointment_status,String,NO,,,"completed"
+Appointment,scheduled_date,DateTime,NO,,,"2025-09-13T18:46:37.000Z"
+Appointment,repairDescription,String,YES,,,"Bla bla "
+Appointment,created_at,DateTime,NO,[object Object],,"2025-09-14T10:46:58.502Z"
+Appointment,final_price,Float,YES,,,1500
+Appointment,availability_id,Int,NO,,,1
+Appointment,service_id,Int,NO,,,1
+Appointment,cancellation_reason,String,YES,,,null
+Appointment,cancelled_by_admin_id,Int,YES,,,null
+Appointment,warranty_days,Int,YES,,,null
+Appointment,finished_at,DateTime,YES,,,null
+Appointment,completed_at,DateTime,YES,,,null
+Appointment,warranty_expires_at,DateTime,YES,,,null
+Appointment,warranty_paused_at,DateTime,YES,,,null
+Appointment,warranty_remaining_days,Int,YES,,,null
+Appointment,availability,Availability,NO,,,
+Appointment,customer,User,NO,,,
+Appointment,serviceProvider,ServiceProviderDetails,NO,,,
+Appointment,service,ServiceListing,NO,,,
+Appointment,appointment_rating,Rating,NO,,,
+Appointment,backjob_applications,BackjobApplication,NO,,,
+Rating,id,Int,NO,[object Object],,3
+Rating,rating_value,Int,NO,,,2
+Rating,rating_comment,String,YES,,,"Great service! Very professional and timely."
+Rating,rating_photo,String,YES,,,"https://res.cloudinary.com/dcx1glkit/image/upload/v1758526596/fixmo/rating-photos/rating_1_1758526593449.png"
+Rating,appointment_id,Int,NO,,,1
+Rating,user_id,Int,NO,,,1
+Rating,provider_id,Int,NO,,,1
+Rating,rated_by,String,NO,,,"customer"
+Rating,created_at,DateTime,NO,[object Object],,"2025-09-22T07:36:35.877Z"
+Rating,appointment,Appointment,NO,,,
+Rating,serviceProvider,ServiceProviderDetails,NO,,,
+Rating,user,User,NO,,,
+OTPVerification,id,Int,NO,[object Object],,50
+OTPVerification,email,String,NO,,,"mekylamanatad@gmail.com"
+OTPVerification,otp,String,NO,,,"375141"
+OTPVerification,expires_at,DateTime,NO,,,"2025-10-09T15:24:04.867Z"
+OTPVerification,created_at,DateTime,NO,[object Object],,"2025-10-09T15:15:32.569Z"
+OTPVerification,verified,Boolean,NO,false,,false
+Admin,admin_id,Int,NO,[object Object],,5
+Admin,admin_username,String,NO,,,"ejmercado0544_1758300078605"
+Admin,admin_email,String,NO,,,"ejmercado0544@gmail.com"
+Admin,admin_password,String,NO,,,"$2b$12$9JzxzPRCI.8gtfHMep5tAOt5Jr.AhiWh7vwXnc3AXgMRtFsOMeEMO"
+Admin,admin_name,String,NO,,,"Admin Michael"
+Admin,admin_role,String,NO,admin,,"admin"
+Admin,created_at,DateTime,NO,[object Object],,"2025-09-19T16:41:19.048Z"
+Admin,last_login,DateTime,YES,,,"2025-09-19T17:20:51.619Z"
+Admin,is_active,Boolean,NO,true,,true
+Admin,must_change_password,Boolean,NO,true,,false
+Conversation,conversation_id,Int,NO,[object Object],,4
+Conversation,customer_id,Int,NO,,,1
+Conversation,provider_id,Int,NO,,,4
+Conversation,status,String,NO,active,,"active"
+Conversation,warranty_expires,DateTime,YES,,,"2025-10-23T08:00:00.000Z"
+Conversation,last_message_at,DateTime,YES,,,null
+Conversation,created_at,DateTime,NO,[object Object],,"2025-09-29T13:32:17.026Z"
+Conversation,updated_at,DateTime,NO,,,"2025-10-09T17:27:03.423Z"
+Conversation,customer,User,NO,,,
+Conversation,provider,ServiceProviderDetails,NO,,,
+Conversation,messages,Message,NO,,,
+Message,message_id,Int,NO,[object Object],,8
+Message,conversation_id,Int,NO,,,2
+Message,sender_id,Int,NO,,,1
+Message,sender_type,String,NO,,,"customer"
+Message,message_type,String,NO,text,,"text"
+Message,content,String,NO,,,"Conversation started"
+Message,attachment_url,String,YES,,,null
+Message,is_read,Boolean,NO,false,,false
+Message,is_edited,Boolean,NO,false,,false
+Message,edited_at,DateTime,YES,,,null
+Message,replied_to_id,Int,YES,,,null
+Message,created_at,DateTime,NO,[object Object],,"2025-09-29T13:53:25.002Z"
+Message,updated_at,DateTime,NO,,,"2025-09-29T13:53:25.002Z"
+Message,conversation,Conversation,NO,,,
+Message,replied_to,Message,YES,,,
+Message,replies,Message,NO,,,
+BackjobApplication,backjob_id,Int,NO,[object Object],,4
+BackjobApplication,appointment_id,Int,NO,,,7
+BackjobApplication,customer_id,Int,NO,,,1
+BackjobApplication,provider_id,Int,NO,,,4
+BackjobApplication,status,String,NO,pending,,"approved"
+BackjobApplication,reason,String,NO,,,"Issue reoccurred within warranty period"
+BackjobApplication,evidence,Json,YES,,,"string"
+BackjobApplication,provider_dispute_reason,String,YES,,,null
+BackjobApplication,provider_dispute_evidence,Json,YES,,,null
+BackjobApplication,customer_cancellation_reason,String,YES,,,null
+BackjobApplication,admin_notes,String,YES,,,null
+BackjobApplication,resolved_at,DateTime,YES,,,null
+BackjobApplication,created_at,DateTime,NO,[object Object],,"2025-09-27T17:34:18.088Z"
+BackjobApplication,updated_at,DateTime,NO,,,"2025-09-27T17:34:18.088Z"
+BackjobApplication,appointment,Appointment,NO,,,
+BackjobApplication,customer,User,NO,,,
+BackjobApplication,provider,ServiceProviderDetails,NO,,,
+PushToken,id,Int,NO,[object Object],,4
+PushToken,user_id,Int,NO,,,1
+PushToken,user_type,String,NO,,,"customer"
+PushToken,expo_push_token,String,NO,,,"ExponentPushToken[vmvMtbObpwwJ0ViIeCeQeE]"
+PushToken,device_platform,String,YES,,,"android"
+PushToken,device_name,String,YES,,,"vili_in"
+PushToken,device_os_version,String,YES,,,"9"
+PushToken,is_active,Boolean,NO,true,,true
+PushToken,created_at,DateTime,NO,[object Object],,"2025-10-10T15:07:29.560Z"
+PushToken,updated_at,DateTime,NO,,,"2025-10-12T15:53:09.451Z"
+PushToken,last_used_at,DateTime,NO,[object Object],,"2025-10-12T15:53:09.450Z"
+Report,report_id,Int,NO,[object Object],,1
+Report,reporter_name,String,NO,,,"Kurt Jhaive  Saldi"
+Report,reporter_email,String,NO,,,"saldikurtjhaive@gmail.com"
+Report,reporter_phone,String,YES,,,"+639639809721"
+Report,reporter_type,String,YES,,,"customer"
+Report,user_id,Int,YES,,,null
+Report,provider_id,Int,YES,,,null
+Report,appointment_id,Int,YES,,,null
+Report,report_type,String,NO,,,"safety_concern"
+Report,subject,String,NO,,,"Test"
+Report,description,String,NO,,,"lol"
+Report,attachment_urls,Json,YES,,,null
+Report,priority,String,NO,normal,,"high"
+Report,status,String,NO,pending,,"pending"
+Report,admin_notes,String,YES,,,null
+Report,resolved_at,DateTime,YES,,,null
+Report,resolved_by,Int,YES,,,null
+Report,created_at,DateTime,NO,[object Object],,"2025-10-12T17:11:44.859Z"
+Report,updated_at,DateTime,NO,,,"2025-10-12T17:11:44.859Z"

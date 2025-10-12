@@ -13,6 +13,7 @@ import {
     sendAdminInvitationEmail,
     sendAdminPasswordResetEmail
 } from '../services/mailer.js';
+import notificationService from '../services/notificationService.js';
 
 const prisma = new PrismaClient();
 
@@ -268,12 +269,15 @@ class AdminController {
                     phone_number: true,
                     profile_photo: true,
                     valid_id: true,
+                    user_location: true,
                     userName: true,
                     is_verified: true,
                     verification_status: true,
                     rejection_reason: true,
                     verification_submitted_at: true,
                     verification_reviewed_at: true,
+                    verified_by_admin_id: true,
+                    deactivated_by_admin_id: true,
                     is_activated: true,
                     created_at: true
                 }
@@ -340,6 +344,7 @@ class AdminController {
     async verifyUser(req, res) {
         try {
             const { userId } = req.params;
+            const adminId = req.userId; // Get admin ID from auth middleware
 
             const user = await prisma.user.update({
                 where: { user_id: parseInt(userId) },
@@ -347,7 +352,8 @@ class AdminController {
                     is_verified: true,
                     verification_status: 'approved',
                     rejection_reason: null,
-                    verification_reviewed_at: new Date()
+                    verification_reviewed_at: new Date(),
+                    verified_by_admin_id: adminId
                 }
             });
 
@@ -390,6 +396,7 @@ class AdminController {
         try {
             const { userId } = req.params;
             const { reason } = req.body;
+            const adminId = req.userId; // Get admin ID from auth middleware
 
             if (!reason) {
                 return res.status(400).json({ message: 'Deactivation reason is required' });
@@ -399,7 +406,8 @@ class AdminController {
                 where: { user_id: parseInt(userId) },
                 data: { 
                     is_activated: false,
-                    user_reason: reason
+                    user_reason: reason,
+                    deactivated_by_admin_id: adminId
                 }
             });
 
@@ -426,6 +434,7 @@ class AdminController {
         try {
             const { userId } = req.params;
             const { reason } = req.body;
+            const adminId = req.userId; // Get admin ID from auth middleware
 
             if (!reason) {
                 return res.status(400).json({ message: 'Rejection reason is required' });
@@ -438,7 +447,8 @@ class AdminController {
                     verification_status: 'rejected',
                     rejection_reason: reason,
                     user_reason: reason,
-                    verification_reviewed_at: new Date()
+                    verification_reviewed_at: new Date(),
+                    verified_by_admin_id: adminId
                 }
             });
 
@@ -474,12 +484,16 @@ class AdminController {
                     provider_phone_number: true,
                     provider_profile_photo: true,
                     provider_valid_id: true,
+                    provider_location: true,
+                    provider_uli: true,
                     provider_userName: true,
                     provider_isVerified: true,
                     verification_status: true,
                     rejection_reason: true,
                     verification_submitted_at: true,
                     verification_reviewed_at: true,
+                    verified_by_admin_id: true,
+                    deactivated_by_admin_id: true,
                     provider_isActivated: true,
                     provider_rating: true,
                     created_at: true
@@ -539,6 +553,7 @@ class AdminController {
     async verifyProvider(req, res) {
         try {
             const { providerId } = req.params;
+            const adminId = req.userId; // Get admin ID from auth middleware
 
             const provider = await prisma.serviceProviderDetails.update({
                 where: { provider_id: parseInt(providerId) },
@@ -546,7 +561,8 @@ class AdminController {
                     provider_isVerified: true,
                     verification_status: 'approved',
                     rejection_reason: null,
-                    verification_reviewed_at: new Date()
+                    verification_reviewed_at: new Date(),
+                    verified_by_admin_id: adminId
                 }
             });
 
@@ -589,6 +605,7 @@ class AdminController {
         try {
             const { providerId } = req.params;
             const { reason } = req.body;
+            const adminId = req.userId; // Get admin ID from auth middleware
 
             if (!reason) {
                 return res.status(400).json({ message: 'Deactivation reason is required' });
@@ -598,7 +615,8 @@ class AdminController {
                 where: { provider_id: parseInt(providerId) },
                 data: { 
                     provider_isActivated: false,
-                    provider_reason: reason
+                    provider_reason: reason,
+                    deactivated_by_admin_id: adminId
                 }
             });
 
@@ -625,6 +643,7 @@ class AdminController {
         try {
             const { providerId } = req.params;
             const { reason } = req.body;
+            const adminId = req.userId; // Get admin ID from auth middleware
 
             if (!reason) {
                 return res.status(400).json({ message: 'Rejection reason is required' });
@@ -637,7 +656,8 @@ class AdminController {
                     verification_status: 'rejected',
                     rejection_reason: reason,
                     provider_reason: reason,
-                    verification_reviewed_at: new Date()
+                    verification_reviewed_at: new Date(),
+                    verified_by_admin_id: adminId
                 }
             });
 
@@ -752,10 +772,15 @@ class AdminController {
     async approveCertificate(req, res) {
         try {
             const { certificateId } = req.params;
+            const adminId = req.userId; // Get admin ID from auth middleware
 
             const certificate = await prisma.certificate.update({
                 where: { certificate_id: parseInt(certificateId) },
-                data: { certificate_status: 'Approved' },
+                data: { 
+                    certificate_status: 'Approved',
+                    reviewed_by_admin_id: adminId,
+                    reviewed_at: new Date()
+                },
                 include: {
                     provider: true
                 }
@@ -774,6 +799,18 @@ class AdminController {
                 // Don't fail the approval if email fails
             }
 
+            // Send push notification to provider
+            try {
+                await notificationService.sendCertificateVerificationNotification(
+                    certificate.provider_id,
+                    certificate.certificate_name || 'Certificate',
+                    'approved'
+                );
+                console.log('✅ Certificate approval notification sent to provider');
+            } catch (notifError) {
+                console.error('❌ Error sending certificate approval notification:', notifError);
+            }
+
             res.json({ message: 'Certificate approved successfully', certificate });
         } catch (error) {
             console.error('Error approving certificate:', error);
@@ -785,6 +822,7 @@ class AdminController {
         try {
             const { certificateId } = req.params;
             const { reason } = req.body;
+            const adminId = req.userId; // Get admin ID from auth middleware
 
             if (!reason) {
                 return res.status(400).json({ message: 'Rejection reason is required' });
@@ -794,7 +832,9 @@ class AdminController {
                 where: { certificate_id: parseInt(certificateId) },
                 data: { 
                     certificate_status: 'Rejected',
-                    certificate_reason: reason
+                    certificate_reason: reason,
+                    reviewed_by_admin_id: adminId,
+                    reviewed_at: new Date()
                 },
                 include: {
                     provider: true
@@ -812,6 +852,19 @@ class AdminController {
             } catch (emailError) {
                 console.error('Error sending certificate rejection email:', emailError);
                 // Don't fail the rejection if email fails
+            }
+
+            // Send push notification to provider
+            try {
+                await notificationService.sendCertificateVerificationNotification(
+                    certificate.provider_id,
+                    certificate.certificate_name || 'Certificate',
+                    'rejected',
+                    reason
+                );
+                console.log('✅ Certificate rejection notification sent to provider');
+            } catch (notifError) {
+                console.error('❌ Error sending certificate rejection notification:', notifError);
             }
 
             res.json({ message: 'Certificate rejected successfully', certificate });

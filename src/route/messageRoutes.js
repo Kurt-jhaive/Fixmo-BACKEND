@@ -22,4 +22,7 @@ router.put('/conversations/:conversationId/messages/read', messageController.mar
 // Search routes
 router.get('/search', messageController.searchMessages);
 
+// Utility routes
+router.post('/conversations/refresh-statuses', messageController.refreshConversationStatuses);
+
 export default router;

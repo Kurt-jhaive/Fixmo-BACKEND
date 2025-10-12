@@ -592,3 +592,388 @@ export const sendBackjobCancellationToProvider = async (providerEmail, cancellat
     
     await transporter.sendMail(mailOptions);
 };
+
+// 7. BACKJOB DISPUTE APPROVED BY ADMIN - Send to Customer
+export const sendDisputeApprovedToCustomer = async (customerEmail, disputeDetails) => {
+    const {
+        customerName,
+        serviceTitle,
+        providerName,
+        appointmentId,
+        backjobId,
+        originalReason,
+        providerDisputeReason,
+        adminNotes
+    } = disputeDetails;
+
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: customerEmail,
+        subject: `Warranty Dispute Approved - Backjob #${backjobId} Cancelled`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
+                <div style="background-color: #ff9800; padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 24px;">⚖️ Dispute Resolution Update</h1>
+                </div>
+                
+                <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <p style="color: #333; font-size: 16px; margin-bottom: 20px;">Dear <strong>${customerName}</strong>,</p>
+                    
+                    <p style="color: #333; font-size: 16px; line-height: 1.6;">
+                        After reviewing the warranty service request dispute filed by <strong>${providerName}</strong>, 
+                        our admin team has <strong style="color: #ff9800;">approved the provider's dispute</strong>. 
+                        This means the provider's original work was completed as specified, and your warranty service request has been cancelled.
+                    </p>
+
+                    <div style="background-color: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;">
+                        <h3 style="color: #333; margin-top: 0; margin-bottom: 15px;">📋 Details</h3>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Service:</td>
+                                <td style="padding: 8px 0; color: #333;">${serviceTitle}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Appointment ID:</td>
+                                <td style="padding: 8px 0; color: #333;">#${appointmentId}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Backjob ID:</td>
+                                <td style="padding: 8px 0; color: #333;">#${backjobId}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Provider:</td>
+                                <td style="padding: 8px 0; color: #333;">${providerName}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Your Issue:</td>
+                                <td style="padding: 8px 0; color: #333;">${originalReason}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #dee2e6;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Provider's Response:</td>
+                                <td style="padding: 8px 0; color: #333;">${providerDisputeReason || 'N/A'}</td>
+                            </tr>
+                            ${adminNotes ? `
+                            <tr>
+                                <td style="padding: 8px 0; font-weight: bold; color: #495057;">Admin Notes:</td>
+                                <td style="padding: 8px 0; color: #333;">${adminNotes}</td>
+                            </tr>
+                            ` : ''}
+                        </table>
+                    </div>
+
+                    <div style="background-color: #f8d7da; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #dc3545;">
+                        <h3 style="color: #721c24; margin-top: 0; margin-bottom: 15px;">⚠️ What This Means</h3>
+                        <ul style="color: #721c24; line-height: 1.6; padding-left: 20px;">
+                            <li>Your warranty service request has been <strong>cancelled</strong></li>
+                            <li>The provider's original work was determined to be satisfactory</li>
+                            <li>Your warranty period will resume from its paused state</li>
+                            <li>No rescheduling will occur</li>
+                        </ul>
+                    </div>
+
+                    <div style="background-color: #d1ecf1; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #17a2b8;">
+                        <h3 style="color: #0c5460; margin-top: 0; margin-bottom: 15px;">💡 Need Further Assistance?</h3>
+                        <p style="color: #0c5460; margin: 0; line-height: 1.6;">
+                            If you believe this decision was made in error or if you have additional evidence, please contact our customer support team for further review.
+                        </p>
+                    </div>
+
+                    <p style="color: #666; font-size: 14px; text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                        We appreciate your understanding.<br>
+                        <strong>Fixmo Admin Team</strong>
+                    </p>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// 8. BACKJOB DISPUTE APPROVED BY ADMIN - Send to Provider
+export const sendDisputeApprovedToProvider = async (providerEmail, disputeDetails) => {
+    const {
+        providerName,
+        customerName,
+        serviceTitle,
+        appointmentId,
+        backjobId,
+        originalReason,
+        providerDisputeReason,
+        adminNotes
+    } = disputeDetails;
+
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: providerEmail,
+        subject: `Dispute Approved - Backjob #${backjobId} Cancelled`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
+                <div style="background-color: #28a745; padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 24px;">✅ Your Dispute Was Approved!</h1>
+                </div>
+                
+                <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <p style="color: #333; font-size: 16px; margin-bottom: 20px;">Dear <strong>${providerName}</strong>,</p>
+                    
+                    <p style="color: #333; font-size: 16px; line-height: 1.6;">
+                        Good news! Our admin team has <strong style="color: #28a745;">approved your dispute</strong> 
+                        regarding the warranty service request from <strong>${customerName}</strong>. 
+                        Your original work has been confirmed as satisfactory, and the backjob request has been cancelled.
+                    </p>
+
+                    <div style="background-color: #d4edda; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
+                        <h3 style="color: #155724; margin-top: 0; margin-bottom: 15px;">✓ Resolution Summary</h3>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Service:</td>
+                                <td style="padding: 8px 0; color: #155724;">${serviceTitle}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Appointment ID:</td>
+                                <td style="padding: 8px 0; color: #155724;">#${appointmentId}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Backjob ID:</td>
+                                <td style="padding: 8px 0; color: #155724;">#${backjobId}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Customer:</td>
+                                <td style="padding: 8px 0; color: #155724;">${customerName}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Customer's Issue:</td>
+                                <td style="padding: 8px 0; color: #155724;">${originalReason}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Your Response:</td>
+                                <td style="padding: 8px 0; color: #155724;">${providerDisputeReason || 'N/A'}</td>
+                            </tr>
+                            ${adminNotes ? `
+                            <tr>
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Admin Notes:</td>
+                                <td style="padding: 8px 0; color: #155724;">${adminNotes}</td>
+                            </tr>
+                            ` : ''}
+                        </table>
+                    </div>
+
+                    <div style="background-color: #d1ecf1; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #17a2b8;">
+                        <h3 style="color: #0c5460; margin-top: 0; margin-bottom: 15px;">📌 What Happens Next</h3>
+                        <ul style="color: #0c5460; line-height: 1.6; padding-left: 20px;">
+                            <li>The warranty service request has been cancelled</li>
+                            <li><strong>No action required from you</strong></li>
+                            <li>Customer's warranty period will resume</li>
+                            <li>This case is now closed</li>
+                        </ul>
+                    </div>
+
+                    <p style="color: #666; font-size: 14px; text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                        Thank you for your professional service.<br>
+                        <strong>Fixmo Admin Team</strong>
+                    </p>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// 9. BACKJOB DISPUTE REJECTED BY ADMIN - Send to Customer
+export const sendDisputeRejectedToCustomer = async (customerEmail, disputeDetails) => {
+    const {
+        customerName,
+        serviceTitle,
+        providerName,
+        providerPhone,
+        appointmentId,
+        backjobId,
+        originalReason,
+        providerDisputeReason,
+        adminNotes
+    } = disputeDetails;
+
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: customerEmail,
+        subject: `Dispute Rejected - Backjob #${backjobId} Remains Active`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
+                <div style="background-color: #28a745; padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 24px;">✅ Your Request Stands!</h1>
+                </div>
+                
+                <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <p style="color: #333; font-size: 16px; margin-bottom: 20px;">Dear <strong>${customerName}</strong>,</p>
+                    
+                    <p style="color: #333; font-size: 16px; line-height: 1.6;">
+                        Good news! After reviewing the dispute filed by <strong>${providerName}</strong>, 
+                        our admin team has <strong style="color: #28a745;">rejected the provider's dispute</strong>. 
+                        Your warranty service request remains <strong>active and valid</strong>, and the provider will proceed with rescheduling your appointment.
+                    </p>
+
+                    <div style="background-color: #d4edda; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
+                        <h3 style="color: #155724; margin-top: 0; margin-bottom: 15px;">📋 Details</h3>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Service:</td>
+                                <td style="padding: 8px 0; color: #155724;">${serviceTitle}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Appointment ID:</td>
+                                <td style="padding: 8px 0; color: #155724;">#${appointmentId}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Backjob ID:</td>
+                                <td style="padding: 8px 0; color: #155724;">#${backjobId}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Provider:</td>
+                                <td style="padding: 8px 0; color: #155724;">${providerName}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Provider Phone:</td>
+                                <td style="padding: 8px 0; color: #155724;">${providerPhone}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Your Issue:</td>
+                                <td style="padding: 8px 0; color: #155724;">${originalReason}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #c3e6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Provider's Dispute:</td>
+                                <td style="padding: 8px 0; color: #155724;">${providerDisputeReason || 'N/A'}</td>
+                            </tr>
+                            ${adminNotes ? `
+                            <tr>
+                                <td style="padding: 8px 0; font-weight: bold; color: #155724;">Admin Notes:</td>
+                                <td style="padding: 8px 0; color: #155724;">${adminNotes}</td>
+                            </tr>
+                            ` : ''}
+                        </table>
+                    </div>
+
+                    <div style="background-color: #d1ecf1; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #17a2b8;">
+                        <h3 style="color: #0c5460; margin-top: 0; margin-bottom: 15px;">⏳ What Happens Next</h3>
+                        <ul style="color: #0c5460; line-height: 1.6; padding-left: 20px;">
+                            <li>Your warranty service request remains <strong>active</strong></li>
+                            <li>The provider (<strong>${providerName}</strong>) will contact you to reschedule</li>
+                            <li>Your warranty remains paused until the service is completed</li>
+                            <li>You'll receive another notification once rescheduled</li>
+                        </ul>
+                    </div>
+
+                    <p style="color: #666; font-size: 14px; text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                        Thank you for your patience.<br>
+                        <strong>Fixmo Admin Team</strong>
+                    </p>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+// 10. BACKJOB DISPUTE REJECTED BY ADMIN - Send to Provider
+export const sendDisputeRejectedToProvider = async (providerEmail, disputeDetails) => {
+    const {
+        providerName,
+        customerName,
+        customerPhone,
+        serviceTitle,
+        appointmentId,
+        backjobId,
+        originalReason,
+        providerDisputeReason,
+        adminNotes
+    } = disputeDetails;
+
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: providerEmail,
+        subject: `Dispute Rejected - Please Reschedule Backjob #${backjobId}`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
+                <div style="background-color: #dc3545; padding: 20px; border-radius: 10px 10px 0 0; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 24px;">⚠️ Dispute Decision Update</h1>
+                </div>
+                
+                <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <p style="color: #333; font-size: 16px; margin-bottom: 20px;">Dear <strong>${providerName}</strong>,</p>
+                    
+                    <p style="color: #333; font-size: 16px; line-height: 1.6;">
+                        After careful review, our admin team has <strong style="color: #dc3545;">rejected your dispute</strong> 
+                        regarding the warranty service request from <strong>${customerName}</strong>. 
+                        The customer's warranty claim is valid, and you are required to reschedule the appointment to address the reported issue.
+                    </p>
+
+                    <div style="background-color: #f8d7da; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #dc3545;">
+                        <h3 style="color: #721c24; margin-top: 0; margin-bottom: 15px;">📋 Backjob Details</h3>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="border-bottom: 1px solid #f5c6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #721c24;">Service:</td>
+                                <td style="padding: 8px 0; color: #721c24;">${serviceTitle}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #f5c6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #721c24;">Appointment ID:</td>
+                                <td style="padding: 8px 0; color: #721c24;">#${appointmentId}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #f5c6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #721c24;">Backjob ID:</td>
+                                <td style="padding: 8px 0; color: #721c24;">#${backjobId}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #f5c6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #721c24;">Customer:</td>
+                                <td style="padding: 8px 0; color: #721c24;">${customerName}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #f5c6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #721c24;">Customer Phone:</td>
+                                <td style="padding: 8px 0; color: #721c24;">${customerPhone}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #f5c6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #721c24;">Customer's Issue:</td>
+                                <td style="padding: 8px 0; color: #721c24;">${originalReason}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #f5c6cb;">
+                                <td style="padding: 8px 0; font-weight: bold; color: #721c24;">Your Dispute:</td>
+                                <td style="padding: 8px 0; color: #721c24;">${providerDisputeReason || 'N/A'}</td>
+                            </tr>
+                            ${adminNotes ? `
+                            <tr>
+                                <td style="padding: 8px 0; font-weight: bold; color: #721c24;">Admin Notes:</td>
+                                <td style="padding: 8px 0; color: #721c24;">${adminNotes}</td>
+                            </tr>
+                            ` : ''}
+                        </table>
+                    </div>
+
+                    <div style="background-color: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;">
+                        <h3 style="color: #856404; margin-top: 0; margin-bottom: 15px;">⚠️ Action Required</h3>
+                        <ul style="color: #856404; line-height: 1.6; padding-left: 20px;">
+                            <li><strong>Contact the customer immediately</strong> to schedule a new appointment</li>
+                            <li>Address the reported issue: <em>${originalReason}</em></li>
+                            <li>Complete the warranty service at no additional charge to the customer</li>
+                            <li>Use the app to reschedule the backjob appointment</li>
+                        </ul>
+                    </div>
+
+                    <div style="background-color: #d1ecf1; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #17a2b8;">
+                        <h3 style="color: #0c5460; margin-top: 0; margin-bottom: 15px;">💡 Important Notes</h3>
+                        <p style="color: #0c5460; margin: 0; line-height: 1.6;">
+                            Failure to complete warranty services may impact your provider rating and future bookings. 
+                            If you have concerns about this decision, please contact our admin team for further discussion.
+                        </p>
+                    </div>
+
+                    <p style="color: #666; font-size: 14px; text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                        Thank you for your cooperation.<br>
+                        <strong>Fixmo Admin Team</strong>
+                    </p>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};

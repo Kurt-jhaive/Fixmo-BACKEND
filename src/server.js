@@ -17,6 +17,9 @@ import messageRoutes from './route/messageRoutes.js';
 import warrantyAdminRoutes from './route/warrantyAdminRoutes.js';
 import testRoutes from './route/testRoutes.js';
 import verificationRoutes from './route/verificationRoutes.js';
+import notificationRoutes from './route/notificationRoutes.js';
+import reportRoutes from './route/reportRoutes.js';
+import exportRoutes from './route/exportRoutes.js';
 import { setWebSocketServer } from './controller/messageController.js';
 import { setWebSocketServer as setWarrantyJobWebSocket, initializeWarrantyExpiryJob } from './services/warrantyExpiryJob.js';
 import cors from 'cors';
@@ -190,6 +193,9 @@ app.use('/api/ratings', ratingRoutes); // Rating management routes
 app.use('/api/messages', messageRoutes); // Message management routes
 app.use('/api/admin/warranty', warrantyAdminRoutes); // Warranty management admin routes
 app.use('/api/verification', verificationRoutes); // Verification management routes
+app.use('/api/notifications', notificationRoutes); // Push notification management routes
+app.use('/api/reports', reportRoutes); // Report submission and management routes
+app.use('/api/admin/export', exportRoutes); // Admin export routes (CSV/PDF)
 app.use('/api/test', testRoutes); // Test routes for Cloudinary and other features
 
 // 404 handler for undefined routes (without wildcard)
@@ -207,6 +213,7 @@ app.use((req, res) => {
       '/api/appointments/*',
       '/api/ratings/*',
       '/api/messages/*',
+      '/api/notifications/*',
       '/uploads/*'
     ]
   });
