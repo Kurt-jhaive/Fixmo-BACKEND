@@ -63,6 +63,7 @@ export const getProviderServices = async (req, res) => {
                 price_per_hour: service.service_startingprice,
                 provider_id: service.provider_id,
                 is_available: service.servicelisting_isActive, // Use actual field from database
+                isActive: service.servicelisting_isActive, // Add for frontend compatibility
                 status: service.servicelisting_isActive ? 'active' : 'inactive', // Based on database field
                 specific_services: service.specific_services,
                 categories: service.specific_services.map(service => service.category.category_name),
