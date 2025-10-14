@@ -2312,7 +2312,9 @@ export const getProviderServices = async (req, res) => {
         const transformedServices = services.map(service => ({
             ...service,
             listing_id: service.service_id, // Add alias for consistency
-            service_picture: service.service_picture // Ensure service_picture is included
+            service_picture: service.service_picture, // Ensure service_picture is included
+            isActive: service.servicelisting_isActive, // Add for frontend compatibility
+            is_available: service.servicelisting_isActive // Add for frontend compatibility
         }));
 
         res.status(200).json(transformedServices);

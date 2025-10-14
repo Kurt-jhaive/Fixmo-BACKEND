@@ -1243,6 +1243,199 @@ export const adminCancelAppointment = async (req, res) => {
     }
 };
 
+// Provider cancel appointment (Service Provider cancellation)
+export const providerCancelAppointment = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        const { cancellation_reason } = req.body;
+        const providerId = req.userId; // Provider ID from requireAuth('provider') middleware
+
+        if (!providerId) {
+            return res.status(401).json({
+                success: false,
+                message: 'Unauthorized: Provider ID not found'
+            });
+        }
+
+        if (!cancellation_reason) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cancellation reason is required'
+            });
+        }
+
+        // Check if appointment exists and belongs to this provider
+        const existingAppointment = await prisma.appointment.findUnique({
+            where: { appointment_id: parseInt(appointmentId) },
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        phone_number: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
+                }
+            }
+        });
+
+        if (!existingAppointment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Appointment not found'
+            });
+        }
+
+        // Verify appointment belongs to this provider
+        if (existingAppointment.provider_id !== providerId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Forbidden: You can only cancel your own appointments'
+            });
+        }
+
+        // Check if appointment is in a cancellable status
+        if (existingAppointment.appointment_status === 'cancelled') {
+            return res.status(400).json({
+                success: false,
+                message: 'Appointment is already cancelled'
+            });
+        }
+
+        if (existingAppointment.appointment_status === 'completed') {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot cancel a completed appointment'
+            });
+        }
+
+        // Update appointment status to cancelled with provider's reason
+        const updatedAppointment = await prisma.appointment.update({
+            where: { appointment_id: parseInt(appointmentId) },
+            data: { 
+                appointment_status: 'cancelled',
+                cancellation_reason: cancellation_reason // Provider's cancellation reason
+            },
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        phone_number: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true,
+                        provider_phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
+                }
+            }
+        });
+
+        // Send cancellation email notifications
+        try {
+            const { sendBookingCancellationToCustomer, sendBookingCancellationEmail } = await import('../services/mailer.js');
+            
+            // Format cancellation details for email
+            const cancellationDetails = {
+                customerName: `${updatedAppointment.customer.first_name} ${updatedAppointment.customer.last_name}`,
+                customerPhone: updatedAppointment.customer.phone_number,
+                customerEmail: updatedAppointment.customer.email,
+                serviceTitle: updatedAppointment.service?.service_title || 'Service',
+                providerName: `${updatedAppointment.serviceProvider.provider_first_name} ${updatedAppointment.serviceProvider.provider_last_name}`,
+                providerPhone: updatedAppointment.serviceProvider.provider_phone_number,
+                providerEmail: updatedAppointment.serviceProvider.provider_email,
+                scheduledDate: updatedAppointment.scheduled_date,
+                appointmentId: updatedAppointment.appointment_id,
+                startingPrice: updatedAppointment.service?.service_startingprice || 0,
+                repairDescription: updatedAppointment.repairDescription,
+                cancellationReason: cancellation_reason,
+                cancelledBy: 'provider' // Indicate that provider cancelled
+            };
+
+            console.log('📧 Sending provider cancellation emails for appointment:', updatedAppointment.appointment_id);
+            
+            // Send email to customer (notify them about provider cancellation)
+            await sendBookingCancellationToCustomer(updatedAppointment.customer.email, cancellationDetails);
+            console.log('✅ Provider cancellation email sent to customer:', updatedAppointment.customer.email);
+            
+            // Send confirmation email to provider
+            await sendBookingCancellationEmail(updatedAppointment.serviceProvider.provider_email, cancellationDetails);
+            console.log('✅ Provider cancellation confirmation sent to provider:', updatedAppointment.serviceProvider.provider_email);
+            
+        } catch (emailError) {
+            console.error('❌ Error sending provider cancellation emails:', emailError);
+            // Don't fail the cancellation if email fails
+        }
+
+        // Send push notifications for cancellation
+        try {
+            // Notify customer about provider cancellation
+            notificationService.sendBookingUpdateNotification(
+                updatedAppointment.appointment_id,
+                'cancelled',
+                'customer'
+            ).catch(err => console.error('Failed to send customer notification:', err));
+
+            // Notify provider (confirmation)
+            notificationService.sendBookingUpdateNotification(
+                updatedAppointment.appointment_id,
+                'cancelled',
+                'provider'
+            ).catch(err => console.error('Failed to send provider notification:', err));
+
+            console.log('✅ Push notifications sent for provider cancellation');
+        } catch (notifError) {
+            console.error('❌ Error sending push notifications:', notifError);
+            // Don't fail the cancellation if notifications fail
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Appointment cancelled successfully by provider and notifications sent',
+            data: updatedAppointment
+        });
+
+    } catch (error) {
+        console.error('Error in provider appointment cancellation:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error cancelling appointment by provider',
+            error: error.message
+        });
+    }
+};
+
 // Rate customer/appointment
 export const rateAppointment = async (req, res) => {
     try {

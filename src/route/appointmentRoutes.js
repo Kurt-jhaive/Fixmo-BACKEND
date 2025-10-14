@@ -8,6 +8,7 @@ import {
     updateAppointmentStatus,
     cancelAppointment,
     adminCancelAppointment,
+    providerCancelAppointment,
     rateAppointment,
     rescheduleAppointment,
     getProviderAppointments,
@@ -22,6 +23,7 @@ import {
 } from '../controller/appointmentController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { adminAuthMiddleware } from '../middleware/adminAuthMiddleware.js';
+import { requireAuth } from '../middleware/sessionAuth.js';
 
 const router = express.Router();
 
@@ -64,7 +66,8 @@ router.delete('/:appointmentId', deleteAppointment);           // DELETE /api/ap
 
 // Status and scheduling management
 router.patch('/:appointmentId/status', updateAppointmentStatus); // PATCH /api/appointments/:id/status - Update appointment status
-router.put('/:appointmentId/cancel', cancelAppointment);         // PUT /api/appointments/:id/cancel - Cancel appointment with reason
+router.put('/:appointmentId/cancel', cancelAppointment);         // PUT /api/appointments/:id/cancel - Cancel appointment with reason (Customer)
+router.post('/:appointmentId/provider-cancel', requireAuth('provider'), providerCancelAppointment); // POST /api/appointments/:id/provider-cancel - Provider cancel appointment
 router.post('/:appointmentId/admin-cancel', adminAuthMiddleware, adminCancelAppointment); // POST /api/appointments/:id/admin-cancel - Admin cancel appointment with enhanced tracking
 router.post('/:appointmentId/rate', rateAppointment);            // POST /api/appointments/:id/rate - Rate appointment/customer
 router.patch('/:appointmentId/reschedule', rescheduleAppointment); // PATCH /api/appointments/:id/reschedule - Reschedule appointment
