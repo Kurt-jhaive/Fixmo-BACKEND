@@ -238,12 +238,103 @@ setWarrantyJobWebSocket(messageWebSocket);
 // Initialize warranty expiry cleanup job
 initializeWarrantyExpiryJob();
 
+// ============================================
+// 🚫 NO-SHOW DETECTION JOB
+// ============================================
+// Automatically marks appointments as "no-show" if they remain in 'scheduled' status
+// past their scheduled date + grace period (1 day)
+const NO_SHOW_CHECK_INTERVAL_MS = 60 * 60 * 1000; // Check every 1 hour
+const NO_SHOW_GRACE_PERIOD_HOURS = 24; // 24 hours (1 day) grace period
+
+// Run immediately on startup
+(async () => {
+  try {
+    const now = new Date();
+    const gracePeriodMs = NO_SHOW_GRACE_PERIOD_HOURS * 60 * 60 * 1000;
+    const cutoffTime = new Date(now.getTime() - gracePeriodMs);
+
+    console.log(`🔍 Initial no-show check (grace period: ${NO_SHOW_GRACE_PERIOD_HOURS}h)`);
+
+    const staleAppointments = await prisma.appointment.findMany({
+      where: {
+        appointment_status: 'scheduled',
+        scheduled_date: { lte: cutoffTime }
+      },
+      select: {
+        appointment_id: true,
+        scheduled_date: true,
+        customer_id: true,
+        provider_id: true
+      }
+    });
+
+    if (staleAppointments.length > 0) {
+      const appointmentIds = staleAppointments.map(a => a.appointment_id);
+      await prisma.appointment.updateMany({
+        where: { appointment_id: { in: appointmentIds } },
+        data: { appointment_status: 'no-show' }
+      });
+
+      console.log(`✅ Marked ${staleAppointments.length} appointment(s) as no-show`);
+      staleAppointments.forEach(appt => {
+        console.log(`   - Appointment #${appt.appointment_id} (scheduled: ${appt.scheduled_date.toISOString()})`);
+      });
+    } else {
+      console.log(`✅ No appointments to mark as no-show`);
+    }
+  } catch (err) {
+    console.error('❌ No-show check error:', err);
+  }
+})();
+
+// Schedule recurring check
+setInterval(async () => {
+  try {
+    const now = new Date();
+    const gracePeriodMs = NO_SHOW_GRACE_PERIOD_HOURS * 60 * 60 * 1000;
+    const cutoffTime = new Date(now.getTime() - gracePeriodMs);
+
+    console.log(`🔍 Checking for no-show appointments (grace period: ${NO_SHOW_GRACE_PERIOD_HOURS}h)`);
+
+    const staleAppointments = await prisma.appointment.findMany({
+      where: {
+        appointment_status: 'scheduled',
+        scheduled_date: { lte: cutoffTime }
+      },
+      select: {
+        appointment_id: true,
+        scheduled_date: true,
+        customer_id: true,
+        provider_id: true
+      }
+    });
+
+    if (staleAppointments.length > 0) {
+      const appointmentIds = staleAppointments.map(a => a.appointment_id);
+      await prisma.appointment.updateMany({
+        where: { appointment_id: { in: appointmentIds } },
+        data: { appointment_status: 'no-show' }
+      });
+
+      console.log(`✅ Marked ${staleAppointments.length} appointment(s) as no-show`);
+      staleAppointments.forEach(appt => {
+        console.log(`   - Appointment #${appt.appointment_id} (scheduled: ${appt.scheduled_date.toISOString()})`);
+      });
+    } else {
+      console.log(`✅ No appointments to mark as no-show`);
+    }
+  } catch (err) {
+    console.error('❌ No-show check error:', err);
+  }
+}, NO_SHOW_CHECK_INTERVAL_MS);
+
 httpServer.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Fixmo Backend API Server is running on http://0.0.0.0:${port}`);
   console.log(`📱 Ready for React Native connections`);
   console.log(`💬 WebSocket server initialized for real-time messaging`);
   console.log(`⏰ Warranty expiry cleanup job initialized`);
-  console.log(`🗄️ Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
+  console.log(`� No-show detection job initialized`);
+  console.log(`�🗄️ Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
 });
 
 // Auto-complete appointments after warranty window if customer hasn't completed
