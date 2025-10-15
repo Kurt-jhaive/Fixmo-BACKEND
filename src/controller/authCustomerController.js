@@ -6,6 +6,7 @@ import { sendOTPEmail, sendRegistrationSuccessEmail, sendBookingCancellationEmai
 import { forgotrequestOTP, verifyOTPAndResetPassword, verifyOTP, cleanupOTP } from '../services/otpUtils.js';
 import { checkOTPRateLimit, recordOTPAttempt, checkForgotPasswordRateLimit, recordForgotPasswordAttempt, resetForgotPasswordAttempts } from '../services/rateLimitUtils.js';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
+import { calculateCustomerProviderDistance } from '../utils/locationUtils.js';
 
 const prisma = new PrismaClient();
 
@@ -1085,6 +1086,62 @@ export const addAppointment = async (req, res) => {
             return res.status(404).json({ message: 'Service provider not found' });
         }
 
+        // ✅ PREVENT SELF-BOOKING: Check if customer is trying to book with themselves
+        const customerFullName = `${customer.first_name} ${customer.last_name}`.toLowerCase().trim();
+        const providerFullName = `${serviceProvider.provider_first_name} ${serviceProvider.provider_last_name}`.toLowerCase().trim();
+        const namesMatch = customerFullName === providerFullName;
+        const emailMatches = customer.email.toLowerCase().trim() === serviceProvider.provider_email.toLowerCase().trim();
+        const phoneMatches = customer.phone_number.trim() === serviceProvider.provider_phone_number.trim();
+
+        if (namesMatch && (emailMatches || phoneMatches)) {
+            console.log('🚫 SELF-BOOKING PREVENTED:', {
+                customer: customerFullName,
+                provider: providerFullName,
+                email_match: emailMatches,
+                phone_match: phoneMatches
+            });
+            return res.status(400).json({
+                message: 'You cannot book an appointment with yourself. Please select a different service provider.',
+                reason: 'self_booking_not_allowed'
+            });
+        }
+
+        // ✅ NEW: Prevent multiple bookings on the same date - customer can only book once per day
+        const requestedDate = new Date(scheduled_date);
+        const startOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate());
+        const endOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate() + 1);
+
+        const existingBookingOnDate = await prisma.appointment.findFirst({
+            where: {
+                customer_id: parseInt(customer_id),
+                scheduled_date: {
+                    gte: startOfDay,
+                    lt: endOfDay
+                },
+                appointment_status: {
+                    notIn: ['Cancelled', 'cancelled'] // Don't count cancelled appointments
+                }
+            }
+        });
+
+        if (existingBookingOnDate) {
+            console.log('🚫 DAILY BOOKING LIMIT EXCEEDED:', {
+                customer_id,
+                requested_date: scheduled_date,
+                existing_appointment_id: existingBookingOnDate.appointment_id,
+                existing_appointment_time: existingBookingOnDate.scheduled_date
+            });
+            return res.status(400).json({
+                message: 'You already have an appointment scheduled on this date. You can only book one appointment per day.',
+                reason: 'daily_booking_limit_exceeded',
+                existing_appointment: {
+                    appointment_id: existingBookingOnDate.appointment_id,
+                    scheduled_date: existingBookingOnDate.scheduled_date,
+                    status: existingBookingOnDate.appointment_status
+                }
+            });
+        }
+
         // Validate service listing if provided
         let serviceListing = null;
         if (service_listing_id) {
@@ -1885,12 +1942,24 @@ export const getServiceListingsForCustomer = async (req, res) => {
         date = null // New parameter for availability filtering
     } = req.query;
 
+    console.log('\n🔍 ========== GET SERVICE LISTINGS REQUEST ==========');
+    console.log('📥 Query Parameters:');
+    console.log(`   - page: ${page}`);
+    console.log(`   - limit: ${limit}`);
+    console.log(`   - search: "${search}"`);
+    console.log(`   - category: "${category}"`);
+    console.log(`   - location: "${location}"`);
+    console.log(`   - sortBy: ${sortBy}`);
+    console.log(`   - date: ${date || 'not specified'}`);
+
     try {
         // Get authenticated user info if available (optional authentication)
         const authenticatedUserId = req.userId; // From authMiddleware if token is provided
         const authenticatedUserType = req.userType;
         
-        // Get customer details if authenticated to enable self-exclusion
+        console.log(`🔐 Authentication: ${authenticatedUserId ? `User ID ${authenticatedUserId} (${authenticatedUserType})` : 'Not authenticated (public request)'}`);
+        
+        // Get customer details if authenticated to enable self-exclusion and distance calculation
         let customerDetails = null;
         if (authenticatedUserId && authenticatedUserType === 'customer') {
             customerDetails = await prisma.user.findUnique({
@@ -1899,12 +1968,14 @@ export const getServiceListingsForCustomer = async (req, res) => {
                     first_name: true,
                     last_name: true,
                     email: true,
-                    phone_number: true
+                    phone_number: true,
+                    exact_location: true // For distance calculation
                 }
             });
             console.log('🔍 Customer authenticated:', {
                 userId: authenticatedUserId,
-                name: `${customerDetails?.first_name} ${customerDetails?.last_name}`
+                name: `${customerDetails?.first_name} ${customerDetails?.last_name}`,
+                has_location: !!customerDetails?.exact_location
             });
         }
         
@@ -2003,6 +2074,7 @@ export const getServiceListingsForCustomer = async (req, res) => {
                         provider_email: true,
                         provider_phone_number: true,
                         provider_location: true,
+                        provider_exact_location: true, // For distance calculation
                         provider_rating: true,
                         provider_isVerified: true,
                         provider_profile_photo: true
@@ -2012,7 +2084,12 @@ export const getServiceListingsForCustomer = async (req, res) => {
                     select: {
                         specific_service_id: true,
                         specific_service_title: true,
-                        specific_service_description: true
+                        specific_service_description: true,
+                        category: {
+                            select: {
+                                category_name: true
+                            }
+                        }
                     }
                 }
             },
@@ -2066,8 +2143,8 @@ export const getServiceListingsForCustomer = async (req, res) => {
         }
         
         if (date && dayOfWeek && startOfDay && endOfDay) {
-            // Get all provider IDs from the listings
-            const providerIds = serviceListings.map(listing => listing.serviceProvider.provider_id);
+            // Get all provider IDs from the listings (use filteredListings after self-exclusion)
+            const providerIds = filteredListings.map(listing => listing.serviceProvider.provider_id);
             
             // First, get all active appointments for all providers on the requested date
             const activeAppointments = await prisma.appointment.findMany({
@@ -2159,7 +2236,8 @@ export const getServiceListingsForCustomer = async (req, res) => {
             });
             
             // Filter service listings to only include providers with available slots
-            filteredListings = serviceListings.filter(listing => {
+            // Use filteredListings to preserve self-exclusion filter
+            filteredListings = filteredListings.filter(listing => {
                 const providerId = listing.serviceProvider.provider_id;
                 const hasAvailability = availableProviderIds.has(providerId);
                 
@@ -2191,10 +2269,42 @@ export const getServiceListingsForCustomer = async (req, res) => {
             });
         }
 
-        // Format the response with availability information
-        const formattedListings = filteredListings.map(listing => {
+        // Format the response with availability information and distance
+        console.log(`\n🔍 Formatting ${filteredListings.length} service listings...`);
+        if (customerDetails?.exact_location) {
+            console.log(`📍 Customer location: ${customerDetails.exact_location}`);
+        } else {
+            console.log(`⚠️ Customer location not available (not authenticated or no location set)`);
+        }
+        
+        const formattedListings = filteredListings.map((listing, index) => {
             const providerId = listing.serviceProvider.provider_id;
             const availability = availabilityInfo[providerId] || null;
+            
+            console.log(`\n🏪 Provider ${index + 1}/${filteredListings.length}: ${listing.serviceProvider.provider_first_name} ${listing.serviceProvider.provider_last_name}`);
+            console.log(`   Provider ID: ${providerId}`);
+            console.log(`   Provider exact_location: ${listing.serviceProvider.provider_exact_location || 'NOT SET'}`);
+            
+            // Calculate distance if both customer and provider have locations
+            let distanceInfo = null;
+            if (customerDetails?.exact_location && listing.serviceProvider.provider_exact_location) {
+                console.log(`   ✅ Both locations available, calculating distance...`);
+                distanceInfo = calculateCustomerProviderDistance(
+                    customerDetails.exact_location,
+                    listing.serviceProvider.provider_exact_location
+                );
+                if (distanceInfo) {
+                    console.log(`   📍 Distance: ${distanceInfo.formatted} (${distanceInfo.category})`);
+                } else {
+                    console.log(`   ❌ Distance calculation failed`);
+                }
+            } else {
+                if (!customerDetails?.exact_location) {
+                    console.log(`   ⚠️ Skipping distance calculation - customer location missing`);
+                } else {
+                    console.log(`   ⚠️ Skipping distance calculation - provider location missing`);
+                }
+            }
             
             return {
                 id: listing.service_id,
@@ -2208,13 +2318,23 @@ export const getServiceListingsForCustomer = async (req, res) => {
                     userName: listing.serviceProvider.provider_userName,
                     rating: listing.serviceProvider.provider_rating || 0,
                     location: listing.serviceProvider.provider_location,
+                    exact_location: listing.serviceProvider.provider_exact_location, // Include exact location for mobile app
                     profilePhoto: listing.serviceProvider.provider_profile_photo
                 },
+                categories: listing.specific_services.map(service => service.category.category_name),
                 specificServices: listing.specific_services.map(service => ({
                     id: service.specific_service_id,
                     title: service.specific_service_title,
                     description: service.specific_service_description
                 })),
+                // Include distance information if available
+                ...(distanceInfo && {
+                    distance: {
+                        km: distanceInfo.distance,
+                        formatted: distanceInfo.formatted,
+                        category: distanceInfo.category // 'very-close', 'nearby', 'moderate', 'far'
+                    }
+                }),
                 // Include availability information if date filtering was applied
                 ...(date && availability && {
                     availability: {
@@ -2230,6 +2350,37 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 })
             };
         });
+
+        // Sort by distance if customer has location (nearest first)
+        if (customerDetails?.exact_location) {
+            console.log(`\n🔄 Sorting ${formattedListings.length} listings by distance...`);
+            
+            formattedListings.sort((a, b) => {
+                // Providers with distance info come first
+                if (a.distance && !b.distance) return -1;
+                if (!a.distance && b.distance) return 1;
+                
+                // Both have distance - sort by distance
+                if (a.distance && b.distance) {
+                    return a.distance.km - b.distance.km;
+                }
+                
+                // Neither has distance - keep original order (by rating/price)
+                return 0;
+            });
+            
+            console.log('✅ Service listings sorted by distance (nearest first)');
+            console.log('\n📋 Final sorted order:');
+            formattedListings.forEach((listing, index) => {
+                if (listing.distance) {
+                    console.log(`   ${index + 1}. ${listing.provider.name} - ${listing.distance.formatted} (${listing.distance.category})`);
+                } else {
+                    console.log(`   ${index + 1}. ${listing.provider.name} - No distance info`);
+                }
+            });
+        } else {
+            console.log('\n⚠️ Skipping distance-based sorting (customer not authenticated or no location)');
+        }
 
         // Prepare response with enhanced information
         const response = {
@@ -2628,6 +2779,55 @@ export const createAppointment = async (req, res) => {
             });
         }
 
+        // ✅ PREVENT SELF-BOOKING: Check if customer is trying to book with themselves
+        const customer = await prisma.user.findUnique({
+            where: { user_id: parseInt(customerId) },
+            select: {
+                first_name: true,
+                last_name: true,
+                email: true,
+                phone_number: true
+            }
+        });
+
+        const provider = await prisma.serviceProviderDetails.findUnique({
+            where: { provider_id: parseInt(provider_id) },
+            select: {
+                provider_first_name: true,
+                provider_last_name: true,
+                provider_email: true,
+                provider_phone_number: true
+            }
+        });
+
+        if (!customer || !provider) {
+            return res.status(404).json({
+                success: false,
+                message: 'Customer or provider not found'
+            });
+        }
+
+        // Check if they are the same person
+        const customerFullName = `${customer.first_name} ${customer.last_name}`.toLowerCase().trim();
+        const providerFullName = `${provider.provider_first_name} ${provider.provider_last_name}`.toLowerCase().trim();
+        const namesMatch = customerFullName === providerFullName;
+        const emailMatches = customer.email.toLowerCase().trim() === provider.provider_email.toLowerCase().trim();
+        const phoneMatches = customer.phone_number.trim() === provider.provider_phone_number.trim();
+
+        if (namesMatch && (emailMatches || phoneMatches)) {
+            console.log('🚫 SELF-BOOKING PREVENTED:', {
+                customer: customerFullName,
+                provider: providerFullName,
+                email_match: emailMatches,
+                phone_match: phoneMatches
+            });
+            return res.status(400).json({
+                success: false,
+                message: 'You cannot book an appointment with yourself. Please select a different service provider.',
+                reason: 'self_booking_not_allowed'
+            });
+        }
+
         // ✅ NEW: Check booking limit - customer can only have 3 scheduled appointments at a time
         // Only 'scheduled' status counts toward the limit
         // Statuses that don't count: 'on the way', 'in-progress', 'finished', 'completed', 'cancelled'
@@ -2646,6 +2846,43 @@ export const createAppointment = async (req, res) => {
                 message: 'Booking limit reached. You can only have 3 scheduled appointments at a time. Please wait for one of your appointments to change status (on the way, in-progress, completed, or cancelled) before booking again.',
                 currentScheduledCount: customerScheduledAppointments,
                 maxAllowed: 3
+            });
+        }
+
+        // ✅ NEW: Prevent multiple bookings on the same date - customer can only book once per day
+        const requestedDate = new Date(scheduled_date);
+        const startOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate());
+        const endOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate() + 1);
+
+        const existingBookingOnDate = await prisma.appointment.findFirst({
+            where: {
+                customer_id: parseInt(customerId),
+                scheduled_date: {
+                    gte: startOfDay,
+                    lt: endOfDay
+                },
+                appointment_status: {
+                    notIn: ['Cancelled', 'cancelled'] // Don't count cancelled appointments
+                }
+            }
+        });
+
+        if (existingBookingOnDate) {
+            console.log('🚫 DAILY BOOKING LIMIT EXCEEDED:', {
+                customer_id: customerId,
+                requested_date: scheduled_date,
+                existing_appointment_id: existingBookingOnDate.appointment_id,
+                existing_appointment_time: existingBookingOnDate.scheduled_date
+            });
+            return res.status(400).json({
+                success: false,
+                message: 'You already have an appointment scheduled on this date. You can only book one appointment per day.',
+                reason: 'daily_booking_limit_exceeded',
+                existing_appointment: {
+                    appointment_id: existingBookingOnDate.appointment_id,
+                    scheduled_date: existingBookingOnDate.scheduled_date,
+                    status: existingBookingOnDate.appointment_status
+                }
             });
         }
 

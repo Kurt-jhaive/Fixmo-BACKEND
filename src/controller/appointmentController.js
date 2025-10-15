@@ -320,6 +320,64 @@ export const createAppointment = async (req, res) => {
             });
         }
 
+        // ✅ PREVENT SELF-BOOKING: Check if customer is trying to book with themselves
+        const customerFullName = `${customer.first_name} ${customer.last_name}`.toLowerCase().trim();
+        const providerFullName = `${provider.provider_first_name} ${provider.provider_last_name}`.toLowerCase().trim();
+        const namesMatch = customerFullName === providerFullName;
+        const emailMatches = customer.email.toLowerCase().trim() === provider.provider_email.toLowerCase().trim();
+        const phoneMatches = customer.phone_number.trim() === provider.provider_phone_number.trim();
+
+        if (namesMatch && (emailMatches || phoneMatches)) {
+            console.log('🚫 SELF-BOOKING PREVENTED:', {
+                customer: customerFullName,
+                provider: providerFullName,
+                email_match: emailMatches,
+                phone_match: phoneMatches
+            });
+            return res.status(400).json({
+                success: false,
+                message: 'You cannot book an appointment with yourself. Please select a different service provider.',
+                reason: 'self_booking_not_allowed'
+            });
+        }
+
+        // ✅ NEW: Prevent multiple bookings on the same date - customer can only book once per day
+        const requestedDate = new Date(scheduled_date);
+        const startOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate());
+        const endOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate() + 1);
+
+        const existingBookingOnDate = await prisma.appointment.findFirst({
+            where: {
+                customer_id: parseInt(customer_id),
+                scheduled_date: {
+                    gte: startOfDay,
+                    lt: endOfDay
+                },
+                appointment_status: {
+                    notIn: ['Cancelled', 'cancelled'] // Don't count cancelled appointments
+                }
+            }
+        });
+
+        if (existingBookingOnDate) {
+            console.log('🚫 DAILY BOOKING LIMIT EXCEEDED:', {
+                customer_id,
+                requested_date: scheduled_date,
+                existing_appointment_id: existingBookingOnDate.appointment_id,
+                existing_appointment_time: existingBookingOnDate.scheduled_date
+            });
+            return res.status(400).json({
+                success: false,
+                message: 'You already have an appointment scheduled on this date. You can only book one appointment per day.',
+                reason: 'daily_booking_limit_exceeded',
+                existing_appointment: {
+                    appointment_id: existingBookingOnDate.appointment_id,
+                    scheduled_date: existingBookingOnDate.scheduled_date,
+                    status: existingBookingOnDate.appointment_status
+                }
+            });
+        }
+
         // Validate scheduled date
         const scheduledDateTime = new Date(scheduled_date);
         if (isNaN(scheduledDateTime.getTime())) {
