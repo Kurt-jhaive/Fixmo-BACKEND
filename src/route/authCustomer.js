@@ -1,5 +1,6 @@
 import express from 'express';
 import multer from 'multer';
+import jwt from 'jsonwebtoken';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { requireCustomerSession } from '../middleware/sessionAuth.js';
 import {
@@ -49,21 +50,47 @@ const router = express.Router();
 const optionalAuth = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   
+  console.log('\n🔐 ========== OPTIONAL AUTH MIDDLEWARE ==========');
+  console.log('Authorization header:', authHeader ? 'Present ✓' : 'Missing ✗');
+  
   if (!authHeader) {
     // No token provided, continue without authentication
+    console.log('⚠️ No Authorization header - continuing as unauthenticated request\n');
     return next();
   }
 
   // Token provided, try to verify it
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+  console.log('Token format:', authHeader.startsWith('Bearer ') ? 'Bearer token ✓' : 'Raw token');
+  console.log('Token (first 20 chars):', token.substring(0, 20) + '...');
   
   try {
-    const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.userId || decoded.id;
     req.userType = decoded.userType;
+    console.log('✅ Token verified successfully!');
+    console.log('   User ID:', req.userId);
+    console.log('   User Type:', req.userType);
+    console.log('   Token issued at:', decoded.iat ? new Date(decoded.iat * 1000).toISOString() : 'unknown');
+    console.log('   Token expires at:', decoded.exp ? new Date(decoded.exp * 1000).toISOString() : 'no expiry');
+    console.log('================================================\n');
   } catch (err) {
     // Invalid token, but don't fail - just continue without auth
+    console.log('❌ Token verification FAILED!');
+    console.log('   Error:', err.message);
+    if (err.name === 'TokenExpiredError') {
+      console.log('   Reason: TOKEN EXPIRED');
+      console.log('   Expired at:', err.expiredAt);
+      console.log('   ⚠️ USER NEEDS TO LOGOUT AND LOGIN AGAIN');
+    } else if (err.name === 'JsonWebTokenError') {
+      console.log('   Reason: INVALID TOKEN (wrong secret or malformed)');
+      console.log('   ⚠️ JWT_SECRET might have changed, or token is corrupted');
+      console.log('   ⚠️ USER NEEDS TO LOGOUT AND LOGIN AGAIN');
+    } else {
+      console.log('   Reason:', err.name);
+    }
+    console.log('   Continuing as unauthenticated request');
+    console.log('================================================\n');
   }
   
   next();
