@@ -63,24 +63,44 @@ export const submitReport = async (req, res) => {
         }
 
         // Handle image uploads to Cloudinary (optional)
+        // Log received files for debugging
+        console.log(`📥 Received ${req.files ? req.files.length : 0} file(s)`);
+        if (req.files && req.files.length > 0) {
+            req.files.forEach((file, index) => {
+                console.log(`  File ${index + 1}: ${file.originalname} (${file.size} bytes, ${file.mimetype})`);
+            });
+        }
+
         let attachment_urls = null;
         if (req.files && req.files.length > 0) {
-            try {
-                const uploadPromises = req.files.map(file => 
-                    uploadToCloudinary(
+            const uploadedUrls = [];
+            console.log(`📤 Starting upload of ${req.files.length} image(s) to Cloudinary...`);
+            
+            // Upload each file individually to handle errors gracefully
+            for (let i = 0; i < req.files.length; i++) {
+                const file = req.files[i];
+                try {
+                    console.log(`  📷 Uploading image ${i + 1}/${req.files.length}: ${file.originalname}...`);
+                    
+                    const url = await uploadToCloudinary(
                         file.buffer,
                         'fixmo/reports',
-                        `report_${Date.now()}_${file.originalname}`
-                    )
-                );
-                attachment_urls = await Promise.all(uploadPromises);
-                console.log(`✅ Uploaded ${attachment_urls.length} images to Cloudinary`);
-            } catch (uploadError) {
-                console.error('❌ Error uploading images to Cloudinary:', uploadError);
-                return res.status(500).json({
-                    success: false,
-                    message: 'Error uploading images. Please try again.'
-                });
+                        `report_${Date.now()}_${Math.random().toString(36).substring(7)}_${i}`
+                    );
+                    
+                    uploadedUrls.push(url);
+                    console.log(`  ✅ Image ${i + 1} uploaded: ${url}`);
+                } catch (uploadError) {
+                    console.error(`  ❌ Error uploading image ${i + 1}:`, uploadError.message);
+                    // Continue with other images even if one fails
+                }
+            }
+            
+            if (uploadedUrls.length > 0) {
+                attachment_urls = uploadedUrls;
+                console.log(`✅ Successfully uploaded ${uploadedUrls.length}/${req.files.length} images`);
+            } else {
+                console.log('⚠️  No images uploaded successfully, continuing without attachments');
             }
         }
 

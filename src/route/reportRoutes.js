@@ -35,7 +35,45 @@ const upload = multer({
  * @desc    Submit a new report with optional image attachments (public - no auth required)
  * @access  Public
  */
-router.post('/', upload.array('images', 5), submitReport);
+router.post('/', (req, res, next) => {
+    upload.array('images', 5)(req, res, (err) => {
+        if (err instanceof multer.MulterError) {
+            // Multer error occurred
+            console.error('❌ Multer error:', err);
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'File too large. Maximum size is 5MB per file.'
+                });
+            }
+            if (err.code === 'LIMIT_FILE_COUNT') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Too many files. Maximum is 5 files.'
+                });
+            }
+            if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Unexpected field name. Use "images" as the field name.'
+                });
+            }
+            return res.status(400).json({
+                success: false,
+                message: `Upload error: ${err.message}`
+            });
+        } else if (err) {
+            // Other errors
+            console.error('❌ Upload error:', err);
+            return res.status(400).json({
+                success: false,
+                message: err.message || 'Error uploading files'
+            });
+        }
+        // No error, proceed to controller
+        next();
+    });
+}, submitReport);
 
 /**
  * @route   GET /api/reports/statistics
