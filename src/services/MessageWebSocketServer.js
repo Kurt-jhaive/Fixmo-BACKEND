@@ -298,23 +298,70 @@ class MessageWebSocketServer {
                 }
             });
 
-            // Check if ANY appointment has an active warranty
+            // Auto-complete expired in-warranty appointments in real-time
             const now = new Date();
-            const hasActiveWarranty = activeAppointments.some(apt => {
-                if (apt.appointment_status === 'in-warranty' || apt.appointment_status === 'backjob') {
-                    // Check if warranty has not expired
-                    if (apt.warranty_expires_at) {
+            const expiredAppointmentIds = [];
+            
+            for (const apt of activeAppointments) {
+                if ((apt.appointment_status === 'in-warranty' || apt.appointment_status === 'backjob') && 
+                    apt.warranty_expires_at && 
+                    now > apt.warranty_expires_at) {
+                    expiredAppointmentIds.push(apt.appointment_id);
+                }
+            }
+
+            // Auto-complete expired appointments
+            if (expiredAppointmentIds.length > 0) {
+                await prisma.appointment.updateMany({
+                    where: { 
+                        appointment_id: { in: expiredAppointmentIds }
+                    },
+                    data: { 
+                        appointment_status: 'completed',
+                        completed_at: now
+                    }
+                });
+                
+                // Also cancel related backjob applications
+                await prisma.backjobApplication.updateMany({
+                    where: { 
+                        appointment_id: { in: expiredAppointmentIds },
+                        status: { in: ['approved', 'pending'] }
+                    },
+                    data: { 
+                        status: 'cancelled-by-admin',
+                        admin_notes: 'Cancelled due to warranty expiration'
+                    }
+                });
+                
+                console.log(`🔄 Auto-completed ${expiredAppointmentIds.length} expired appointment(s) in conversation ${conversationId}`);
+            }
+
+            // Re-check for active appointments after auto-completion
+            const stillActiveAppointments = activeAppointments.filter(apt => 
+                !expiredAppointmentIds.includes(apt.appointment_id)
+            );
+
+            // Check if there are ANY active appointments (not just warranty-based)
+            const hasActiveAppointment = stillActiveAppointments.length > 0 && stillActiveAppointments.some(apt => {
+                // Allow messaging for ANY active appointment status
+                const activeStatuses = ['scheduled', 'confirmed', 'On the Way', 'in-progress', 'finished', 'in-warranty', 'backjob'];
+                
+                if (activeStatuses.includes(apt.appointment_status)) {
+                    // For in-warranty/backjob, also check expiry
+                    if ((apt.appointment_status === 'in-warranty' || apt.appointment_status === 'backjob') && apt.warranty_expires_at) {
                         return now <= apt.warranty_expires_at;
                     }
-                    // If in-warranty but no expiry date, allow messaging
+                    // For all other active statuses, allow messaging
                     return true;
                 }
-                // For other active statuses (scheduled, in-progress, etc.), allow messaging
-                return true;
+                return false;
             });
 
-            if (!hasActiveWarranty) {
-                throw new Error('All warranties have expired for this conversation');
+            // Only block if conversation is explicitly closed AND there are no active appointments
+            // Don't auto-close - just check if messaging is allowed
+            if (conversation.status === 'closed' && !hasActiveAppointment) {
+                throw new Error('This conversation has been closed - no active appointments found');
             }
 
             const roomName = `conversation_${conversationId}`;

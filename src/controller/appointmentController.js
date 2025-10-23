@@ -8,6 +8,9 @@ const prisma = new PrismaClient();
 // Get all appointments (with filtering and pagination)
 export const getAllAppointments = async (req, res) => {
     try {
+        // NOTE: Auto-complete logic moved to hourly cron job for better performance
+        // Running this on every request was causing Railway backend issues
+        
         const { 
             page = 1, 
             limit = 10, 

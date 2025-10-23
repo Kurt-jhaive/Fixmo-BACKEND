@@ -215,42 +215,38 @@ class AvailabilityController {
                 });
             }
 
-            // Only check for truly active appointments (scheduled, confirmed, in-progress)
-            // Allow deletion if appointments are: completed, cancelled, no-show, in-warranty, backjob, etc.
-            const activeAppointments = availability.appointments.filter(appt => 
-                ['scheduled', 'confirmed', 'in-progress'].includes(appt.appointment_status)
-            );
+            // Check if there are ANY appointments linked to this slot
+            if (availability.appointments.length > 0) {
+                const activeAppointments = availability.appointments.filter(appt => 
+                    ['scheduled', 'confirmed', 'in-progress'].includes(appt.appointment_status)
+                );
 
-            // Cannot delete if there are active appointments
-            if (activeAppointments.length > 0) {
+                const inactiveAppointments = availability.appointments.filter(appt => 
+                    !['scheduled', 'confirmed', 'in-progress'].includes(appt.appointment_status)
+                );
+
                 return res.status(409).json({
                     success: false,
-                    message: `Cannot delete availability slot with ${activeAppointments.length} active appointment(s). Please cancel or complete the appointments first.`,
-                    conflictingAppointments: activeAppointments.map(appt => ({
-                        appointment_id: appt.appointment_id,
-                        scheduled_date: appt.scheduled_date,
-                        status: appt.appointment_status
-                    }))
-                });
-            }
-
-            // Has appointments but all are inactive (completed, cancelled, in-warranty, etc.)
-            // Unlink them and delete the slot
-            if (availability.appointments.length > 0) {
-                // Set appointments' availability_id to null
-                await prisma.appointment.updateMany({
-                    where: {
-                        availability_id: parseInt(availabilityId)
-                    },
-                    data: {
-                        availability_id: null
+                    message: `Cannot delete availability slot with ${availability.appointments.length} appointment(s). This slot has ${activeAppointments.length} active and ${inactiveAppointments.length} completed/cancelled appointments.`,
+                    reason: 'Appointments are permanently linked to availability slots for record-keeping',
+                    suggestion: 'Instead of deleting, you can deactivate this slot by toggling it off',
+                    appointments: {
+                        total: availability.appointments.length,
+                        active: activeAppointments.map(appt => ({
+                            appointment_id: appt.appointment_id,
+                            scheduled_date: appt.scheduled_date,
+                            status: appt.appointment_status
+                        })),
+                        inactive: inactiveAppointments.map(appt => ({
+                            appointment_id: appt.appointment_id,
+                            scheduled_date: appt.scheduled_date,
+                            status: appt.appointment_status
+                        }))
                     }
                 });
-
-                console.log(`Unlinked ${availability.appointments.length} inactive appointment(s) from slot ${availabilityId}`);
             }
 
-            // Now safe to delete the availability slot
+            // No appointments - safe to delete the availability slot
             await prisma.availability.delete({
                 where: {
                     availability_id: parseInt(availabilityId)
@@ -819,6 +815,143 @@ class AvailabilityController {
             res.status(500).json({
                 success: false,
                 message: 'Error getting availability summary'
+            });
+        }
+    }
+
+    // Track which specific slots are booked on a given day
+    static async getBookedSlotsForDay(req, res) {
+        try {
+            const providerId = req.userId;
+            const { dayOfWeek, date } = req.query;
+            
+            if (!providerId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication required'
+                });
+            }
+
+            // Validation
+            if (!dayOfWeek) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'dayOfWeek query parameter is required (e.g., ?dayOfWeek=Monday)'
+                });
+            }
+
+            // Validate day of week
+            const validDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            if (!validDays.includes(dayOfWeek)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid dayOfWeek. Must be one of: ${validDays.join(', ')}`
+                });
+            }
+
+            // Build query filter for appointments
+            let appointmentFilter = {
+                appointment_status: {
+                    in: ['scheduled', 'confirmed', 'in-progress']
+                }
+            };
+
+            // If specific date provided, filter appointments by that date
+            if (date) {
+                const targetDate = new Date(date);
+                if (isNaN(targetDate.getTime())) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Invalid date format. Use YYYY-MM-DD'
+                    });
+                }
+                appointmentFilter.scheduled_date = {
+                    gte: new Date(targetDate.setHours(0, 0, 0, 0)),
+                    lt: new Date(targetDate.setHours(23, 59, 59, 999))
+                };
+            }
+
+            // Get all availability slots for the day with their appointments
+            const availabilitySlots = await prisma.availability.findMany({
+                where: {
+                    provider_id: providerId,
+                    dayOfWeek: dayOfWeek
+                },
+                include: {
+                    appointments: {
+                        where: appointmentFilter,
+                        include: {
+                            customer: {
+                                select: {
+                                    user_id: true,
+                                    first_name: true,
+                                    last_name: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            scheduled_date: 'asc'
+                        }
+                    }
+                },
+                orderBy: {
+                    startTime: 'asc'
+                }
+            });
+
+            // Calculate statistics
+            const totalSlots = availabilitySlots.length;
+            const activeSlots = availabilitySlots.filter(slot => slot.availability_isActive).length;
+            const bookedSlots = availabilitySlots.filter(slot => slot.appointments.length > 0).length;
+            const availableSlots = availabilitySlots.filter(
+                slot => slot.availability_isActive && slot.appointments.length === 0
+            ).length;
+
+            // Format response
+            const slotsData = availabilitySlots.map(slot => ({
+                availability_id: slot.availability_id,
+                startTime: slot.startTime,
+                endTime: slot.endTime,
+                isActive: slot.availability_isActive,
+                isBooked: slot.appointments.length > 0,
+                bookingCount: slot.appointments.length,
+                appointments: slot.appointments.map(appt => ({
+                    appointment_id: appt.appointment_id,
+                    scheduled_date: appt.scheduled_date,
+                    status: appt.appointment_status,
+                    customer: {
+                        id: appt.customer.user_id,
+                        name: `${appt.customer.first_name} ${appt.customer.last_name}`
+                    }
+                })),
+                status: !slot.availability_isActive 
+                    ? 'Inactive' 
+                    : slot.appointments.length > 0 
+                        ? 'Booked' 
+                        : 'Available'
+            }));
+
+            res.json({
+                success: true,
+                data: {
+                    dayOfWeek,
+                    date: date || 'All dates',
+                    summary: {
+                        totalSlots,
+                        activeSlots,
+                        bookedSlots,
+                        availableSlots
+                    },
+                    slots: slotsData
+                }
+            });
+
+        } catch (error) {
+            console.error('Error getting booked slots for day:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error getting booked slots',
+                error: error.message
             });
         }
     }

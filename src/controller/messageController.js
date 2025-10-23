@@ -124,8 +124,8 @@ class MessageController {
                 take: parseInt(limit)
             });
 
-            // Check and update conversation statuses based on appointment status
-            const conversationsToClose = [];
+            // Check appointment status for each conversation (but don't auto-close them)
+            // Auto-closing is now handled only when trying to send messages
             const allConversations = [];
 
             for (const conv of conversations) {
@@ -133,25 +133,12 @@ class MessageController {
                     // Check the appointment status for this conversation
                     const appointmentStatus = await checkAppointmentStatus(conv.customer_id, conv.provider_id);
                     
-                    // If appointment is completed or cancelled, mark for closing
-                    if (appointmentStatus.hasAppointment && !appointmentStatus.canMessage) {
-                        conversationsToClose.push(conv.conversation_id);
-                        
-                        // Include in results if includeCompleted is true
-                        allConversations.push({
-                            ...conv,
-                            appointment_status: appointmentStatus.appointmentStatus || 'completed',
-                            is_warranty_active: appointmentStatus.isInWarranty || false,
-                            can_message: appointmentStatus.canMessage || false
-                        });
-                    } else {
-                        allConversations.push({
-                            ...conv,
-                            appointment_status: appointmentStatus.appointmentStatus || 'unknown',
-                            is_warranty_active: appointmentStatus.isInWarranty || false,
-                            can_message: appointmentStatus.canMessage || false
-                        });
-                    }
+                    allConversations.push({
+                        ...conv,
+                        appointment_status: appointmentStatus.appointmentStatus || 'unknown',
+                        is_warranty_active: appointmentStatus.isInWarranty || false,
+                        can_message: appointmentStatus.canMessage || false
+                    });
                 } catch (error) {
                     console.error(`Error checking appointment status for conversation ${conv.conversation_id}:`, error);
                     // If we can't check the status, keep the conversation
@@ -164,27 +151,11 @@ class MessageController {
                 }
             }
 
-            // Close conversations for completed appointments
-            if (conversationsToClose.length > 0) {
-                await prisma.conversation.updateMany({
-                    where: {
-                        conversation_id: { in: conversationsToClose }
-                    },
-                    data: {
-                        status: 'closed',
-                        updated_at: new Date()
-                    }
-                });
-                console.log(`🔒 Auto-closed ${conversationsToClose.length} conversations for completed appointments`);
-            }
-
-            // Filter conversations based on includeCompleted parameter
+            // Filter conversations based on includeCompleted parameter and can_message status
             let finalConversations = allConversations;
             if (includeCompleted !== 'true' && includeCompleted !== true) {
-                // Only show conversations that weren't marked to close
-                finalConversations = allConversations.filter(conv => 
-                    !conversationsToClose.includes(conv.conversation_id)
-                );
+                // Only show conversations that can still message
+                finalConversations = allConversations.filter(conv => conv.can_message === true);
             }
 
             // Format conversations
@@ -563,14 +534,45 @@ class MessageController {
                             provider_last_name: true,
                             provider_profile_photo: true
                         }
+                    },
+                    messages: {
+                        select: {
+                            message_id: true,
+                            content: true,
+                            message_type: true,
+                            sender_type: true,
+                            is_read: true,
+                            created_at: true
+                        },
+                        orderBy: { created_at: 'desc' },
+                        take: 1
                     }
                 }
             });
 
+            // Check appointment status for this conversation
+            const appointmentStatus = await checkAppointmentStatus(
+                conversationWithDetails.customer_id, 
+                conversationWithDetails.provider_id
+            );
+
+            // Format response with additional fields that frontend expects
+            const formattedConversation = {
+                ...conversationWithDetails,
+                last_message: conversationWithDetails.messages[0] || null,
+                unread_count: 0, // New conversation has no unread messages
+                appointment_status: appointmentStatus.appointmentStatus || 'scheduled',
+                is_warranty_active: appointmentStatus.isInWarranty || false,
+                can_message: appointmentStatus.canMessage !== false
+            };
+
+            // Remove the messages array since we only need last_message
+            delete formattedConversation.messages;
+
             res.status(201).json({
                 success: true,
                 message: 'Conversation ready',
-                data: conversationWithDetails
+                data: formattedConversation
             });
 
         } catch (error) {

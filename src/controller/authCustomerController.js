@@ -2214,7 +2214,34 @@ export const getServiceListingsForCustomer = async (req, res) => {
                         provider_exact_location: true, // For distance calculation
                         provider_rating: true,
                         provider_isVerified: true,
-                        provider_profile_photo: true
+                        provider_profile_photo: true,
+                        provider_availability: {
+                            where: {
+                                availability_isActive: true
+                            },
+                            select: {
+                                availability_id: true,
+                                dayOfWeek: true,
+                                startTime: true,
+                                endTime: true,
+                                availability_isActive: true,
+                                _count: {
+                                    select: {
+                                        appointments: {
+                                            where: {
+                                                appointment_status: {
+                                                    in: ['scheduled', 'confirmed', 'in-progress']
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            orderBy: [
+                                { dayOfWeek: 'asc' },
+                                { startTime: 'asc' }
+                            ]
+                        }
                     }
                 },
                 specific_services: {
@@ -2283,7 +2310,7 @@ export const getServiceListingsForCustomer = async (req, res) => {
             // Get all provider IDs from the listings (use filteredListings after self-exclusion)
             const providerIds = filteredListings.map(listing => listing.serviceProvider.provider_id);
             
-            // First, get all active appointments for all providers on the requested date
+            // Get all active appointments for all providers on the requested date WITH availability_id
             const activeAppointments = await prisma.appointment.findMany({
                 where: {
                     provider_id: { in: providerIds },
@@ -2297,14 +2324,17 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 },
                 select: {
                     provider_id: true,
+                    availability_id: true,
                     appointment_status: true,
                     scheduled_date: true
                 }
             });
             
-            // Create a set of provider IDs that have active appointments on this date
-            const providersWithActiveAppointments = new Set(
-                activeAppointments.map(apt => apt.provider_id)
+            // Create a set of availability_ids that are booked (not provider IDs)
+            const bookedAvailabilityIds = new Set(
+                activeAppointments
+                    .filter(apt => apt.availability_id !== null)
+                    .map(apt => apt.availability_id)
             );
             
             // Get availability data for all providers for the requested day of week
@@ -2320,8 +2350,8 @@ export const getServiceListingsForCustomer = async (req, res) => {
             const availableProviderIds = new Set();
             
             providerAvailability.forEach(availability => {
-                // Check if this provider has any active appointments on the requested date
-                const hasActiveAppointments = providersWithActiveAppointments.has(availability.provider_id);
+                // Check if THIS SPECIFIC SLOT is booked
+                const isSlotBooked = bookedAvailabilityIds.has(availability.availability_id);
                 const isPastDate = requestedDate < new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
                 
                 // Check if booking is still allowed (for today only - until 3 PM)
@@ -2335,13 +2365,13 @@ export const getServiceListingsForCustomer = async (req, res) => {
                     isBookingAllowed = currentHour < 15;
                 }
                 
-                // Provider slot is available if:
+                // This slot is available if:
                 // 1. Not a past date
                 // 2. Booking is still allowed (before 3 PM if today)
-                // 3. No active appointments for this provider on this date
-                const isAvailable = !isPastDate && isBookingAllowed && !hasActiveAppointments;
+                // 3. This specific slot is NOT booked
+                const isSlotAvailable = !isPastDate && isBookingAllowed && !isSlotBooked;
                 
-                if (isAvailable) {
+                if (isSlotAvailable) {
                     availableProviderIds.add(availability.provider_id);
                 }
                 
@@ -2357,7 +2387,7 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 }
                 
                 availabilityInfo[availability.provider_id].totalSlots++;
-                if (isAvailable) {
+                if (isSlotAvailable) {
                     availabilityInfo[availability.provider_id].availableSlots++;
                     availabilityInfo[availability.provider_id].hasAvailability = true;
                     // Add the available slot details including availability_id
@@ -2367,7 +2397,7 @@ export const getServiceListingsForCustomer = async (req, res) => {
                         endTime: availability.endTime,
                         dayOfWeek: availability.dayOfWeek
                     });
-                } else if (hasActiveAppointments) {
+                } else if (isSlotBooked) {
                     availabilityInfo[availability.provider_id].bookedSlots++;
                 }
             });
@@ -2456,7 +2486,27 @@ export const getServiceListingsForCustomer = async (req, res) => {
                     rating: listing.serviceProvider.provider_rating || 0,
                     location: listing.serviceProvider.provider_location,
                     exact_location: listing.serviceProvider.provider_exact_location, // Include exact location for mobile app
-                    profilePhoto: listing.serviceProvider.provider_profile_photo
+                    profilePhoto: listing.serviceProvider.provider_profile_photo,
+                    // Add available time slots
+                    available_time_slots: listing.serviceProvider.provider_availability ? 
+                        listing.serviceProvider.provider_availability.map(slot => {
+                            const totalBookings = slot._count?.appointments || 0;
+                            const startHour = parseInt(slot.startTime.split(':')[0]);
+                            const endHour = parseInt(slot.endTime.split(':')[0]);
+                            const totalSlots = endHour - startHour;
+                            const availableSlots = Math.max(0, totalSlots - totalBookings);
+                            
+                            return {
+                                availability_id: slot.availability_id,
+                                dayOfWeek: slot.dayOfWeek,
+                                startTime: slot.startTime,
+                                endTime: slot.endTime,
+                                isActive: slot.availability_isActive,
+                                totalBookings: totalBookings,
+                                estimatedAvailableSlots: availableSlots,
+                                isFullyBooked: availableSlots === 0
+                            };
+                        }) : []
                 },
                 categories: listing.specific_services.map(service => service.category.category_name),
                 specificServices: listing.specific_services.map(service => ({

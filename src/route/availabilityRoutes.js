@@ -17,6 +17,9 @@ router.get('/summary', AvailabilityController.getAvailabilitySummary);
 // GET /api/availability/day-status - Get day availability status
 router.get('/day-status', AvailabilityController.getDayAvailabilityStatus);
 
+// GET /api/availability/booked-slots - Get booked slots for specific day
+router.get('/booked-slots', AvailabilityController.getBookedSlotsForDay);
+
 // GET /api/availability - Get provider's availability
 router.get('/', AvailabilityController.getProviderAvailability);
 
