@@ -197,11 +197,14 @@ class AvailabilityController {
                 });
             }
 
-            // Check if the availability belongs to the provider
+            // Check if the availability belongs to the provider and get all appointments
             const availability = await prisma.availability.findFirst({
                 where: {
                     availability_id: parseInt(availabilityId),
                     provider_id: providerId
+                },
+                include: {
+                    appointments: true // Get all appointments
                 }
             });
 
@@ -212,33 +215,531 @@ class AvailabilityController {
                 });
             }
 
-            // Check if the availability is booked
-            if (availability.availability_isBooked) {
-                return res.status(400).json({
+            // Only check for truly active appointments (scheduled, confirmed, in-progress)
+            // Allow deletion if appointments are: completed, cancelled, no-show, in-warranty, backjob, etc.
+            const activeAppointments = availability.appointments.filter(appt => 
+                ['scheduled', 'confirmed', 'in-progress'].includes(appt.appointment_status)
+            );
+
+            // Cannot delete if there are active appointments
+            if (activeAppointments.length > 0) {
+                return res.status(409).json({
                     success: false,
-                    message: 'Cannot delete booked availability'
+                    message: `Cannot delete availability slot with ${activeAppointments.length} active appointment(s). Please cancel or complete the appointments first.`,
+                    conflictingAppointments: activeAppointments.map(appt => ({
+                        appointment_id: appt.appointment_id,
+                        scheduled_date: appt.scheduled_date,
+                        status: appt.appointment_status
+                    }))
                 });
             }
 
+            // Has appointments but all are inactive (completed, cancelled, in-warranty, etc.)
+            // Unlink them and delete the slot
+            if (availability.appointments.length > 0) {
+                // Set appointments' availability_id to null
+                await prisma.appointment.updateMany({
+                    where: {
+                        availability_id: parseInt(availabilityId)
+                    },
+                    data: {
+                        availability_id: null
+                    }
+                });
+
+                console.log(`Unlinked ${availability.appointments.length} inactive appointment(s) from slot ${availabilityId}`);
+            }
+
+            // Now safe to delete the availability slot
             await prisma.availability.delete({
                 where: {
                     availability_id: parseInt(availabilityId)
                 }
             });
 
-            console.log(`Deleted availability record ${availabilityId} for provider ${providerId}`);            res.json({
+            console.log(`Deleted availability record ${availabilityId} for provider ${providerId}`);
+
+            res.json({
                 success: true,
-                message: 'Availability deleted successfully'
+                message: 'Availability deleted successfully',
+                action: 'deleted'
             });
 
         } catch (error) {
             console.error('Error deleting availability:', error);
+            
+            // Handle foreign key constraint error
+            if (error.code === 'P2003') {
+                return res.status(409).json({
+                    success: false,
+                    message: 'Cannot delete availability slot with existing appointments. The slot has been deactivated instead.',
+                    error: 'foreign_key_constraint'
+                });
+            }
+            
             res.status(500).json({
                 success: false,
-                message: 'Error deleting availability'
+                message: 'Error deleting availability',
+                error: error.message
             });
         }
-    }    // Get availability summary
+    }
+
+    // Toggle availability for an entire day
+    static async toggleDayAvailability(req, res) {
+        try {
+            console.log('Toggling day availability for provider:', req.userId);
+            console.log('Request body:', req.body);
+            
+            const providerId = req.userId;
+            
+            if (!providerId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication required'
+                });
+            }
+
+            const { dayOfWeek, isActive } = req.body;
+
+            // Validation
+            if (!dayOfWeek) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'dayOfWeek is required'
+                });
+            }
+
+            if (typeof isActive !== 'boolean') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'isActive must be a boolean value (true or false)'
+                });
+            }
+
+            // Validate day of week
+            const validDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            if (!validDays.includes(dayOfWeek)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid dayOfWeek. Must be one of: ${validDays.join(', ')}`
+                });
+            }
+
+            // Get all availability slots for this day
+            const availabilitySlots = await prisma.availability.findMany({
+                where: {
+                    provider_id: providerId,
+                    dayOfWeek: dayOfWeek
+                },
+                include: {
+                    appointments: {
+                        where: {
+                            appointment_status: {
+                                in: ['scheduled', 'confirmed', 'in-progress']
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (availabilitySlots.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    message: `No availability slots found for ${dayOfWeek}. Please add availability first.`
+                });
+            }
+
+            // Check if trying to deactivate a day with active appointments
+            if (!isActive) {
+                const slotsWithAppointments = availabilitySlots.filter(slot => 
+                    slot.appointments && slot.appointments.length > 0
+                );
+
+                if (slotsWithAppointments.length > 0) {
+                    const totalAppointments = slotsWithAppointments.reduce(
+                        (sum, slot) => sum + slot.appointments.length, 
+                        0
+                    );
+
+                    return res.status(409).json({
+                        success: false,
+                        message: `Cannot deactivate ${dayOfWeek}. There are ${totalAppointments} active appointment(s) scheduled for this day.`,
+                        conflictingAppointments: slotsWithAppointments.map(slot => ({
+                            availability_id: slot.availability_id,
+                            startTime: slot.startTime,
+                            endTime: slot.endTime,
+                            appointments: slot.appointments.map(appt => ({
+                                appointment_id: appt.appointment_id,
+                                scheduled_date: appt.scheduled_date,
+                                status: appt.appointment_status
+                            }))
+                        }))
+                    });
+                }
+            }
+
+            // Update all slots for this day
+            const updateResult = await prisma.availability.updateMany({
+                where: {
+                    provider_id: providerId,
+                    dayOfWeek: dayOfWeek
+                },
+                data: {
+                    availability_isActive: isActive
+                }
+            });
+
+            console.log(`${isActive ? 'Activated' : 'Deactivated'} ${updateResult.count} availability slot(s) for ${dayOfWeek}`);
+
+            res.json({
+                success: true,
+                message: `${dayOfWeek} availability ${isActive ? 'activated' : 'deactivated'} successfully`,
+                data: {
+                    dayOfWeek,
+                    isActive,
+                    updatedSlots: updateResult.count,
+                    status: isActive ? 'Bookable' : 'Not bookable'
+                }
+            });
+
+        } catch (error) {
+            console.error('Error toggling day availability:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error toggling day availability',
+                error: error.message
+            });
+        }
+    }
+
+    // Get day availability status
+    static async getDayAvailabilityStatus(req, res) {
+        try {
+            const providerId = req.userId;
+            
+            if (!providerId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication required'
+                });
+            }
+
+            // Get availability grouped by day
+            const allSlots = await prisma.availability.findMany({
+                where: {
+                    provider_id: providerId
+                },
+                orderBy: [
+                    { dayOfWeek: 'asc' },
+                    { startTime: 'asc' }
+                ]
+            });
+
+            // Group by day and calculate status
+            const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            
+            const dayStatus = daysOfWeek.map(day => {
+                const daySlots = allSlots.filter(slot => slot.dayOfWeek === day);
+                
+                if (daySlots.length === 0) {
+                    return {
+                        dayOfWeek: day,
+                        hasSlots: false,
+                        totalSlots: 0,
+                        activeSlots: 0,
+                        inactiveSlots: 0,
+                        isFullyActive: false,
+                        isFullyInactive: false,
+                        status: 'No availability set'
+                    };
+                }
+
+                const activeSlots = daySlots.filter(slot => slot.availability_isActive).length;
+                const inactiveSlots = daySlots.length - activeSlots;
+
+                return {
+                    dayOfWeek: day,
+                    hasSlots: true,
+                    totalSlots: daySlots.length,
+                    activeSlots,
+                    inactiveSlots,
+                    isFullyActive: activeSlots === daySlots.length,
+                    isFullyInactive: activeSlots === 0,
+                    status: activeSlots === daySlots.length 
+                        ? 'Fully available' 
+                        : activeSlots === 0 
+                            ? 'Not available' 
+                            : 'Partially available',
+                    slots: daySlots.map(slot => ({
+                        availability_id: slot.availability_id,
+                        startTime: slot.startTime,
+                        endTime: slot.endTime,
+                        isActive: slot.availability_isActive
+                    }))
+                };
+            });
+
+            res.json({
+                success: true,
+                data: dayStatus
+            });
+
+        } catch (error) {
+            console.error('Error getting day availability status:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error getting day availability status',
+                error: error.message
+            });
+        }
+    }
+
+    // Add time-range based availability for a specific day
+    static async addTimeRangeAvailability(req, res) {
+        try {
+            console.log('Adding time-range availability for provider:', req.userId);
+            console.log('Request body:', req.body);
+            
+            const providerId = req.userId;
+            
+            if (!providerId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication required'
+                });
+            }
+
+            const { dayOfWeek, startTime, endTime } = req.body;
+
+            // Validation
+            if (!dayOfWeek || !startTime || !endTime) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'dayOfWeek, startTime, and endTime are required'
+                });
+            }
+
+            // Validate day of week
+            const validDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            if (!validDays.includes(dayOfWeek)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid dayOfWeek. Must be one of: ${validDays.join(', ')}`
+                });
+            }
+
+            // Validate time format (HH:MM)
+            const timePattern = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+            if (!timePattern.test(startTime) || !timePattern.test(endTime)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid time format. Use HH:MM format (e.g., 09:00, 14:30)'
+                });
+            }
+
+            // Check if end time is after start time
+            if (startTime >= endTime) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'End time must be after start time'
+                });
+            }
+
+            // Check for overlapping availability slots
+            const existingSlots = await prisma.availability.findMany({
+                where: {
+                    provider_id: providerId,
+                    dayOfWeek: dayOfWeek,
+                    availability_isActive: true
+                },
+                include: {
+                    appointments: {
+                        where: {
+                            appointment_status: {
+                                in: ['scheduled', 'confirmed', 'in-progress']
+                            }
+                        }
+                    }
+                },
+                orderBy: {
+                    startTime: 'asc'
+                }
+            });
+
+            // Helper function to check if time ranges overlap
+            const timeRangesOverlap = (start1, end1, start2, end2) => {
+                return start1 < end2 && start2 < end1;
+            };
+
+            // Check for conflicts with existing slots
+            for (const slot of existingSlots) {
+                if (timeRangesOverlap(startTime, endTime, slot.startTime, slot.endTime)) {
+                    // If there are active appointments in this overlapping slot
+                    if (slot.appointments.length > 0) {
+                        return res.status(409).json({
+                            success: false,
+                            message: `Time conflict: You have existing bookings between ${slot.startTime} - ${slot.endTime} on ${dayOfWeek}`,
+                            conflictingSlot: {
+                                availability_id: slot.availability_id,
+                                startTime: slot.startTime,
+                                endTime: slot.endTime,
+                                bookingCount: slot.appointments.length
+                            }
+                        });
+                    }
+                }
+            }
+
+            // Create the new availability slot
+            const newAvailability = await prisma.availability.create({
+                data: {
+                    provider_id: providerId,
+                    dayOfWeek: dayOfWeek,
+                    startTime: startTime,
+                    endTime: endTime,
+                    availability_isActive: true
+                }
+            });
+
+            console.log(`Created new availability slot ${newAvailability.availability_id} for provider ${providerId}`);
+
+            res.status(201).json({
+                success: true,
+                message: 'Time-range availability added successfully',
+                data: newAvailability
+            });
+
+        } catch (error) {
+            console.error('Error adding time-range availability:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error adding availability',
+                error: error.message
+            });
+        }
+    }
+
+    // Check if a specific time range is available for booking
+    static async checkTimeRangeAvailability(req, res) {
+        try {
+            const { providerId } = req.params;
+            const { dayOfWeek, startTime, endTime, date } = req.query;
+
+            // Validation
+            if (!dayOfWeek || !startTime || !endTime) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'dayOfWeek, startTime, and endTime are required'
+                });
+            }
+
+            // Get all availability slots for the provider on that day
+            const availabilitySlots = await prisma.availability.findMany({
+                where: {
+                    provider_id: parseInt(providerId),
+                    dayOfWeek: dayOfWeek,
+                    availability_isActive: true
+                },
+                include: {
+                    appointments: {
+                        where: date ? {
+                            scheduled_date: new Date(date),
+                            appointment_status: {
+                                in: ['scheduled', 'confirmed', 'in-progress']
+                            }
+                        } : {
+                            appointment_status: {
+                                in: ['scheduled', 'confirmed', 'in-progress']
+                            }
+                        }
+                    }
+                },
+                orderBy: {
+                    startTime: 'asc'
+                }
+            });
+
+            // Helper function to check if requested time is within availability slot
+            const isWithinSlot = (reqStart, reqEnd, slotStart, slotEnd) => {
+                return reqStart >= slotStart && reqEnd <= slotEnd;
+            };
+
+            // Helper function to check if time ranges overlap
+            const timeRangesOverlap = (start1, end1, start2, end2) => {
+                return start1 < end2 && start2 < end1;
+            };
+
+            let isAvailable = false;
+            let matchingSlot = null;
+            let conflictingAppointments = [];
+
+            // Check if the requested time range fits within any availability slot
+            for (const slot of availabilitySlots) {
+                if (isWithinSlot(startTime, endTime, slot.startTime, slot.endTime)) {
+                    matchingSlot = slot;
+                    
+                    // Check if there are any conflicting appointments
+                    const conflicts = slot.appointments.filter(appt => {
+                        // Get appointment time from scheduled_date
+                        const apptDate = new Date(appt.scheduled_date);
+                        const apptStartTime = `${String(apptDate.getHours()).padStart(2, '0')}:${String(apptDate.getMinutes()).padStart(2, '0')}`;
+                        
+                        // Assuming appointments last 1 hour (you can adjust this)
+                        const apptEndHour = apptDate.getHours() + 1;
+                        const apptEndTime = `${String(apptEndHour).padStart(2, '0')}:${String(apptDate.getMinutes()).padStart(2, '0')}`;
+                        
+                        return timeRangesOverlap(startTime, endTime, apptStartTime, apptEndTime);
+                    });
+
+                    if (conflicts.length === 0) {
+                        isAvailable = true;
+                        break;
+                    } else {
+                        conflictingAppointments = conflicts;
+                    }
+                }
+            }
+
+            res.json({
+                success: true,
+                data: {
+                    isAvailable,
+                    requestedTimeRange: {
+                        dayOfWeek,
+                        startTime,
+                        endTime,
+                        date
+                    },
+                    matchingSlot: matchingSlot ? {
+                        availability_id: matchingSlot.availability_id,
+                        startTime: matchingSlot.startTime,
+                        endTime: matchingSlot.endTime
+                    } : null,
+                    conflictingAppointments: conflictingAppointments.map(appt => ({
+                        appointment_id: appt.appointment_id,
+                        scheduled_date: appt.scheduled_date,
+                        status: appt.appointment_status
+                    })),
+                    message: isAvailable 
+                        ? 'Time range is available for booking' 
+                        : matchingSlot 
+                            ? `Time range conflicts with ${conflictingAppointments.length} existing appointment(s)`
+                            : 'No availability slot found for the requested time range'
+                }
+            });
+
+        } catch (error) {
+            console.error('Error checking time-range availability:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error checking availability',
+                error: error.message
+            });
+        }
+    }
+
+    // Get availability summary
     static async getAvailabilitySummary(req, res) {
         try {
             const providerId = req.userId;

@@ -1342,7 +1342,7 @@ export const addAppointment = async (req, res) => {
 // Get all service listings (for customer browsing)
 export const getServiceListings = async (req, res) => {
     try {
-        const { provider_id, service_type, location, min_price, max_price } = req.query;
+        const { provider_id, service_type, location, min_price, max_price, include_availability } = req.query;
         
         let whereClause = {};
         
@@ -1356,6 +1356,50 @@ export const getServiceListings = async (req, res) => {
             if (max_price) whereClause.service_startingprice.lte = parseFloat(max_price);
         }
 
+        const includeProviderData = {
+            select: {
+                provider_id: true,
+                provider_first_name: true,
+                provider_last_name: true,
+                provider_email: true,
+                provider_phone_number: true,
+                provider_location: true,
+                provider_rating: true,
+                provider_isVerified: true
+            }
+        };
+
+        // If include_availability is requested, add availability data
+        if (include_availability === 'true') {
+            includeProviderData.select.provider_availability = {
+                where: {
+                    availability_isActive: true
+                },
+                select: {
+                    availability_id: true,
+                    dayOfWeek: true,
+                    startTime: true,
+                    endTime: true,
+                    availability_isActive: true,
+                    _count: {
+                        select: {
+                            appointments: {
+                                where: {
+                                    appointment_status: {
+                                        in: ['scheduled', 'confirmed', 'in-progress']
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                orderBy: [
+                    { dayOfWeek: 'asc' },
+                    { startTime: 'asc' }
+                ]
+            };
+        }
+
         const serviceListings = await prisma.serviceListing.findMany({
             where: whereClause,
             include: {
@@ -1364,18 +1408,7 @@ export const getServiceListings = async (req, res) => {
                         uploadedAt: 'asc'
                     }
                 },
-                serviceProvider: {
-                    select: {
-                        provider_id: true,
-                        provider_first_name: true,
-                        provider_last_name: true,
-                        provider_email: true,
-                        provider_phone_number: true,
-                        provider_location: true,
-                        provider_rating: true,
-                        provider_isVerified: true
-                    }
-                },
+                serviceProvider: includeProviderData,
                 specific_services: {
                     include: {
                         category: true
@@ -1406,6 +1439,41 @@ export const getServiceListings = async (req, res) => {
             );
         }
 
+        // Process availability if included
+        if (include_availability === 'true') {
+            filteredListings = filteredListings.map(listing => {
+                if (listing.serviceProvider.provider_availability) {
+                    const processedAvailability = listing.serviceProvider.provider_availability.map(slot => {
+                        const totalBookings = slot._count?.appointments || 0;
+                        const startHour = parseInt(slot.startTime.split(':')[0]);
+                        const endHour = parseInt(slot.endTime.split(':')[0]);
+                        const totalSlots = endHour - startHour;
+                        const availableSlots = Math.max(0, totalSlots - totalBookings);
+                        
+                        return {
+                            availability_id: slot.availability_id,
+                            dayOfWeek: slot.dayOfWeek,
+                            startTime: slot.startTime,
+                            endTime: slot.endTime,
+                            isActive: slot.availability_isActive,
+                            totalBookings: totalBookings,
+                            estimatedAvailableSlots: availableSlots,
+                            isFullyBooked: availableSlots === 0
+                        };
+                    });
+
+                    return {
+                        ...listing,
+                        serviceProvider: {
+                            ...listing.serviceProvider,
+                            available_time_slots: processedAvailability
+                        }
+                    };
+                }
+                return listing;
+            });
+        }
+
         return res.status(200).json({
             message: 'Service listings retrieved successfully',
             count: filteredListings.length,
@@ -1421,6 +1489,7 @@ export const getServiceListings = async (req, res) => {
 // Get specific service listing details
 export const getServiceListingDetails = async (req, res) => {
     const { service_id } = req.params;
+    const { date } = req.query; // Optional: specific date to check availability
 
     try {
         if (!service_id) {
@@ -1432,7 +1501,31 @@ export const getServiceListingDetails = async (req, res) => {
             include: {
                 serviceProvider: {
                     include: {
-                        provider_availability: true,
+                        provider_availability: {
+                            where: {
+                                availability_isActive: true
+                            },
+                            include: {
+                                appointments: date ? {
+                                    where: {
+                                        scheduled_date: new Date(date),
+                                        appointment_status: {
+                                            in: ['scheduled', 'confirmed', 'in-progress']
+                                        }
+                                    }
+                                } : {
+                                    where: {
+                                        appointment_status: {
+                                            in: ['scheduled', 'confirmed', 'in-progress']
+                                        }
+                                    }
+                                }
+                            },
+                            orderBy: [
+                                { dayOfWeek: 'asc' },
+                                { startTime: 'asc' }
+                            ]
+                        },
                         provider_ratings: {
                             include: {
                                 user: {
@@ -1461,9 +1554,53 @@ export const getServiceListingDetails = async (req, res) => {
             return res.status(404).json({ message: 'Service listing not found' });
         }
 
+        // Process availability to show available time slots
+        const processedAvailability = serviceListing.serviceProvider.provider_availability.map(slot => {
+            const totalBookings = slot.appointments?.length || 0;
+            
+            // Calculate available slots based on time range
+            // Assuming 1-hour appointment slots
+            const startHour = parseInt(slot.startTime.split(':')[0]);
+            const endHour = parseInt(slot.endTime.split(':')[0]);
+            const totalSlots = endHour - startHour;
+            const availableSlots = Math.max(0, totalSlots - totalBookings);
+            
+            return {
+                availability_id: slot.availability_id,
+                dayOfWeek: slot.dayOfWeek,
+                startTime: slot.startTime,
+                endTime: slot.endTime,
+                isActive: slot.availability_isActive,
+                totalBookings: totalBookings,
+                estimatedAvailableSlots: availableSlots,
+                isFullyBooked: availableSlots === 0,
+                bookedAppointments: slot.appointments?.map(appt => ({
+                    appointment_id: appt.appointment_id,
+                    scheduled_date: appt.scheduled_date,
+                    status: appt.appointment_status
+                })) || []
+            };
+        });
+
+        // Group by day of week for easier frontend consumption
+        const availabilityByDay = processedAvailability.reduce((acc, slot) => {
+            if (!acc[slot.dayOfWeek]) {
+                acc[slot.dayOfWeek] = [];
+            }
+            acc[slot.dayOfWeek].push(slot);
+            return acc;
+        }, {});
+
         return res.status(200).json({
             message: 'Service listing details retrieved successfully',
-            listing: serviceListing
+            listing: {
+                ...serviceListing,
+                serviceProvider: {
+                    ...serviceListing.serviceProvider,
+                    available_time_slots: processedAvailability,
+                    availability_by_day: availabilityByDay
+                }
+            }
         });
 
     } catch (err) {

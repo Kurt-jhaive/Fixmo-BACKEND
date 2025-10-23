@@ -281,9 +281,40 @@ class MessageWebSocketServer {
                 throw new Error(`Conversation is ${conversation.status} and not available for messaging`);
             }
 
-            // Check if warranty has expired
-            if (conversation.warranty_expires && new Date() > conversation.warranty_expires) {
-                throw new Error('Conversation warranty period has expired');
+            // Check if there are any active appointments with warranties
+            // Don't rely solely on conversation.warranty_expires as it might be outdated
+            const activeAppointments = await prisma.appointment.findMany({
+                where: {
+                    customer_id: conversation.customer_id,
+                    provider_id: conversation.provider_id,
+                    appointment_status: { 
+                        in: ['scheduled', 'confirmed', 'On the Way', 'in-progress', 'finished', 'in-warranty', 'backjob'] 
+                    }
+                },
+                select: {
+                    appointment_id: true,
+                    appointment_status: true,
+                    warranty_expires_at: true
+                }
+            });
+
+            // Check if ANY appointment has an active warranty
+            const now = new Date();
+            const hasActiveWarranty = activeAppointments.some(apt => {
+                if (apt.appointment_status === 'in-warranty' || apt.appointment_status === 'backjob') {
+                    // Check if warranty has not expired
+                    if (apt.warranty_expires_at) {
+                        return now <= apt.warranty_expires_at;
+                    }
+                    // If in-warranty but no expiry date, allow messaging
+                    return true;
+                }
+                // For other active statuses (scheduled, in-progress, etc.), allow messaging
+                return true;
+            });
+
+            if (!hasActiveWarranty) {
+                throw new Error('All warranties have expired for this conversation');
             }
 
             const roomName = `conversation_${conversationId}`;

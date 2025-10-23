@@ -337,45 +337,7 @@ httpServer.listen(port, '0.0.0.0', () => {
   console.log(`�🗄️ Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
 });
 
-// Auto-complete appointments after warranty window if customer hasn't completed
-// Runs every 6 hours to reduce load; uses warranty_days and finished_at/warranty_expires_at
-const AUTO_COMPLETE_INTERVAL_MS = 6 * 60 * 60 * 1000;
-setInterval(async () => {
-  try {
-    const now = new Date();
-    // Find appointments that are in-warranty or backjob, have warranty_expires_at in the past, and are not completed/cancelled
-    // Exclude appointments with paused warranties (backjobs)
-    const expired = await prisma.appointment.findMany({
-      where: {
-        appointment_status: { in: ['in-warranty', 'backjob'] },
-        warranty_expires_at: { lte: now },
-        warranty_paused_at: null, // Only expire non-paused warranties
-      },
-      select: { appointment_id: true, appointment_status: true }
-    });
+// NOTE: Auto-complete logic has been moved to the warranty expiry cron job (warrantyExpiryJob.js)
+// The cron job runs every hour, which is more timely than the previous 6-hour interval
+// This provides better user experience with more accurate appointment status updates
 
-    if (expired.length > 0) {
-      const ids = expired.map(a => a.appointment_id);
-      await prisma.appointment.updateMany({
-        where: { appointment_id: { in: ids } },
-        data: { appointment_status: 'completed', completed_at: now }
-      });
-      
-      // Also expire any active backjob applications for these appointments
-      await prisma.backjobApplication.updateMany({
-        where: { 
-          appointment_id: { in: ids },
-          status: { in: ['approved', 'pending'] }
-        },
-        data: { 
-          status: 'cancelled-by-admin',
-          admin_notes: 'Cancelled due to warranty expiration'
-        }
-      });
-      
-      console.log(`✅ Auto-completed ${ids.length} appointment(s) after warranty expiration and cancelled related backjobs.`);
-    }
-  } catch (err) {
-    console.error('Auto-complete job error:', err);
-  }
-}, AUTO_COMPLETE_INTERVAL_MS);
