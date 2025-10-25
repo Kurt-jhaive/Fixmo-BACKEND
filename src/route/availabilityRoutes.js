@@ -4,9 +4,12 @@ import { requireAuth } from '../middleware/sessionAuth.js';
 
 const router = express.Router();
 
-// Public route - Check time-range availability (no auth required)
+// Public routes - No authentication required for customers to check availability
 // GET /api/availability/check/:providerId - Check if time range is available
 router.get('/check/:providerId', AvailabilityController.checkTimeRangeAvailability);
+
+// GET /api/availability/provider/:providerId/booked-slots - Get booked slots for provider (public for customers)
+router.get('/provider/:providerId/booked-slots', AvailabilityController.getProviderBookedSlots);
 
 // Apply authentication middleware to all routes below
 router.use(requireAuth('provider'));

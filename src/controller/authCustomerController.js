@@ -1647,6 +1647,22 @@ export const getCustomerAppointments = async (req, res) => {
                         provider_location: true,
                         provider_exact_location: true
                     }
+                },
+                availability: {
+                    select: {
+                        availability_id: true,
+                        dayOfWeek: true,
+                        startTime: true,
+                        endTime: true,
+                        availability_isActive: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
                 }
             },
             orderBy: {
@@ -1654,13 +1670,21 @@ export const getCustomerAppointments = async (req, res) => {
             }
         });
 
+        // Add slot times at root level for easier access
+        const formattedAppointments = appointments.map(a => ({
+            ...a,
+            slot_start_time: a.availability?.startTime || null,
+            slot_end_time: a.availability?.endTime || null,
+            slot_day_of_week: a.availability?.dayOfWeek || null
+        }));
+
         return res.status(200).json({
             message: 'Customer appointments retrieved successfully',
             customer: {
                 customer_id: customer.user_id,
                 customer_name: `${customer.first_name} ${customer.last_name}`
             },
-            appointments: appointments
+            appointments: formattedAppointments
         });
 
     } catch (err) {
@@ -3380,6 +3404,23 @@ export const getAppointmentDetails = async (req, res) => {
                         provider_email: true,
                         provider_phone_number: true
                     }
+                },
+                availability: {
+                    select: {
+                        availability_id: true,
+                        dayOfWeek: true,
+                        startTime: true,
+                        endTime: true,
+                        availability_isActive: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_description: true,
+                        service_startingprice: true
+                    }
                 }
             }
         });
@@ -3391,10 +3432,18 @@ export const getAppointmentDetails = async (req, res) => {
             });
         }
 
+        // Format response with slot details at root level for easier access
+        const formattedAppointment = {
+            ...appointment,
+            slot_start_time: appointment.availability?.startTime || null,
+            slot_end_time: appointment.availability?.endTime || null,
+            slot_day_of_week: appointment.availability?.dayOfWeek || null
+        };
+
         res.status(200).json({
             success: true,
             message: 'Appointment details retrieved successfully',
-            appointment: appointment
+            appointment: formattedAppointment
         });
 
     } catch (error) {

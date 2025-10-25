@@ -819,7 +819,149 @@ class AvailabilityController {
         }
     }
 
-    // Track which specific slots are booked on a given day
+    // Get booked slots for a specific provider (public endpoint for customers)
+    static async getProviderBookedSlots(req, res) {
+        try {
+            const { providerId } = req.params;
+            const { dayOfWeek, date } = req.query;
+            
+            if (!providerId || isNaN(parseInt(providerId))) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Valid provider ID is required'
+                });
+            }
+
+            // Validation
+            if (!dayOfWeek) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'dayOfWeek query parameter is required (e.g., ?dayOfWeek=Monday)'
+                });
+            }
+
+            // Validate day of week
+            const validDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            if (!validDays.includes(dayOfWeek)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Invalid dayOfWeek. Must be one of: ${validDays.join(', ')}`
+                });
+            }
+
+            // Build query filter for appointments
+            let appointmentFilter = {
+                appointment_status: {
+                    in: ['scheduled', 'confirmed', 'in-progress']
+                }
+            };
+
+            // If specific date provided, filter appointments by that date
+            if (date) {
+                const targetDate = new Date(date);
+                if (isNaN(targetDate.getTime())) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Invalid date format. Use YYYY-MM-DD'
+                    });
+                }
+                const startOfDay = new Date(targetDate);
+                startOfDay.setHours(0, 0, 0, 0);
+                const endOfDay = new Date(targetDate);
+                endOfDay.setHours(23, 59, 59, 999);
+                
+                appointmentFilter.scheduled_date = {
+                    gte: startOfDay,
+                    lt: endOfDay
+                };
+            }
+
+            // Get all availability slots for the day with their appointments
+            const availabilitySlots = await prisma.availability.findMany({
+                where: {
+                    provider_id: parseInt(providerId),
+                    dayOfWeek: dayOfWeek
+                },
+                include: {
+                    appointments: {
+                        where: appointmentFilter,
+                        select: {
+                            appointment_id: true,
+                            scheduled_date: true,
+                            appointment_status: true
+                        },
+                        orderBy: {
+                            scheduled_date: 'asc'
+                        }
+                    }
+                },
+                orderBy: {
+                    startTime: 'asc'
+                }
+            });
+
+            // Calculate statistics
+            const totalSlots = availabilitySlots.length;
+            const activeSlots = availabilitySlots.filter(slot => slot.availability_isActive).length;
+            const bookedSlots = availabilitySlots.filter(slot => slot.appointments.length > 0).length;
+            const availableSlots = availabilitySlots.filter(
+                slot => slot.availability_isActive && slot.appointments.length === 0
+            ).length;
+
+            // Format response with booking details
+            // IMPORTANT: Each availability_id is a SINGLE slot (1:1 mapping)
+            // If an availability has ANY appointment, it's booked
+            const slotsData = availabilitySlots.map(slot => {
+                const hasBooking = slot.appointments.length > 0;
+                const totalBookings = slot.appointments.length;
+
+                return {
+                    availability_id: slot.availability_id,
+                    startTime: slot.startTime,
+                    endTime: slot.endTime,
+                    isActive: slot.availability_isActive,
+                    isBooked: hasBooking,
+                    totalBookings: totalBookings,
+                    appointments: slot.appointments.map(appt => ({
+                        appointment_id: appt.appointment_id,
+                        scheduled_date: appt.scheduled_date,
+                        status: appt.appointment_status
+                    })),
+                    status: !slot.availability_isActive 
+                        ? 'Inactive' 
+                        : hasBooking 
+                            ? 'Booked' 
+                            : 'Available'
+                };
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    providerId: parseInt(providerId),
+                    dayOfWeek,
+                    date: date || 'All dates',
+                    summary: {
+                        totalSlots,
+                        activeSlots,
+                        bookedSlots,
+                        availableSlots
+                    },
+                    slots: slotsData
+                }
+            });
+
+        } catch (error) {
+            console.error('Error getting provider booked slots:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error getting booked slots',
+                error: error.message
+            });
+        }
+    }
+
+    // Track which specific slots are booked on a given day (for authenticated providers)
     static async getBookedSlotsForDay(req, res) {
         try {
             const providerId = req.userId;

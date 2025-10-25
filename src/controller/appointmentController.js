@@ -95,6 +95,15 @@ export const getAllAppointments = async (req, res) => {
                             service_title: true,
                             service_startingprice: true
                         }
+                    },
+                    availability: {
+                        select: {
+                            availability_id: true,
+                            dayOfWeek: true,
+                            startTime: true,
+                            endTime: true,
+                            availability_isActive: true
+                        }
                     }
                 },
                 orderBy: {
@@ -133,7 +142,17 @@ export const getAllAppointments = async (req, res) => {
                 provider_rating_value: provider_rating?.rating_value || null
             };
             
-            return { ...a, days_left, needs_rating, is_rated, rating_status };
+            // Add slot times at root level for easier access
+            return { 
+                ...a, 
+                days_left, 
+                needs_rating, 
+                is_rated, 
+                rating_status,
+                slot_start_time: a.availability?.startTime || null,
+                slot_end_time: a.availability?.endTime || null,
+                slot_day_of_week: a.availability?.dayOfWeek || null
+            };
         });
 
         const totalPages = Math.ceil(totalCount / take);
@@ -1735,6 +1754,15 @@ export const getProviderAppointments = async (req, res) => {
                             service_startingprice: true
                         }
                     },
+                    availability: {
+                        select: {
+                            availability_id: true,
+                            dayOfWeek: true,
+                            startTime: true,
+                            endTime: true,
+                            availability_isActive: true
+                        }
+                    },
                     appointment_rating: {
                         select: {
                             rating_value: true,
@@ -1806,6 +1834,7 @@ export const getProviderAppointments = async (req, res) => {
                 ? a.backjob_applications[0] 
                 : null;
             
+            // Add slot times at root level for easier frontend access
             return { 
                 ...a, 
                 days_left, 
@@ -1813,7 +1842,10 @@ export const getProviderAppointments = async (req, res) => {
                 is_rated,
                 rating_status,
                 current_backjob,
-                backjob_applications: undefined // Remove the array to avoid duplication
+                backjob_applications: undefined, // Remove the array to avoid duplication
+                slot_start_time: a.availability?.startTime || null,
+                slot_end_time: a.availability?.endTime || null,
+                slot_day_of_week: a.availability?.dayOfWeek || null
             };
         });
 
@@ -1900,6 +1932,15 @@ export const getCustomerAppointments = async (req, res) => {
                             service_startingprice: true
                         }
                     },
+                    availability: {
+                        select: {
+                            availability_id: true,
+                            dayOfWeek: true,
+                            startTime: true,
+                            endTime: true,
+                            availability_isActive: true
+                        }
+                    },
                     appointment_rating: {
                         select: {
                             rating_value: true,
@@ -1969,6 +2010,7 @@ export const getCustomerAppointments = async (req, res) => {
                 ? a.backjob_applications[0] 
                 : null;
             
+            // Add slot times at root level for easier frontend access
             return { 
                 ...a, 
                 days_left, 
@@ -1976,7 +2018,10 @@ export const getCustomerAppointments = async (req, res) => {
                 is_rated,
                 rating_status,
                 current_backjob,
-                backjob_applications: undefined // Remove the array to avoid duplication
+                backjob_applications: undefined, // Remove the array to avoid duplication
+                slot_start_time: a.availability?.startTime || null,
+                slot_end_time: a.availability?.endTime || null,
+                slot_day_of_week: a.availability?.dayOfWeek || null
             };
         });
 

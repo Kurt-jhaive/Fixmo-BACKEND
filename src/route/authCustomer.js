@@ -170,8 +170,8 @@ router.post('/customer-profile/request-otp', authMiddleware, requestCustomerProf
 router.put('/customer-profile', authMiddleware, verifyOTPAndUpdateCustomerProfile);
 // Update verification documents
 router.post('/update-verification-documents', upload.fields([
-  { name: 'profilePicture', maxCount: 1 },
-  { name: 'validId', maxCount: 1 }
+  { name: 'profile_photo', maxCount: 1 },
+  { name: 'valid_id', maxCount: 1 }
 ]), updateVerificationDocuments);
 
 // Get service listings for customer dashboard
