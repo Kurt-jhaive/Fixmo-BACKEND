@@ -35,6 +35,9 @@ router.post('/time-range', AvailabilityController.addTimeRangeAvailability);
 // POST /api/availability/toggle-day - Toggle availability for entire day
 router.post('/toggle-day', AvailabilityController.toggleDayAvailability);
 
+// PUT /api/availability/toggle-slot/:availabilityId - Toggle individual time slot
+router.put('/toggle-slot/:availabilityId', AvailabilityController.toggleTimeSlot);
+
 // DELETE /api/availability/:availabilityId - Delete specific availability
 router.delete('/:availabilityId', AvailabilityController.deleteAvailability);
 

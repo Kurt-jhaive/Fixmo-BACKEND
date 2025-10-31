@@ -20,8 +20,10 @@ import verificationRoutes from './route/verificationRoutes.js';
 import notificationRoutes from './route/notificationRoutes.js';
 import reportRoutes from './route/reportRoutes.js';
 import exportRoutes from './route/exportRoutes.js';
+import penaltyRoutes from './route/penaltyRoutes.js';
 import { setWebSocketServer } from './controller/messageController.js';
 import { setWebSocketServer as setWarrantyJobWebSocket, initializeWarrantyExpiryJob } from './services/warrantyExpiryJob.js';
+import { initializePenaltyResetJob } from './services/penaltyResetJob.js';
 import cors from 'cors';
 import { specs, swaggerUi } from './config/swagger.js';
 import MessageWebSocketServer from './services/MessageWebSocketServer.js';
@@ -196,6 +198,7 @@ app.use('/api/verification', verificationRoutes); // Verification management rou
 app.use('/api/notifications', notificationRoutes); // Push notification management routes
 app.use('/api/reports', reportRoutes); // Report submission and management routes
 app.use('/api/admin/export', exportRoutes); // Admin export routes (CSV/PDF)
+app.use('/api/penalty', penaltyRoutes); // Penalty system routes
 app.use('/api/test', testRoutes); // Test routes for Cloudinary and other features
 
 // 404 handler for undefined routes (without wildcard)
@@ -237,6 +240,9 @@ setWarrantyJobWebSocket(messageWebSocket);
 
 // Initialize warranty expiry cleanup job
 initializeWarrantyExpiryJob();
+
+// Initialize penalty reset job (every 3 months)
+initializePenaltyResetJob();
 
 // ============================================
 // 🚫 NO-SHOW DETECTION JOB

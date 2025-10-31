@@ -8,6 +8,7 @@ class AvailabilityController {
             console.log('Getting provider availability for provider:', req.userId);
             
             const providerId = req.userId;
+            const { includeInactive } = req.query; // Optional query param to include inactive slots
             
             if (!providerId) {
                 return res.status(401).json({
@@ -16,10 +17,22 @@ class AvailabilityController {
                 });
             }
 
+            // Build where clause based on includeInactive flag
+            const whereClause = {
+                provider_id: providerId
+            };
+
+            // By default, only show slots where both day AND slot are active
+            // Unless includeInactive=true is specified
+            if (includeInactive !== 'true') {
+                whereClause.AND = [
+                    { availability_isActive: true },
+                    { slot_isActive: true }
+                ];
+            }
+
             const availability = await prisma.availability.findMany({
-                where: {
-                    provider_id: providerId
-                },
+                where: whereClause,
                 orderBy: [
                     {
                         dayOfWeek: 'asc'
@@ -32,9 +45,25 @@ class AvailabilityController {
 
             console.log(`Found ${availability.length} availability records for provider ${providerId}`);
 
+            // Add status indicator for each slot
+            const enrichedAvailability = availability.map(slot => ({
+                ...slot,
+                isBookable: slot.availability_isActive && slot.slot_isActive,
+                statusReason: !slot.availability_isActive 
+                    ? 'Day is deactivated' 
+                    : !slot.slot_isActive 
+                        ? 'Time slot is deactivated' 
+                        : 'Available for booking'
+            }));
+
             res.json({
                 success: true,
-                data: availability
+                data: enrichedAvailability,
+                meta: {
+                    total: enrichedAvailability.length,
+                    bookableSlots: enrichedAvailability.filter(s => s.isBookable).length,
+                    showingInactive: includeInactive === 'true'
+                }
             });
 
         } catch (error) {
@@ -445,33 +474,45 @@ class AvailabilityController {
                         totalSlots: 0,
                         activeSlots: 0,
                         inactiveSlots: 0,
+                        bookableSlots: 0,
                         isFullyActive: false,
                         isFullyInactive: false,
                         status: 'No availability set'
                     };
                 }
 
-                const activeSlots = daySlots.filter(slot => slot.availability_isActive).length;
-                const inactiveSlots = daySlots.length - activeSlots;
+                // Count slots by different criteria
+                const dayActiveSlots = daySlots.filter(slot => slot.availability_isActive).length;
+                const slotActiveSlots = daySlots.filter(slot => slot.slot_isActive).length;
+                const bookableSlots = daySlots.filter(slot => slot.availability_isActive && slot.slot_isActive).length;
 
                 return {
                     dayOfWeek: day,
                     hasSlots: true,
                     totalSlots: daySlots.length,
-                    activeSlots,
-                    inactiveSlots,
-                    isFullyActive: activeSlots === daySlots.length,
-                    isFullyInactive: activeSlots === 0,
-                    status: activeSlots === daySlots.length 
+                    dayActiveSlots, // Day-level toggle count
+                    slotActiveSlots, // Slot-level toggle count
+                    bookableSlots, // Both day AND slot active
+                    inactiveSlots: daySlots.length - bookableSlots,
+                    isFullyActive: bookableSlots === daySlots.length,
+                    isFullyInactive: bookableSlots === 0,
+                    status: bookableSlots === daySlots.length 
                         ? 'Fully available' 
-                        : activeSlots === 0 
+                        : bookableSlots === 0 
                             ? 'Not available' 
                             : 'Partially available',
                     slots: daySlots.map(slot => ({
                         availability_id: slot.availability_id,
                         startTime: slot.startTime,
                         endTime: slot.endTime,
-                        isActive: slot.availability_isActive
+                        dayIsActive: slot.availability_isActive, // Day-level toggle
+                        slotIsActive: slot.slot_isActive, // Slot-level toggle
+                        isBookable: slot.availability_isActive && slot.slot_isActive, // Combined status
+                        statusReason: !slot.availability_isActive 
+                            ? 'Day deactivated' 
+                            : !slot.slot_isActive 
+                                ? 'Slot deactivated' 
+                                : 'Available'
                     }))
                 };
             });
@@ -486,6 +527,119 @@ class AvailabilityController {
             res.status(500).json({
                 success: false,
                 message: 'Error getting day availability status',
+                error: error.message
+            });
+        }
+    }
+
+    // Toggle individual time slot (new feature for granular control)
+    static async toggleTimeSlot(req, res) {
+        try {
+            console.log('Toggling individual time slot for provider:', req.userId);
+            console.log('Request params:', req.params);
+            console.log('Request body:', req.body);
+            
+            const providerId = req.userId;
+            const { availabilityId } = req.params;
+            const { slot_isActive } = req.body;
+            
+            if (!providerId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication required'
+                });
+            }
+
+            // Validation
+            if (!availabilityId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'availabilityId is required'
+                });
+            }
+
+            if (typeof slot_isActive !== 'boolean') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'slot_isActive must be a boolean value (true or false)'
+                });
+            }
+
+            // Find the slot and verify it belongs to the provider
+            const slot = await prisma.availability.findFirst({
+                where: {
+                    availability_id: parseInt(availabilityId),
+                    provider_id: providerId
+                },
+                include: {
+                    appointments: {
+                        where: {
+                            appointment_status: {
+                                in: ['scheduled', 'confirmed', 'in-progress']
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (!slot) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Time slot not found or does not belong to you'
+                });
+            }
+
+            // Check if trying to deactivate a slot with active appointments
+            if (!slot_isActive && slot.appointments && slot.appointments.length > 0) {
+                return res.status(409).json({
+                    success: false,
+                    message: `Cannot deactivate time slot. There are ${slot.appointments.length} active appointment(s) scheduled for this slot.`,
+                    conflictingAppointments: slot.appointments.map(appt => ({
+                        appointment_id: appt.appointment_id,
+                        scheduled_date: appt.scheduled_date,
+                        status: appt.appointment_status,
+                        customer_name: appt.customer_name
+                    })),
+                    suggestion: 'Please cancel or complete these appointments before deactivating the slot'
+                });
+            }
+
+            // Update the individual slot
+            const updatedSlot = await prisma.availability.update({
+                where: {
+                    availability_id: parseInt(availabilityId)
+                },
+                data: {
+                    slot_isActive: slot_isActive
+                }
+            });
+
+            console.log(`${slot_isActive ? 'Activated' : 'Deactivated'} time slot ${availabilityId} (${slot.dayOfWeek} ${slot.startTime}-${slot.endTime})`);
+
+            res.json({
+                success: true,
+                message: `Time slot ${slot_isActive ? 'activated' : 'deactivated'} successfully`,
+                data: {
+                    availability_id: updatedSlot.availability_id,
+                    dayOfWeek: updatedSlot.dayOfWeek,
+                    startTime: updatedSlot.startTime,
+                    endTime: updatedSlot.endTime,
+                    slot_isActive: updatedSlot.slot_isActive,
+                    availability_isActive: updatedSlot.availability_isActive,
+                    status: updatedSlot.slot_isActive && updatedSlot.availability_isActive 
+                        ? 'Bookable' 
+                        : 'Not bookable',
+                    note: updatedSlot.slot_isActive && !updatedSlot.availability_isActive 
+                        ? 'Slot is active but day is deactivated. Customers cannot book until day is activated.' 
+                        : null
+                }
+            });
+
+        } catch (error) {
+            console.error('Error toggling time slot:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error toggling time slot',
                 error: error.message
             });
         }
