@@ -115,6 +115,82 @@ router.get('/my-rewards', authMiddleware, PenaltyController.getMyRewardStats);
 
 /**
  * @swagger
+ * /api/penalty/my-adjustments:
+ *   get:
+ *     summary: Get penalty adjustments (restorations/bonuses) for current user/provider
+ *     tags: [Penalty]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [restore, bonus, reset, penalty]
+ *         description: Filter by adjustment type (default shows only restore/bonus/reset)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Number of records to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Number of records to skip
+ *     responses:
+ *       200:
+ *         description: Penalty adjustments retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     adjustments:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           adjustment_id:
+ *                             type: integer
+ *                           adjustment_type:
+ *                             type: string
+ *                           points_adjusted:
+ *                             type: integer
+ *                           previous_points:
+ *                             type: integer
+ *                           new_points:
+ *                             type: integer
+ *                           reason:
+ *                             type: string
+ *                           created_at:
+ *                             type: string
+ *                             format: date-time
+ *                     pagination:
+ *                       type: object
+ *                       properties:
+ *                         total:
+ *                           type: integer
+ *                         limit:
+ *                           type: integer
+ *                         offset:
+ *                           type: integer
+ *                         hasMore:
+ *                           type: boolean
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/my-adjustments', authMiddleware, PenaltyController.getMyAdjustments);
+
+/**
+ * @swagger
  * /api/penalty/violation-types:
  *   get:
  *     summary: Get all violation types

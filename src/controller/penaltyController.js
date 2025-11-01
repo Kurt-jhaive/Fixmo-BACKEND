@@ -109,9 +109,9 @@ class PenaltyController {
 
       const result = await PenaltyService.appealViolation(
         parseInt(violationId),
+        appealReason,
         userType === 'customer' ? userId : null,
-        userType === 'service_provider' ? userId : null,
-        appealReason
+        userType === 'service_provider' ? userId : null
       );
 
       res.status(200).json({
@@ -179,6 +179,77 @@ class PenaltyController {
       res.status(500).json({
         success: false,
         message: 'Failed to fetch reward statistics',
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * Get penalty adjustments (restorations/bonuses) for current user/provider
+   */
+  static async getMyAdjustments(req, res) {
+    try {
+      const userId = req.userId;
+      const userType = req.userType;
+      const { type, limit = 50, offset = 0 } = req.query;
+
+      // Build where clause
+      const where = {};
+      
+      if (userType === 'customer') {
+        where.user_id = userId;
+      } else if (userType === 'service_provider') {
+        where.provider_id = userId;
+      }
+
+      // Filter by adjustment type if specified
+      if (type) {
+        where.adjustment_type = type;
+      } else {
+        // By default, only show positive adjustments (restore, bonus, reset)
+        where.adjustment_type = {
+          in: ['restore', 'bonus', 'reset']
+        };
+      }
+
+      const adjustments = await prisma.penaltyAdjustment.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        take: parseInt(limit),
+        skip: parseInt(offset),
+        select: {
+          adjustment_id: true,
+          adjustment_type: true,
+          points_adjusted: true,
+          previous_points: true,
+          new_points: true,
+          reason: true,
+          created_at: true,
+          adjusted_by_admin_id: true,
+          related_violation_id: true,
+        },
+      });
+
+      // Get total count
+      const total = await prisma.penaltyAdjustment.count({ where });
+
+      res.status(200).json({
+        success: true,
+        data: {
+          adjustments,
+          pagination: {
+            total,
+            limit: parseInt(limit),
+            offset: parseInt(offset),
+            hasMore: parseInt(offset) + adjustments.length < total,
+          },
+        },
+      });
+    } catch (error) {
+      console.error('Error fetching penalty adjustments:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch penalty adjustments',
         error: error.message,
       });
     }

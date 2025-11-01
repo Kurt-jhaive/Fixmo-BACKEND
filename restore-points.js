@@ -3,12 +3,12 @@ import PenaltyService from './src/services/penaltyService.js';
 
 const prisma = new PrismaClient();
 
-async function addPenalty() {
+async function restorePoints() {
   try {
     const userId = 1;
-    const pointsToDeduct = 10; // Deduct 10 more points (will go from 70 to 60)
+    const pointsToRestore = 20; // Restore 20 points
 
-    console.log('🎯 Adding penalty to user...');
+    console.log('🎁 Restoring penalty points to user...');
 
     // Get current user data
     const user = await prisma.user.findUnique({
@@ -20,6 +20,7 @@ async function addPenalty() {
         penalty_points: true,
         is_suspended: true,
         is_activated: true,
+        suspended_at: true,
       },
     });
 
@@ -34,21 +35,23 @@ async function addPenalty() {
     console.log(`   Current Tier: ${getTierName(user.penalty_points)}`);
     console.log(`   Suspended: ${user.is_suspended}`);
     console.log(`   Activated: ${user.is_activated}`);
+    console.log(`   Suspended At: ${user.suspended_at?.toLocaleString() || 'N/A'}`);
 
-    const estimatedNewPoints = Math.max(0, user.penalty_points - pointsToDeduct);
+    const estimatedNewPoints = Math.min(100, user.penalty_points + pointsToRestore);
 
-    console.log(`\n⚙️ Deducting ${pointsToDeduct} points using PenaltyService...`);
+    console.log(`\n⚙️ Restoring ${pointsToRestore} points using PenaltyService...`);
     console.log(`   ${user.penalty_points} → ${estimatedNewPoints}`);
 
-    // Use PenaltyService to record violation (this handles deactivation automatically)
-    const violation = await PenaltyService.recordViolation({
+    // Use PenaltyService to restore points (this handles reactivation automatically)
+    const result = await PenaltyService.restorePoints({
       userId: userId,
-      violationCode: 'USER_LATE_CANCEL',
-      violationDetails: `Late cancellation - Testing tier system`,
-      detectedBy: 'system',
+      points: pointsToRestore,
+      reason: 'Manual point restoration - Testing penalty system',
+      adminId: 1, // Admin ID (optional)
     });
 
-    console.log(`   ✓ Violation recorded via PenaltyService (ID: ${violation.violation_id})`);
+    console.log(`   ✓ Points restored via PenaltyService`);
+    console.log(`   ✓ Previous: ${result.previousPoints}, New: ${result.newPoints}`);
 
     // Get updated user data
     const updatedUser = await prisma.user.findUnique({
@@ -64,7 +67,7 @@ async function addPenalty() {
       },
     });
 
-    console.log('\n✅ Penalty Added Successfully!');
+    console.log('\n✅ Points Restored Successfully!');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log(`   User: ${updatedUser.first_name} ${updatedUser.last_name}`);
     console.log(`   Previous Points: ${user.penalty_points}`);
@@ -84,29 +87,23 @@ async function addPenalty() {
       console.log('⚠️  TIER CHANGE DETECTED!');
       console.log(`   Moved from ${getTierName(user.penalty_points)} to ${getTierName(updatedUser.penalty_points)}`);
       
-      // Show deactivation warning
-      if (updatedUser.penalty_points <= 50 && user.penalty_points > 50) {
-        console.log('   🔒 ACCOUNT AUTO-DEACTIVATED!');
-        console.log(`   → is_activated changed from true to false`);
-        console.log(`   → User cannot log in or book appointments`);
+      // Show reactivation notice
+      if (updatedUser.penalty_points > 50 && user.penalty_points <= 50) {
+        console.log('   ✅ ACCOUNT REACTIVATED!');
+        console.log(`   → is_activated changed from false to true`);
+        console.log(`   → is_suspended changed from true to false`);
+        console.log(`   → suspended_at cleared`);
+        console.log(`   → User can now log in and use the platform`);
       }
       
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
     }
 
   } catch (error) {
-    console.error('❌ Error adding penalty:', error);
+    console.error('❌ Error restoring points:', error);
   } finally {
     await prisma.$disconnect();
   }
-}
-
-function getTierNumber(points) {
-  if (points <= 50) return 5;
-  if (points <= 60) return 4;
-  if (points <= 70) return 3;
-  if (points <= 80) return 2;
-  return 1;
 }
 
 function getTierName(points) {
@@ -117,12 +114,20 @@ function getTierName(points) {
   return '✅ Tier 1: Good Standing';
 }
 
+function getTierNumber(points) {
+  if (points <= 50) return 5;
+  if (points <= 60) return 4;
+  if (points <= 70) return 3;
+  if (points <= 80) return 2;
+  return 1;
+}
+
 function getRestrictions(points) {
-  if (points <= 50) return 'Cannot book appointments';
+  if (points <= 50) return 'Cannot book appointments - Account deactivated';
   if (points <= 60) return 'Maximum 1 appointment at a time';
   if (points <= 70) return 'Maximum 2 appointments at a time';
-  if (points <= 80) return 'Warning only';
+  if (points <= 80) return 'Warning only - Monitor behavior';
   return 'No restrictions';
 }
 
-addPenalty();
+restorePoints();

@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { handleAppointmentWarranty } from '../services/conversationWarrantyService.js';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
 import notificationService from '../services/notificationService.js';
+import PenaltyService from '../services/penaltyService.js';
 
 const prisma = new PrismaClient();
 
@@ -956,6 +957,24 @@ export const updateAppointmentStatus = async (req, res) => {
                 console.log('✅ Push notifications sent for completion');
             } catch (notifError) {
                 console.error('❌ Error sending push notifications:', notifError);
+            }
+
+            // ✨ Reward penalty points for successful completion
+            try {
+                console.log('🎁 Rewarding penalty points for completed appointment:', updatedAppointment.appointment_id);
+                
+                const reward = await PenaltyService.rewardSuccessfulBooking(updatedAppointment.appointment_id);
+                
+                if (reward.success) {
+                    console.log('✅ Penalty rewards granted:');
+                    console.log(`   Customer: ${reward.customerReward?.points_added || 0} points (now ${reward.customerReward?.new_points || 'N/A'})`);
+                    console.log(`   Provider: ${reward.providerReward?.points_added || 0} points (now ${reward.providerReward?.new_points || 'N/A'})`);
+                } else {
+                    console.log('⚠️ No penalty rewards granted:', reward.message);
+                }
+            } catch (rewardError) {
+                console.error('❌ Error rewarding penalty points:', rewardError);
+                // Don't fail the status update if reward fails
             }
         }
 

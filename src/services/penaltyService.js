@@ -292,12 +292,13 @@ class PenaltyService {
       // Auto-deactivate if points drop to 50 or below
       const shouldDeactivate = newPoints <= 50;
 
-      // Update user points
+      // Update user points and deactivate account if needed
       await prisma.user.update({
         where: { user_id: userId },
         data: {
           penalty_points: newPoints,
           is_suspended: shouldDeactivate,
+          is_activated: !shouldDeactivate, // Deactivate account when ≤50 points
           suspended_at: shouldDeactivate ? new Date() : user.suspended_at,
         },
       });
@@ -318,7 +319,7 @@ class PenaltyService {
       });
 
       if (shouldDeactivate && previousPoints > 50) {
-        console.log(`⚠️  User ${userId} auto-deactivated - penalty points dropped to ${newPoints} (≤ 50)`);
+        console.log(`⚠️  User ${userId} auto-deactivated - penalty points dropped to ${newPoints} (≤ 50). Account status set to inactive.`);
       }
 
       return { previousPoints, newPoints, suspended: shouldDeactivate, deactivated: shouldDeactivate };
@@ -334,12 +335,13 @@ class PenaltyService {
       // Auto-deactivate if points drop to 50 or below
       const shouldDeactivate = newPoints <= 50;
 
-      // Update provider points
+      // Update provider points and deactivate account if needed
       await prisma.serviceProviderDetails.update({
         where: { provider_id: providerId },
         data: {
           penalty_points: newPoints,
           is_suspended: shouldDeactivate,
+          provider_isActivated: !shouldDeactivate, // Deactivate account when ≤50 points
           suspended_at: shouldDeactivate ? new Date() : provider.suspended_at,
         },
       });
@@ -360,7 +362,7 @@ class PenaltyService {
       });
 
       if (shouldDeactivate && previousPoints > 50) {
-        console.log(`⚠️  Provider ${providerId} auto-deactivated - penalty points dropped to ${newPoints} (≤ 50)`);
+        console.log(`⚠️  Provider ${providerId} auto-deactivated - penalty points dropped to ${newPoints} (≤ 50). Account status set to inactive.`);
       }
 
       return { previousPoints, newPoints, suspended: shouldDeactivate, deactivated: shouldDeactivate };
@@ -379,12 +381,16 @@ class PenaltyService {
       const previousPoints = user.penalty_points;
       const newPoints = Math.min(100, previousPoints + points);
 
+      // Reactivate account if points go above 50
+      const shouldReactivate = newPoints > 50;
+
       await prisma.user.update({
         where: { user_id: userId },
         data: {
           penalty_points: newPoints,
-          is_suspended: false,
-          suspended_at: null,
+          is_suspended: !shouldReactivate,
+          is_activated: shouldReactivate, // Reactivate account when points > 50
+          suspended_at: shouldReactivate ? null : user.suspended_at,
         },
       });
 
@@ -401,6 +407,10 @@ class PenaltyService {
         },
       });
 
+      if (shouldReactivate && previousPoints <= 50) {
+        console.log(`✅ User ${userId} reactivated - penalty points restored to ${newPoints} (> 50). Account status set to active.`);
+      }
+
       return { previousPoints, newPoints };
     }
 
@@ -411,12 +421,16 @@ class PenaltyService {
       const previousPoints = provider.penalty_points;
       const newPoints = Math.min(100, previousPoints + points);
 
+      // Reactivate account if points go above 50
+      const shouldReactivate = newPoints > 50;
+
       await prisma.serviceProviderDetails.update({
         where: { provider_id: providerId },
         data: {
           penalty_points: newPoints,
-          is_suspended: false,
-          suspended_at: null,
+          is_suspended: !shouldReactivate,
+          provider_isActivated: shouldReactivate, // Reactivate account when points > 50
+          suspended_at: shouldReactivate ? null : provider.suspended_at,
         },
       });
 
@@ -432,6 +446,10 @@ class PenaltyService {
           related_violation_id: violationId,
         },
       });
+
+      if (shouldReactivate && previousPoints <= 50) {
+        console.log(`✅ Provider ${providerId} reactivated - penalty points restored to ${newPoints} (> 50). Account status set to active.`);
+      }
 
       return { previousPoints, newPoints };
     }
@@ -820,13 +838,15 @@ class PenaltyService {
       if (appointment.customer && appointment.customer.penalty_points < 100) {
         const customerPointsToAdd = 5;
         const customerNewPoints = Math.min(100, appointment.customer.penalty_points + customerPointsToAdd);
+        const shouldReactivate = customerNewPoints > 50 && appointment.customer.penalty_points <= 50;
         
         await prisma.user.update({
           where: { user_id: appointment.customer_id },
           data: {
             penalty_points: customerNewPoints,
-            is_suspended: false,
-            suspended_at: null
+            is_suspended: customerNewPoints <= 50,
+            is_activated: customerNewPoints > 50, // Reactivate if points go above 50
+            suspended_at: customerNewPoints > 50 ? null : appointment.customer.suspended_at
           }
         });
 
@@ -838,7 +858,9 @@ class PenaltyService {
             points_adjusted: customerPointsToAdd,
             previous_points: appointment.customer.penalty_points,
             new_points: customerNewPoints,
-            reason: `Reward for successful booking completion - Appointment #${appointmentId}`
+            reason: shouldReactivate 
+              ? `Reward for successful booking completion - Account reactivated (points > 50) - Appointment #${appointmentId}`
+              : `Reward for successful booking completion - Appointment #${appointmentId}`
           }
         });
 
@@ -848,20 +870,26 @@ class PenaltyService {
           new_points: customerNewPoints
         };
 
-        console.log(`✓ Rewarded customer ${appointment.customer_id} with ${customerPointsToAdd} points for completing appointment ${appointmentId}`);
+        if (shouldReactivate) {
+          console.log(`✓ Customer ${appointment.customer_id} reactivated by earning ${customerPointsToAdd} points (now ${customerNewPoints} > 50)`);
+        } else {
+          console.log(`✓ Rewarded customer ${appointment.customer_id} with ${customerPointsToAdd} points for completing appointment ${appointmentId}`);
+        }
       }
 
-      // Reward provider (10 points per successful booking)
+      // Reward provider (5 points per successful booking)
       if (appointment.serviceProvider && appointment.serviceProvider.penalty_points < 100) {
-        const providerPointsToAdd = 10;
+        const providerPointsToAdd = 5;
         const providerNewPoints = Math.min(100, appointment.serviceProvider.penalty_points + providerPointsToAdd);
+        const shouldReactivate = providerNewPoints > 50 && appointment.serviceProvider.penalty_points <= 50;
         
         await prisma.serviceProviderDetails.update({
           where: { provider_id: appointment.provider_id },
           data: {
             penalty_points: providerNewPoints,
-            is_suspended: false,
-            suspended_at: null
+            is_suspended: providerNewPoints <= 50,
+            provider_isActivated: providerNewPoints > 50, // Reactivate if points go above 50
+            suspended_at: providerNewPoints > 50 ? null : appointment.serviceProvider.suspended_at
           }
         });
 
@@ -873,7 +901,9 @@ class PenaltyService {
             points_adjusted: providerPointsToAdd,
             previous_points: appointment.serviceProvider.penalty_points,
             new_points: providerNewPoints,
-            reason: `Reward for successful booking completion - Appointment #${appointmentId}`
+            reason: shouldReactivate 
+              ? `Reward for successful booking completion - Account reactivated (points > 50) - Appointment #${appointmentId}`
+              : `Reward for successful booking completion - Appointment #${appointmentId}`
           }
         });
 
@@ -883,7 +913,11 @@ class PenaltyService {
           new_points: providerNewPoints
         };
 
-        console.log(`✓ Rewarded provider ${appointment.provider_id} with ${providerPointsToAdd} points for completing appointment ${appointmentId}`);
+        if (shouldReactivate) {
+          console.log(`✓ Provider ${appointment.provider_id} reactivated by earning ${providerPointsToAdd} points (now ${providerNewPoints} > 50)`);
+        } else {
+          console.log(`✓ Rewarded provider ${appointment.provider_id} with ${providerPointsToAdd} points for completing appointment ${appointmentId}`);
+        }
       }
 
       return rewards;
