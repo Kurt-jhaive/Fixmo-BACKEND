@@ -21,6 +21,7 @@ import notificationRoutes from './route/notificationRoutes.js';
 import reportRoutes from './route/reportRoutes.js';
 import exportRoutes from './route/exportRoutes.js';
 import penaltyRoutes from './route/penaltyRoutes.js';
+import PenaltyService from './services/penaltyService.js';
 import { setWebSocketServer } from './controller/messageController.js';
 import { setWebSocketServer as setWarrantyJobWebSocket, initializeWarrantyExpiryJob } from './services/warrantyExpiryJob.js';
 import { initializePenaltyResetJob } from './services/penaltyResetJob.js';
@@ -243,6 +244,17 @@ initializeWarrantyExpiryJob();
 
 // Initialize penalty reset job (every 3 months)
 initializePenaltyResetJob();
+
+// Initialize penalty violation types in database
+(async () => {
+  try {
+    console.log('🔧 Initializing penalty violation types...');
+    await PenaltyService.initializeViolationTypes();
+    console.log('✅ Penalty violation types initialized successfully');
+  } catch (err) {
+    console.error('❌ Failed to initialize penalty violation types:', err);
+  }
+})();
 
 // ============================================
 // 🚫 NO-SHOW DETECTION JOB

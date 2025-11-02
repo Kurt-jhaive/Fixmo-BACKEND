@@ -5,6 +5,7 @@ import { sendOTPEmail, sendRegistrationSuccessEmail, sendAppointmentStatusUpdate
 import { forgotrequestOTP, verifyOTPAndResetPassword, verifyOTP, cleanupOTP } from '../services/otpUtils.js';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
 import { checkForgotPasswordRateLimit, recordForgotPasswordAttempt, resetForgotPasswordAttempts } from '../services/rateLimitUtils.js';
+import PenaltyService from '../services/penaltyService.js';
 
 const prisma = new PrismaClient();
 
@@ -4196,4 +4197,168 @@ export const verifyOTPAndUpdateProviderProfile = async (req, res) => {
     }
 };
 
+/**
+ * Provider reports customer no-show
+ * Grace period: 45 minutes after appointment starts (status = "On the Way")
+ * Requires: photo evidence and description
+ */
+export const reportCustomerNoShow = async (req, res) => {
+    try {
+        const providerId = req.userId; // From auth middleware
+        const { appointmentId } = req.params;
+        const { description } = req.body;
+
+        console.log('🚫 Provider reporting customer no-show:', {
+            providerId,
+            appointmentId,
+            hasPhoto: !!req.file,
+            description
+        });
+
+        // Validate required fields
+        if (!description || !req.file) {
+            return res.status(400).json({
+                success: false,
+                message: 'Photo evidence and description are required to report a no-show'
+            });
+        }
+
+        // Get appointment details
+        const appointment = await prisma.appointment.findFirst({
+            where: {
+                appointment_id: parseInt(appointmentId),
+                provider_id: providerId
+            },
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_first_name: true,
+                        provider_last_name: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_title: true
+                    }
+                }
+            }
+        });
+
+        if (!appointment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Appointment not found or does not belong to this provider'
+            });
+        }
+
+        // Check if appointment status is "On the Way"
+        if (appointment.appointment_status !== 'On the Way') {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot report no-show. Appointment must be in "On the Way" status. Current status: ${appointment.appointment_status}`
+            });
+        }
+
+        // Check 45-minute grace period
+        const now = new Date();
+        const scheduledTime = new Date(appointment.scheduled_date);
+        const timeDiffMinutes = (now - scheduledTime) / (1000 * 60);
+
+        console.log('⏱️ Grace period check:', {
+            scheduledTime: scheduledTime.toISOString(),
+            currentTime: now.toISOString(),
+            timeDiffMinutes: timeDiffMinutes.toFixed(2),
+            gracePeriodMet: timeDiffMinutes >= 45
+        });
+
+        if (timeDiffMinutes < 45) {
+            return res.status(400).json({
+                success: false,
+                message: `Grace period not met. You can report a no-show after 45 minutes. Time elapsed: ${Math.floor(timeDiffMinutes)} minutes`,
+                timeElapsed: Math.floor(timeDiffMinutes),
+                gracePeriod: 45,
+                canReportAt: new Date(scheduledTime.getTime() + 45 * 60 * 1000).toISOString()
+            });
+        }
+
+        // Upload photo evidence to Cloudinary
+        let evidencePhotoUrl;
+        try {
+            evidencePhotoUrl = await uploadToCloudinary(req.file.buffer, 'no-show-evidence');
+            console.log('✅ Evidence photo uploaded:', evidencePhotoUrl);
+        } catch (uploadError) {
+            console.error('❌ Error uploading evidence photo:', uploadError);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to upload evidence photo'
+            });
+        }
+
+        // Update appointment status to user_no_show
+        const updatedAppointment = await prisma.appointment.update({
+            where: { appointment_id: parseInt(appointmentId) },
+            data: {
+                appointment_status: 'user_no_show',
+                cancellation_reason: `Provider reported customer no-show: ${description}`
+            }
+        });
+
+        // Record no-show violation and trigger penalty detection
+        try {
+            await PenaltyService.detectUserNoShow(parseInt(appointmentId));
+            
+            // Also check for repeated no-shows
+            await PenaltyService.detectRepeatedNoShows(appointment.customer_id);
+            
+            console.log('✅ Penalty violations checked for customer:', appointment.customer_id);
+        } catch (penaltyError) {
+            console.error('❌ Error recording no-show penalty:', penaltyError);
+            // Continue even if penalty recording fails
+        }
+
+        // Create a no-show report record (optional - you can add this to track evidence)
+        const noShowReport = {
+            appointment_id: appointment.appointment_id,
+            reported_by: 'provider',
+            reporter_id: providerId,
+            evidence_photo: evidencePhotoUrl,
+            description: description,
+            reported_at: new Date(),
+            time_elapsed_minutes: Math.floor(timeDiffMinutes)
+        };
+
+        console.log('📝 No-show report created:', noShowReport);
+
+        res.status(200).json({
+            success: true,
+            message: 'Customer no-show reported successfully',
+            data: {
+                appointment: {
+                    appointment_id: updatedAppointment.appointment_id,
+                    status: updatedAppointment.appointment_status,
+                    customer_name: `${appointment.customer.first_name} ${appointment.customer.last_name}`,
+                    service: appointment.service.service_title,
+                    scheduled_date: appointment.scheduled_date
+                },
+                report: noShowReport
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error reporting customer no-show:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to report no-show',
+            error: error.message
+        });
+    }
+};
 

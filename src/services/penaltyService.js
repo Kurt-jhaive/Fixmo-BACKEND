@@ -25,7 +25,7 @@ class PenaltyService {
         violation_code: 'USER_NO_SHOW',
         violation_name: 'No-Show',
         violation_category: 'user',
-        penalty_points: 15,
+        penalty_points: 10,
         description: 'Failing to attend a booked service without cancellation',
         requires_evidence: false,
         auto_detect: true,
@@ -49,6 +49,24 @@ class PenaltyService {
         auto_detect: false,
       },
       {
+        violation_code: 'USER_MULTIPLE_CANCELS_SAME_DAY',
+        violation_name: 'Multiple Cancellations Same Day',
+        violation_category: 'user',
+        penalty_points: 5,
+        description: 'Cancelling scheduled appointments three times within a single day',
+        requires_evidence: false,
+        auto_detect: true,
+      },
+      {
+        violation_code: 'USER_CONSECUTIVE_DAY_CANCELS',
+        violation_name: 'Consecutive Day Cancellations',
+        violation_category: 'user',
+        penalty_points: 5,
+        description: 'Cancelling appointments on three consecutive days',
+        requires_evidence: false,
+        auto_detect: true,
+      },
+      {
         violation_code: 'USER_RUDE_BEHAVIOR',
         violation_name: 'Rude or Disrespectful Behavior',
         violation_category: 'user',
@@ -61,7 +79,7 @@ class PenaltyService {
         violation_code: 'USER_CHAT_SPAM',
         violation_name: 'Chat Spam/Abuse',
         violation_category: 'user',
-        penalty_points: 30,
+        penalty_points: 20,
         description: 'Spamming or abusing the in-app chat system',
         requires_evidence: true,
         auto_detect: false,
@@ -603,31 +621,16 @@ class PenaltyService {
 
     // Check if appointment is marked as user no-show
     if (appointment.appointment_status === 'user_no_show') {
-      // Check for repeated no-shows
-      const repeated = await this.checkRepeatedViolations({
+      // Record single no-show penalty
+      await this.recordViolation({
         userId: appointment.customer_id,
         violationCode: 'USER_NO_SHOW',
-        days: 7,
+        appointmentId: appointment.appointment_id,
+        detectedBy: 'system',
       });
 
-      if (repeated.count >= 3) {
-        // Apply repeated no-show penalty
-        await this.recordViolation({
-          userId: appointment.customer_id,
-          violationCode: 'USER_REPEATED_NO_SHOW',
-          appointmentId: appointment.appointment_id,
-          violationDetails: `User has ${repeated.count} no-shows in the past 7 days`,
-          detectedBy: 'system',
-        });
-      } else {
-        // Regular no-show penalty
-        await this.recordViolation({
-          userId: appointment.customer_id,
-          violationCode: 'USER_NO_SHOW',
-          appointmentId: appointment.appointment_id,
-          detectedBy: 'system',
-        });
-      }
+      // Check for repeated no-shows after recording this one
+      await this.detectRepeatedNoShows(appointment.customer_id);
 
       return true;
     }
@@ -661,6 +664,195 @@ class PenaltyService {
           detectedBy: 'system',
         });
 
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Auto-detect multiple cancellations on the same day (3 times = 5 points)
+   */
+  static async detectMultipleCancellationsSameDay(userId) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Since Appointment model doesn't have updated_at, we'll check for recent violations
+    // and count appointments scheduled for today that were cancelled
+    // This is an approximation - ideally the schema should have a cancelled_at field
+    
+    // Get all cancelled appointments created today (as a proxy for cancelled today)
+    const recentCancellations = await prisma.appointment.findMany({
+      where: {
+        customer_id: userId,
+        appointment_status: {
+          in: ['cancelled', 'canceled']
+        },
+        created_at: {
+          gte: new Date(Date.now() - 24 * 60 * 60 * 1000) // Last 24 hours
+        }
+      },
+      orderBy: {
+        created_at: 'desc'
+      }
+    });
+
+    const cancellationsToday = recentCancellations.length;
+
+    console.log(`📊 Cancelled appointments today: ${cancellationsToday}/3 for user ${userId}`);
+
+    if (cancellationsToday >= 3) {
+      // Check if already recorded today
+      const existingViolation = await prisma.penaltyViolation.findFirst({
+        where: {
+          user_id: userId,
+          violation_type: {
+            violation_code: 'USER_MULTIPLE_CANCELS_SAME_DAY',
+          },
+          created_at: {
+            gte: today,
+            lt: tomorrow,
+          },
+        },
+        include: { violation_type: true },
+      });
+
+      if (!existingViolation) {
+        await this.recordViolation({
+          userId,
+          violationCode: 'USER_MULTIPLE_CANCELS_SAME_DAY',
+          violationDetails: `Cancelled ${cancellationsToday} appointments within a single day`,
+          detectedBy: 'system',
+        });
+
+        console.log(`⚠️ User ${userId} violated: ${cancellationsToday} cancellations in one day`);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Auto-detect consecutive day cancellations (3 days in a row = 5 points)
+   */
+  static async detectConsecutiveDayCancellations(userId) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Check last 3 days for cancellations
+    // Since we don't have updated_at, we check appointments created in last 3 days that are cancelled
+    let consecutiveDays = 0;
+    for (let i = 0; i < 3; i++) {
+      const dayStart = new Date(today);
+      dayStart.setDate(dayStart.getDate() - i);
+      const dayEnd = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+
+      const cancellationsOnDay = await prisma.appointment.count({
+        where: {
+          customer_id: userId,
+          appointment_status: {
+            in: ['cancelled', 'canceled']
+          },
+          created_at: {
+            gte: dayStart,
+            lt: dayEnd,
+          },
+        },
+      });
+
+      if (cancellationsOnDay > 0) {
+        consecutiveDays++;
+      } else {
+        break; // Break the streak
+      }
+    }
+
+    console.log(`📊 Consecutive days with cancellations: ${consecutiveDays}/3 for user ${userId}`);
+
+    if (consecutiveDays >= 3) {
+      // Check if already recorded in last 3 days
+      const threeDaysAgo = new Date(today);
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+      const existingViolation = await prisma.penaltyViolation.findFirst({
+        where: {
+          user_id: userId,
+          violation_type: {
+            violation_code: 'USER_CONSECUTIVE_DAY_CANCELS',
+          },
+          created_at: {
+            gte: threeDaysAgo,
+          },
+        },
+        include: { violation_type: true },
+      });
+
+      if (!existingViolation) {
+        await this.recordViolation({
+          userId,
+          violationCode: 'USER_CONSECUTIVE_DAY_CANCELS',
+          violationDetails: `Cancelled appointments on ${consecutiveDays} consecutive days`,
+          detectedBy: 'system',
+        });
+
+        console.log(`⚠️ User ${userId} violated: cancellations on ${consecutiveDays} consecutive days`);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Auto-detect repeated no-shows within 7 days (3 times = 25 points)
+   */
+  static async detectRepeatedNoShows(userId) {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    // Count no-shows in last 7 days
+    const recentNoShows = await prisma.penaltyViolation.count({
+      where: {
+        user_id: userId,
+        violation_type: {
+          violation_code: 'USER_NO_SHOW',
+        },
+        created_at: {
+          gte: sevenDaysAgo,
+        },
+      },
+      include: { violation_type: true },
+    });
+
+    if (recentNoShows >= 3) {
+      // Check if repeated no-show violation already recorded
+      const existingRepeatedViolation = await prisma.penaltyViolation.findFirst({
+        where: {
+          user_id: userId,
+          violation_type: {
+            violation_code: 'USER_REPEATED_NO_SHOW',
+          },
+          created_at: {
+            gte: sevenDaysAgo,
+          },
+        },
+        include: { violation_type: true },
+      });
+
+      if (!existingRepeatedViolation) {
+        await this.recordViolation({
+          userId,
+          violationCode: 'USER_REPEATED_NO_SHOW',
+          violationDetails: `Three no-shows within seven days`,
+          detectedBy: 'system',
+        });
+
+        console.log(`⚠️ User ${userId} violated: ${recentNoShows} no-shows in 7 days`);
         return true;
       }
     }
@@ -920,10 +1112,17 @@ class PenaltyService {
         }
       }
 
-      return rewards;
+      return {
+        success: true,
+        customerReward: rewards.customer,
+        providerReward: rewards.provider,
+        message: !rewards.customer && !rewards.provider 
+          ? 'No rewards granted (both parties at 100 points)' 
+          : 'Rewards processed successfully'
+      };
     } catch (error) {
       console.error('Error rewarding successful booking:', error);
-      return null;
+      return { success: false, message: error.message };
     }
   }
 
@@ -939,69 +1138,146 @@ class PenaltyService {
         include: {
           serviceProvider: {
             select: { provider_id: true, penalty_points: true, is_suspended: true }
+          },
+          user: {
+            select: { user_id: true, penalty_points: true, is_suspended: true }
           }
         }
       });
 
       if (!rating) {
         console.error(`Rating ${ratingId} not found`);
-        return null;
+        return { success: false, message: 'Rating not found' };
       }
 
-      // Only reward providers for customer ratings (not vice versa)
-      if (rating.rated_by !== 'customer') {
-        return null;
-      }
-
-      // Determine points based on rating value
-      let pointsToAdd = 0;
-      if (rating.rating_value === 5) {
-        pointsToAdd = 5;
-      } else if (rating.rating_value === 4) {
-        pointsToAdd = 3;
-      } else if (rating.rating_value === 3) {
-        pointsToAdd = 2;
-      }
-      // No points for ratings below 3
-
-      if (pointsToAdd === 0 || rating.serviceProvider.penalty_points >= 100) {
-        return null; // No reward needed
-      }
-
-      const newPoints = Math.min(100, rating.serviceProvider.penalty_points + pointsToAdd);
-
-      await prisma.serviceProviderDetails.update({
-        where: { provider_id: rating.provider_id },
-        data: {
-          penalty_points: newPoints,
-          is_suspended: false,
-          suspended_at: null
+      // Reward provider if rated by customer
+      if (rating.rated_by === 'customer') {
+        // Determine points based on rating value
+        let pointsToAdd = 0;
+        if (rating.rating_value === 5) {
+          pointsToAdd = 5;
+        } else if (rating.rating_value === 4) {
+          pointsToAdd = 3;
+        } else if (rating.rating_value === 3) {
+          pointsToAdd = 2;
         }
-      });
+        // No points for ratings below 3
 
-      // Log the reward
-      await prisma.penaltyAdjustment.create({
-        data: {
-          provider_id: rating.provider_id,
-          adjustment_type: 'bonus',
-          points_adjusted: pointsToAdd,
-          previous_points: rating.serviceProvider.penalty_points,
-          new_points: newPoints,
-          reason: `Reward for receiving ${rating.rating_value}-star rating - Rating #${ratingId}`
+        if (pointsToAdd === 0) {
+          return { success: false, message: 'Rating too low for reward (< 3 stars)' };
         }
-      });
 
-      console.log(`✓ Rewarded provider ${rating.provider_id} with ${pointsToAdd} points for ${rating.rating_value}-star rating`);
+        if (rating.serviceProvider.penalty_points >= 100) {
+          return { success: false, message: 'Provider already at maximum points (100)' };
+        }
 
-      return {
-        points_added: pointsToAdd,
-        previous_points: rating.serviceProvider.penalty_points,
-        new_points: newPoints,
-        rating_value: rating.rating_value
-      };
+        const newPoints = Math.min(100, rating.serviceProvider.penalty_points + pointsToAdd);
+
+        await prisma.serviceProviderDetails.update({
+          where: { provider_id: rating.provider_id },
+          data: {
+            penalty_points: newPoints,
+            is_suspended: false,
+            suspended_at: null
+          }
+        });
+
+        // Log the reward
+        await prisma.penaltyAdjustment.create({
+          data: {
+            provider_id: rating.provider_id,
+            adjustment_type: 'bonus',
+            points_adjusted: pointsToAdd,
+            previous_points: rating.serviceProvider.penalty_points,
+            new_points: newPoints,
+            reason: `Reward for receiving ${rating.rating_value}-star rating - Rating #${ratingId}`
+          }
+        });
+
+        console.log(`✓ Rewarded provider ${rating.provider_id} with ${pointsToAdd} points for ${rating.rating_value}-star rating`);
+
+        return {
+          success: true,
+          providerReward: {
+            points_added: pointsToAdd,
+            previous_points: rating.serviceProvider.penalty_points,
+            new_points: newPoints,
+            rating_value: rating.rating_value
+          },
+          message: 'Provider rewarded for good rating'
+        };
+      }
+
+      // Reward customer if rated by provider
+      if (rating.rated_by === 'provider') {
+        // Determine points based on rating value
+        let pointsToAdd = 0;
+        if (rating.rating_value === 5) {
+          pointsToAdd = 5;
+        } else if (rating.rating_value === 4) {
+          pointsToAdd = 3;
+        } else if (rating.rating_value === 3) {
+          pointsToAdd = 2;
+        }
+        // No points for ratings below 3
+
+        if (pointsToAdd === 0) {
+          return { success: false, message: 'Rating too low for reward (< 3 stars)' };
+        }
+
+        if (rating.user.penalty_points >= 100) {
+          return { success: false, message: 'Customer already at maximum points (100)' };
+        }
+
+        const newPoints = Math.min(100, rating.user.penalty_points + pointsToAdd);
+        const shouldReactivate = newPoints > 50 && rating.user.penalty_points <= 50;
+
+        await prisma.user.update({
+          where: { user_id: rating.user_id },
+          data: {
+            penalty_points: newPoints,
+            is_suspended: newPoints <= 50,
+            is_activated: newPoints > 50,
+            suspended_at: newPoints > 50 ? null : rating.user.suspended_at
+          }
+        });
+
+        // Log the reward
+        await prisma.penaltyAdjustment.create({
+          data: {
+            user_id: rating.user_id,
+            adjustment_type: 'bonus',
+            points_adjusted: pointsToAdd,
+            previous_points: rating.user.penalty_points,
+            new_points: newPoints,
+            reason: shouldReactivate 
+              ? `Reward for receiving ${rating.rating_value}-star rating - Account reactivated (points > 50) - Rating #${ratingId}`
+              : `Reward for receiving ${rating.rating_value}-star rating - Rating #${ratingId}`
+          }
+        });
+
+        if (shouldReactivate) {
+          console.log(`✓ Customer ${rating.user_id} reactivated by earning ${pointsToAdd} points (now ${newPoints} > 50)`);
+        } else {
+          console.log(`✓ Rewarded customer ${rating.user_id} with ${pointsToAdd} points for ${rating.rating_value}-star rating`);
+        }
+
+        return {
+          success: true,
+          customerReward: {
+            points_added: pointsToAdd,
+            previous_points: rating.user.penalty_points,
+            new_points: newPoints,
+            rating_value: rating.rating_value
+          },
+          message: 'Customer rewarded for good rating'
+        };
+      }
+
+      return { success: false, message: 'Invalid rating type' };
     } catch (error) {
       console.error('Error rewarding good rating:', error);
-      return null;
+      return { success: false, message: error.message };
     }
   }
 

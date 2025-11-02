@@ -364,43 +364,6 @@ export const createAppointment = async (req, res) => {
             });
         }
 
-        // ✅ NEW: Prevent multiple bookings on the same date - customer can only book once per day
-        const requestedDate = new Date(scheduled_date);
-        const startOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate());
-        const endOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate() + 1);
-
-        const existingBookingOnDate = await prisma.appointment.findFirst({
-            where: {
-                customer_id: parseInt(customer_id),
-                scheduled_date: {
-                    gte: startOfDay,
-                    lt: endOfDay
-                },
-                appointment_status: {
-                    notIn: ['Cancelled', 'cancelled'] // Don't count cancelled appointments
-                }
-            }
-        });
-
-        if (existingBookingOnDate) {
-            console.log('🚫 DAILY BOOKING LIMIT EXCEEDED:', {
-                customer_id,
-                requested_date: scheduled_date,
-                existing_appointment_id: existingBookingOnDate.appointment_id,
-                existing_appointment_time: existingBookingOnDate.scheduled_date
-            });
-            return res.status(400).json({
-                success: false,
-                message: 'You already have an appointment scheduled on this date. You can only book one appointment per day.',
-                reason: 'daily_booking_limit_exceeded',
-                existing_appointment: {
-                    appointment_id: existingBookingOnDate.appointment_id,
-                    scheduled_date: existingBookingOnDate.scheduled_date,
-                    status: existingBookingOnDate.appointment_status
-                }
-            });
-        }
-
         // Validate scheduled date
         const scheduledDateTime = new Date(scheduled_date);
         if (isNaN(scheduledDateTime.getTime())) {
@@ -1172,6 +1135,25 @@ export const cancelAppointment = async (req, res) => {
             // Don't fail the cancellation if email fails
         }
 
+        // Auto-detect penalty violations for cancellation patterns
+        try {
+            const customerId = updatedAppointment.customer.user_id;
+            
+            // Check for late cancellation (< 2 hours before appointment)
+            await PenaltyService.detectLateCancellation(customerId, updatedAppointment.appointment_id);
+            
+            // Check for multiple cancellations on the same day
+            await PenaltyService.detectMultipleCancellationsSameDay(customerId);
+            
+            // Check for consecutive day cancellations
+            await PenaltyService.detectConsecutiveDayCancellations(customerId);
+            
+            console.log('✅ Penalty violation checks completed for customer:', customerId);
+        } catch (penaltyError) {
+            console.error('❌ Error checking penalty violations:', penaltyError);
+            // Don't fail the cancellation if penalty check fails
+        }
+
         res.status(200).json({
             success: true,
             message: 'Appointment cancelled successfully and notifications sent',
@@ -1320,6 +1302,25 @@ export const adminCancelAppointment = async (req, res) => {
         } catch (emailError) {
             console.error('❌ Error sending admin cancellation emails:', emailError);
             // Don't fail the cancellation if email fails
+        }
+
+        // Auto-detect penalty violations for cancellation patterns (even admin cancellations)
+        try {
+            const customerId = updatedAppointment.customer.user_id;
+            
+            // Check for late cancellation (< 2 hours before appointment)
+            await PenaltyService.detectLateCancellation(customerId, updatedAppointment.appointment_id);
+            
+            // Check for multiple cancellations on the same day
+            await PenaltyService.detectMultipleCancellationsSameDay(customerId);
+            
+            // Check for consecutive day cancellations
+            await PenaltyService.detectConsecutiveDayCancellations(customerId);
+            
+            console.log('✅ Penalty violation checks completed for customer:', customerId);
+        } catch (penaltyError) {
+            console.error('❌ Error checking penalty violations:', penaltyError);
+            // Don't fail the cancellation if penalty check fails
         }
 
         res.status(200).json({

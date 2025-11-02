@@ -7,6 +7,7 @@ import { forgotrequestOTP, verifyOTPAndResetPassword, verifyOTP, cleanupOTP } fr
 import { checkOTPRateLimit, recordOTPAttempt, checkForgotPasswordRateLimit, recordForgotPasswordAttempt, resetForgotPasswordAttempts } from '../services/rateLimitUtils.js';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
 import { calculateCustomerProviderDistance } from '../utils/locationUtils.js';
+import PenaltyService from '../services/penaltyService.js';
 
 const prisma = new PrismaClient();
 
@@ -1106,42 +1107,6 @@ export const addAppointment = async (req, res) => {
             });
         }
 
-        // ✅ NEW: Prevent multiple bookings on the same date - customer can only book once per day
-        const requestedDate = new Date(scheduled_date);
-        const startOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate());
-        const endOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate() + 1);
-
-        const existingBookingOnDate = await prisma.appointment.findFirst({
-            where: {
-                customer_id: parseInt(customer_id),
-                scheduled_date: {
-                    gte: startOfDay,
-                    lt: endOfDay
-                },
-                appointment_status: {
-                    notIn: ['Cancelled', 'cancelled'] // Don't count cancelled appointments
-                }
-            }
-        });
-
-        if (existingBookingOnDate) {
-            console.log('🚫 DAILY BOOKING LIMIT EXCEEDED:', {
-                customer_id,
-                requested_date: scheduled_date,
-                existing_appointment_id: existingBookingOnDate.appointment_id,
-                existing_appointment_time: existingBookingOnDate.scheduled_date
-            });
-            return res.status(400).json({
-                message: 'You already have an appointment scheduled on this date. You can only book one appointment per day.',
-                reason: 'daily_booking_limit_exceeded',
-                existing_appointment: {
-                    appointment_id: existingBookingOnDate.appointment_id,
-                    scheduled_date: existingBookingOnDate.scheduled_date,
-                    status: existingBookingOnDate.appointment_status
-                }
-            });
-        }
-
         // Validate service listing if provided
         let serviceListing = null;
         if (service_listing_id) {
@@ -1748,6 +1713,25 @@ export const cancelAppointment = async (req, res) => {
             where: { appointment_id: parseInt(appointment_id) },
             data: { appointment_status: 'canceled' }
         });
+
+        // Auto-detect penalty violations for cancellation patterns
+        try {
+            const customerId = parseInt(customer_id);
+            
+            // Check for late cancellation (< 2 hours before appointment)
+            await PenaltyService.detectLateCancellation(customerId, parseInt(appointment_id));
+            
+            // Check for multiple cancellations on the same day
+            await PenaltyService.detectMultipleCancellationsSameDay(customerId);
+            
+            // Check for consecutive day cancellations
+            await PenaltyService.detectConsecutiveDayCancellations(customerId);
+            
+            console.log('✅ Penalty violation checks completed for customer:', customerId);
+        } catch (penaltyError) {
+            console.error('❌ Error checking penalty violations:', penaltyError);
+            // Don't fail the cancellation if penalty check fails
+        }
 
         // No need to update availability slot - the appointment is simply cancelled
         // The availability slot can be reused for the same time slot on different dates
@@ -3060,43 +3044,6 @@ export const createAppointment = async (req, res) => {
             });
         }
 
-        // ✅ NEW: Prevent multiple bookings on the same date - customer can only book once per day
-        const requestedDate = new Date(scheduled_date);
-        const startOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate());
-        const endOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate() + 1);
-
-        const existingBookingOnDate = await prisma.appointment.findFirst({
-            where: {
-                customer_id: parseInt(customerId),
-                scheduled_date: {
-                    gte: startOfDay,
-                    lt: endOfDay
-                },
-                appointment_status: {
-                    notIn: ['Cancelled', 'cancelled'] // Don't count cancelled appointments
-                }
-            }
-        });
-
-        if (existingBookingOnDate) {
-            console.log('🚫 DAILY BOOKING LIMIT EXCEEDED:', {
-                customer_id: customerId,
-                requested_date: scheduled_date,
-                existing_appointment_id: existingBookingOnDate.appointment_id,
-                existing_appointment_time: existingBookingOnDate.scheduled_date
-            });
-            return res.status(400).json({
-                success: false,
-                message: 'You already have an appointment scheduled on this date. You can only book one appointment per day.',
-                reason: 'daily_booking_limit_exceeded',
-                existing_appointment: {
-                    appointment_id: existingBookingOnDate.appointment_id,
-                    scheduled_date: existingBookingOnDate.scheduled_date,
-                    status: existingBookingOnDate.appointment_status
-                }
-            });
-        }
-
         // Combine date and time into a proper DateTime
         const appointmentDateTime = new Date(`${scheduled_date}T${scheduled_time}:00.000Z`);
         console.log('Appointment DateTime:', appointmentDateTime);
@@ -3662,6 +3609,25 @@ export const cancelAppointmentEnhanced = async (req, res) => {
             }
         });
 
+        // Auto-detect penalty violations for cancellation patterns
+        try {
+            const customerId = userId;
+            
+            // Check for late cancellation (< 2 hours before appointment)
+            await PenaltyService.detectLateCancellation(customerId, parseInt(appointment_id));
+            
+            // Check for multiple cancellations on the same day
+            await PenaltyService.detectMultipleCancellationsSameDay(customerId);
+            
+            // Check for consecutive day cancellations
+            await PenaltyService.detectConsecutiveDayCancellations(customerId);
+            
+            console.log('✅ Penalty violation checks completed for customer:', customerId);
+        } catch (penaltyError) {
+            console.error('❌ Error checking penalty violations:', penaltyError);
+            // Don't fail the cancellation if penalty check fails
+        }
+
         // Send email notifications to both customer and service provider
         try {
             const customerName = `${existingAppointment.customer.first_name} ${existingAppointment.customer.last_name}`;
@@ -4183,6 +4149,188 @@ export const verifyOTPAndUpdateCustomerProfile = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to update profile',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Customer reports provider no-show
+ * Can report if scheduled appointment hasn't been updated past its time slot
+ * Requires: photo evidence and description
+ */
+export const reportProviderNoShow = async (req, res) => {
+    try {
+        const customerId = req.userId; // From auth middleware
+        const { appointmentId } = req.params;
+        const { description } = req.body;
+
+        console.log('🚫 Customer reporting provider no-show:', {
+            customerId,
+            appointmentId,
+            hasPhoto: !!req.file,
+            description
+        });
+
+        // Validate required fields
+        if (!description || !req.file) {
+            return res.status(400).json({
+                success: false,
+                message: 'Photo evidence and description are required to report a no-show'
+            });
+        }
+
+        // Get appointment details with availability info
+        const appointment = await prisma.appointment.findFirst({
+            where: {
+                appointment_id: parseInt(appointmentId),
+                customer_id: customerId
+            },
+            include: {
+                customer: {
+                    select: {
+                        first_name: true,
+                        last_name: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_title: true
+                    }
+                },
+                availability: {
+                    select: {
+                        startTime: true,
+                        endTime: true
+                    }
+                }
+            }
+        });
+
+        if (!appointment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Appointment not found or does not belong to you'
+            });
+        }
+
+        // Check if appointment is still in "scheduled" status
+        if (appointment.appointment_status !== 'scheduled') {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot report no-show. Appointment must be in "scheduled" status. Current status: ${appointment.appointment_status}`
+            });
+        }
+
+        // Check if the scheduled time has passed
+        const now = new Date();
+        const scheduledDate = new Date(appointment.scheduled_date);
+        
+        // Get the end time from availability slot
+        const endTime = appointment.availability?.endTime;
+        if (!endTime) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot determine appointment end time'
+            });
+        }
+
+        // Parse end time (HH:MM format) and add to scheduled date
+        const [endHour, endMinute] = endTime.split(':').map(Number);
+        const appointmentEndTime = new Date(scheduledDate);
+        appointmentEndTime.setHours(endHour, endMinute, 0, 0);
+
+        console.log('⏱️ Time check:', {
+            scheduledDate: scheduledDate.toISOString(),
+            appointmentEndTime: appointmentEndTime.toISOString(),
+            currentTime: now.toISOString(),
+            timeSlot: `${appointment.availability.startTime} - ${endTime}`,
+            hasTimePassed: now > appointmentEndTime
+        });
+
+        // Check if current time is past the appointment end time
+        if (now <= appointmentEndTime) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot report no-show yet. The appointment time slot has not ended. Appointment ends at ${appointmentEndTime.toLocaleString()}`,
+                appointmentEndTime: appointmentEndTime.toISOString(),
+                currentTime: now.toISOString()
+            });
+        }
+
+        // Upload photo evidence to Cloudinary
+        let evidencePhotoUrl;
+        try {
+            evidencePhotoUrl = await uploadToCloudinary(req.file.buffer, 'no-show-evidence');
+            console.log('✅ Evidence photo uploaded:', evidencePhotoUrl);
+        } catch (uploadError) {
+            console.error('❌ Error uploading evidence photo:', uploadError);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to upload evidence photo'
+            });
+        }
+
+        // Update appointment status to provider_no_show
+        const updatedAppointment = await prisma.appointment.update({
+            where: { appointment_id: parseInt(appointmentId) },
+            data: {
+                appointment_status: 'provider_no_show',
+                cancellation_reason: `Customer reported provider no-show: ${description}`
+            }
+        });
+
+        // Record no-show violation for provider
+        try {
+            await PenaltyService.detectProviderNoShow(parseInt(appointmentId));
+            console.log('✅ Penalty violations checked for provider:', appointment.serviceProvider.provider_id);
+        } catch (penaltyError) {
+            console.error('❌ Error recording provider no-show penalty:', penaltyError);
+            // Continue even if penalty recording fails
+        }
+
+        // Create a no-show report record
+        const noShowReport = {
+            appointment_id: appointment.appointment_id,
+            reported_by: 'customer',
+            reporter_id: customerId,
+            evidence_photo: evidencePhotoUrl,
+            description: description,
+            reported_at: new Date(),
+            time_past_appointment: Math.floor((now - appointmentEndTime) / (1000 * 60))
+        };
+
+        console.log('📝 No-show report created:', noShowReport);
+
+        res.status(200).json({
+            success: true,
+            message: 'Provider no-show reported successfully',
+            data: {
+                appointment: {
+                    appointment_id: updatedAppointment.appointment_id,
+                    status: updatedAppointment.appointment_status,
+                    provider_name: `${appointment.serviceProvider.provider_first_name} ${appointment.serviceProvider.provider_last_name}`,
+                    service: appointment.service.service_title,
+                    scheduled_date: appointment.scheduled_date,
+                    time_slot: `${appointment.availability.startTime} - ${appointment.availability.endTime}`
+                },
+                report: noShowReport
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error reporting provider no-show:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to report no-show',
             error: error.message
         });
     }

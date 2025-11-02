@@ -42,6 +42,7 @@ import {
   getCustomerBookingAvailability,
   requestCustomerProfileUpdateOTP,
   verifyOTPAndUpdateCustomerProfile,
+  reportProviderNoShow,
 } from '../controller/authCustomerController.js';
 
 const router = express.Router();
@@ -209,6 +210,10 @@ router.get('/appointment/:appointmentId', getAppointmentDetails);
 router.get('/bookings', authMiddleware, getCustomerBookingsDetailed);
 router.put('/bookings/:appointment_id/cancel', authMiddleware, cancelAppointmentEnhanced);
 router.post('/bookings/:appointment_id/rate', requireCustomerSession, addRatetoProvider);
+
+// Report provider no-show (requires authentication and photo upload)
+const noShowUpload = multer({ storage: multer.memoryStorage() });
+router.post('/appointments/:appointmentId/report-no-show', authMiddleware, noShowUpload.single('evidence_photo'), reportProviderNoShow);
 
 export default router;
 

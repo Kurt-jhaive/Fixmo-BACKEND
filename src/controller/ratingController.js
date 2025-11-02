@@ -158,15 +158,15 @@ export const createRating = async (req, res) => {
         // ✨ Reward penalty points for good ratings (3+ stars)
         if (ratingNum >= 3) {
             try {
-                console.log('🎁 Rewarding penalty points for good rating:', newRating.rating_id);
+                console.log('🎁 Rewarding penalty points for good rating:', newRating.id);
                 
-                const reward = await PenaltyService.rewardGoodRating(newRating.rating_id);
+                const reward = await PenaltyService.rewardGoodRating(newRating.id);
                 
-                if (reward.success) {
+                if (reward && reward.success) {
                     console.log('✅ Penalty reward granted for good rating:');
                     console.log(`   Provider: ${reward.providerReward?.points_added || 0} points (now ${reward.providerReward?.new_points || 'N/A'})`);
                 } else {
-                    console.log('⚠️ No penalty reward granted:', reward.message);
+                    console.log('⚠️ No penalty reward granted:', reward?.message || 'No reward returned');
                 }
             } catch (rewardError) {
                 console.error('❌ Error rewarding penalty points for rating:', rewardError);
@@ -700,15 +700,15 @@ export const createProviderRatingForCustomer = async (req, res) => {
         // ✨ Reward penalty points for good customer ratings (3+ stars)
         if (ratingNum >= 3) {
             try {
-                console.log('🎁 Rewarding penalty points for good customer rating:', newRating.rating_id);
+                console.log('🎁 Rewarding penalty points for good customer rating:', newRating.id);
                 
-                const reward = await PenaltyService.rewardGoodRating(newRating.rating_id);
+                const reward = await PenaltyService.rewardGoodRating(newRating.id);
                 
-                if (reward.success) {
+                if (reward && reward.success) {
                     console.log('✅ Penalty reward granted for good customer rating:');
                     console.log(`   Customer: ${reward.customerReward?.points_added || 0} points (now ${reward.customerReward?.new_points || 'N/A'})`);
                 } else {
-                    console.log('⚠️ No penalty reward granted:', reward.message);
+                    console.log('⚠️ No penalty reward granted:', reward?.message || 'No reward returned');
                 }
             } catch (rewardError) {
                 console.error('❌ Error rewarding penalty points for customer rating:', rewardError);
