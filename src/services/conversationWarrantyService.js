@@ -432,6 +432,113 @@ export const checkAppointmentStatus = async (customerId, providerId) => {
 };
 
 /**
+ * Auto-complete expired in-warranty appointments
+ * This should be run periodically via cron job
+ * @returns {Array} - Array of auto-completed appointment IDs
+ */
+export const autoCompleteExpiredWarranties = async () => {
+    try {
+        const now = new Date();
+        
+        // Step 1: Find appointments missing warranty_expires_at and calculate it
+        const missingExpiry = await prisma.appointment.findMany({
+            where: {
+                appointment_status: { in: ['in-warranty', 'backjob'] },
+                warranty_expires_at: null,
+                warranty_days: { not: null },
+                warranty_paused_at: null
+            }
+        });
+
+        if (missingExpiry.length > 0) {
+            console.log(`🔧 Found ${missingExpiry.length} in-warranty appointment(s) missing warranty_expires_at - calculating now...`);
+            
+            for (const apt of missingExpiry) {
+                const warrantyDays = apt.warranty_days;
+                let baseDate = apt.finished_at ? new Date(apt.finished_at) : new Date(apt.created_at);
+                
+                // If no finished_at, set it to now
+                const updateData = {};
+                if (!apt.finished_at) {
+                    updateData.finished_at = now;
+                    baseDate = now;
+                    console.log(`  📅 Appointment ${apt.appointment_id}: Set finished_at to now`);
+                }
+                
+                // Calculate warranty expiry
+                const expires = new Date(baseDate);
+                expires.setDate(expires.getDate() + warrantyDays);
+                updateData.warranty_expires_at = expires;
+                
+                await prisma.appointment.update({
+                    where: { appointment_id: apt.appointment_id },
+                    data: updateData
+                });
+                
+                console.log(`  ✅ Appointment ${apt.appointment_id}: warranty_expires_at set to ${expires.toISOString()}`);
+            }
+        }
+        
+        // Step 2: Find all appointments that are in-warranty or backjob with expired warranties
+        const expiredAppointments = await prisma.appointment.findMany({
+            where: {
+                appointment_status: { in: ['in-warranty', 'backjob'] },
+                warranty_expires_at: { 
+                    lte: now 
+                },
+                warranty_paused_at: null // Only expire non-paused warranties
+            },
+            select: {
+                appointment_id: true,
+                appointment_status: true,
+                warranty_expires_at: true,
+                customer_id: true,
+                provider_id: true
+            }
+        });
+
+        if (expiredAppointments.length === 0) {
+            if (missingExpiry.length > 0) {
+                console.log(`✅ Set warranty_expires_at for ${missingExpiry.length} appointment(s). No expired warranties to auto-complete yet.`);
+            }
+            return [];
+        }
+
+        const appointmentIds = expiredAppointments.map(a => a.appointment_id);
+        
+        // Update all expired appointments to completed
+        await prisma.appointment.updateMany({
+            where: { 
+                appointment_id: { in: appointmentIds }
+            },
+            data: { 
+                appointment_status: 'completed',
+                completed_at: now
+            }
+        });
+
+        // Also expire any active backjob applications for these appointments
+        await prisma.backjobApplication.updateMany({
+            where: { 
+                appointment_id: { in: appointmentIds },
+                status: { in: ['approved', 'pending'] }
+            },
+            data: { 
+                status: 'cancelled-by-admin',
+                admin_notes: 'Cancelled due to warranty expiration'
+            }
+        });
+
+        console.log(`✅ Auto-completed ${appointmentIds.length} expired in-warranty appointment(s) and cancelled related backjobs`);
+        
+        return expiredAppointments;
+    } catch (error) {
+        console.error('Error auto-completing expired warranties:', error);
+        throw error;
+    }
+};
+
+/**
  * Check if messaging is allowed based on appointment status
  * @param {number} customerId - Customer ID
  * @param {number} providerId - Provider ID
@@ -463,5 +570,6 @@ export default {
     closeExpiredConversations,
     getActiveWarrantyExpiry,
     checkAppointmentStatus,
-    isMessagingAllowed
+    isMessagingAllowed,
+    autoCompleteExpiredWarranties
 };

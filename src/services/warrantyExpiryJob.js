@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { closeExpiredConversations } from '../services/conversationWarrantyService.js';
+import { closeExpiredConversations, autoCompleteExpiredWarranties } from '../services/conversationWarrantyService.js';
 
 let webSocketServer = null;
 
@@ -46,22 +46,33 @@ const runWarrantyExpiryCleanup = async () => {
     try {
         console.log('🔄 Running warranty expiry cleanup job...');
         
+        // Step 1: Auto-complete expired in-warranty appointments
+        const expiredAppointments = await autoCompleteExpiredWarranties();
+        
+        // Step 2: Close expired conversations
         const expiredConversations = await closeExpiredConversations();
         
-        if (expiredConversations.length > 0) {
-            console.log(`✅ Warranty expiry cleanup completed. Closed ${expiredConversations.length} conversations.`);
-            
-            // Send WebSocket notifications for each closed conversation
-            expiredConversations.forEach(conversation => {
-                notifyConversationClosure(conversation);
-            });
-            
-            // Log summary
+        // Log results
+        if (expiredAppointments.length > 0 || expiredConversations.length > 0) {
+            console.log(`✅ Warranty expiry cleanup completed.`);
             console.log(`📊 Cleanup Summary:`);
+            console.log(`   - Appointments auto-completed: ${expiredAppointments.length}`);
             console.log(`   - Conversations closed: ${expiredConversations.length}`);
-            console.log(`   - Conversation IDs: ${expiredConversations.map(c => c.conversation_id).join(', ')}`);
+            
+            if (expiredAppointments.length > 0) {
+                console.log(`   - Appointment IDs: ${expiredAppointments.map(a => a.appointment_id).join(', ')}`);
+            }
+            
+            if (expiredConversations.length > 0) {
+                console.log(`   - Conversation IDs: ${expiredConversations.map(c => c.conversation_id).join(', ')}`);
+                
+                // Send WebSocket notifications for each closed conversation
+                expiredConversations.forEach(conversation => {
+                    notifyConversationClosure(conversation);
+                });
+            }
         } else {
-            console.log('ℹ️  No expired conversations found during cleanup.');
+            console.log('ℹ️  No expired warranties or conversations found during cleanup.');
         }
         
     } catch (error) {
@@ -116,7 +127,7 @@ export const getWarrantyJobStatus = () => {
         name: 'Warranty Expiry Cleanup',
         schedule: 'Every hour at minute 0 (0 * * * *)',
         timezone: 'UTC',
-        description: 'Closes conversations where warranty has expired',
+        description: 'Auto-completes expired in-warranty appointments and closes conversations where warranty has expired',
         last_run: 'Check application logs',
         manual_trigger_available: true
     };

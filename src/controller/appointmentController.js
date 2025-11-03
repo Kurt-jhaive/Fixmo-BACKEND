@@ -2,12 +2,16 @@ import { PrismaClient } from '@prisma/client';
 import { handleAppointmentWarranty } from '../services/conversationWarrantyService.js';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
 import notificationService from '../services/notificationService.js';
+import PenaltyService from '../services/penaltyService.js';
 
 const prisma = new PrismaClient();
 
 // Get all appointments (with filtering and pagination)
 export const getAllAppointments = async (req, res) => {
     try {
+        // NOTE: Auto-complete logic moved to hourly cron job for better performance
+        // Running this on every request was causing Railway backend issues
+        
         const { 
             page = 1, 
             limit = 10, 
@@ -92,6 +96,15 @@ export const getAllAppointments = async (req, res) => {
                             service_title: true,
                             service_startingprice: true
                         }
+                    },
+                    availability: {
+                        select: {
+                            availability_id: true,
+                            dayOfWeek: true,
+                            startTime: true,
+                            endTime: true,
+                            availability_isActive: true
+                        }
                     }
                 },
                 orderBy: {
@@ -130,7 +143,17 @@ export const getAllAppointments = async (req, res) => {
                 provider_rating_value: provider_rating?.rating_value || null
             };
             
-            return { ...a, days_left, needs_rating, is_rated, rating_status };
+            // Add slot times at root level for easier access
+            return { 
+                ...a, 
+                days_left, 
+                needs_rating, 
+                is_rated, 
+                rating_status,
+                slot_start_time: a.availability?.startTime || null,
+                slot_end_time: a.availability?.endTime || null,
+                slot_day_of_week: a.availability?.dayOfWeek || null
+            };
         });
 
         const totalPages = Math.ceil(totalCount / take);
@@ -338,43 +361,6 @@ export const createAppointment = async (req, res) => {
                 success: false,
                 message: 'You cannot book an appointment with yourself. Please select a different service provider.',
                 reason: 'self_booking_not_allowed'
-            });
-        }
-
-        // ✅ NEW: Prevent multiple bookings on the same date - customer can only book once per day
-        const requestedDate = new Date(scheduled_date);
-        const startOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate());
-        const endOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate() + 1);
-
-        const existingBookingOnDate = await prisma.appointment.findFirst({
-            where: {
-                customer_id: parseInt(customer_id),
-                scheduled_date: {
-                    gte: startOfDay,
-                    lt: endOfDay
-                },
-                appointment_status: {
-                    notIn: ['Cancelled', 'cancelled'] // Don't count cancelled appointments
-                }
-            }
-        });
-
-        if (existingBookingOnDate) {
-            console.log('🚫 DAILY BOOKING LIMIT EXCEEDED:', {
-                customer_id,
-                requested_date: scheduled_date,
-                existing_appointment_id: existingBookingOnDate.appointment_id,
-                existing_appointment_time: existingBookingOnDate.scheduled_date
-            });
-            return res.status(400).json({
-                success: false,
-                message: 'You already have an appointment scheduled on this date. You can only book one appointment per day.',
-                reason: 'daily_booking_limit_exceeded',
-                existing_appointment: {
-                    appointment_id: existingBookingOnDate.appointment_id,
-                    scheduled_date: existingBookingOnDate.scheduled_date,
-                    status: existingBookingOnDate.appointment_status
-                }
             });
         }
 
@@ -935,6 +921,24 @@ export const updateAppointmentStatus = async (req, res) => {
             } catch (notifError) {
                 console.error('❌ Error sending push notifications:', notifError);
             }
+
+            // ✨ Reward penalty points for successful completion
+            try {
+                console.log('🎁 Rewarding penalty points for completed appointment:', updatedAppointment.appointment_id);
+                
+                const reward = await PenaltyService.rewardSuccessfulBooking(updatedAppointment.appointment_id);
+                
+                if (reward.success) {
+                    console.log('✅ Penalty rewards granted:');
+                    console.log(`   Customer: ${reward.customerReward?.points_added || 0} points (now ${reward.customerReward?.new_points || 'N/A'})`);
+                    console.log(`   Provider: ${reward.providerReward?.points_added || 0} points (now ${reward.providerReward?.new_points || 'N/A'})`);
+                } else {
+                    console.log('⚠️ No penalty rewards granted:', reward.message);
+                }
+            } catch (rewardError) {
+                console.error('❌ Error rewarding penalty points:', rewardError);
+                // Don't fail the status update if reward fails
+            }
         }
 
         // Send push notifications for other status changes
@@ -1131,6 +1135,25 @@ export const cancelAppointment = async (req, res) => {
             // Don't fail the cancellation if email fails
         }
 
+        // Auto-detect penalty violations for cancellation patterns
+        try {
+            const customerId = updatedAppointment.customer.user_id;
+            
+            // Check for late cancellation (< 2 hours before appointment)
+            await PenaltyService.detectLateCancellation(customerId, updatedAppointment.appointment_id);
+            
+            // Check for multiple cancellations on the same day
+            await PenaltyService.detectMultipleCancellationsSameDay(customerId);
+            
+            // Check for consecutive day cancellations
+            await PenaltyService.detectConsecutiveDayCancellations(customerId);
+            
+            console.log('✅ Penalty violation checks completed for customer:', customerId);
+        } catch (penaltyError) {
+            console.error('❌ Error checking penalty violations:', penaltyError);
+            // Don't fail the cancellation if penalty check fails
+        }
+
         res.status(200).json({
             success: true,
             message: 'Appointment cancelled successfully and notifications sent',
@@ -1279,6 +1302,25 @@ export const adminCancelAppointment = async (req, res) => {
         } catch (emailError) {
             console.error('❌ Error sending admin cancellation emails:', emailError);
             // Don't fail the cancellation if email fails
+        }
+
+        // Auto-detect penalty violations for cancellation patterns (even admin cancellations)
+        try {
+            const customerId = updatedAppointment.customer.user_id;
+            
+            // Check for late cancellation (< 2 hours before appointment)
+            await PenaltyService.detectLateCancellation(customerId, updatedAppointment.appointment_id);
+            
+            // Check for multiple cancellations on the same day
+            await PenaltyService.detectMultipleCancellationsSameDay(customerId);
+            
+            // Check for consecutive day cancellations
+            await PenaltyService.detectConsecutiveDayCancellations(customerId);
+            
+            console.log('✅ Penalty violation checks completed for customer:', customerId);
+        } catch (penaltyError) {
+            console.error('❌ Error checking penalty violations:', penaltyError);
+            // Don't fail the cancellation if penalty check fails
         }
 
         res.status(200).json({
@@ -1732,6 +1774,15 @@ export const getProviderAppointments = async (req, res) => {
                             service_startingprice: true
                         }
                     },
+                    availability: {
+                        select: {
+                            availability_id: true,
+                            dayOfWeek: true,
+                            startTime: true,
+                            endTime: true,
+                            availability_isActive: true
+                        }
+                    },
                     appointment_rating: {
                         select: {
                             rating_value: true,
@@ -1803,6 +1854,7 @@ export const getProviderAppointments = async (req, res) => {
                 ? a.backjob_applications[0] 
                 : null;
             
+            // Add slot times at root level for easier frontend access
             return { 
                 ...a, 
                 days_left, 
@@ -1810,7 +1862,10 @@ export const getProviderAppointments = async (req, res) => {
                 is_rated,
                 rating_status,
                 current_backjob,
-                backjob_applications: undefined // Remove the array to avoid duplication
+                backjob_applications: undefined, // Remove the array to avoid duplication
+                slot_start_time: a.availability?.startTime || null,
+                slot_end_time: a.availability?.endTime || null,
+                slot_day_of_week: a.availability?.dayOfWeek || null
             };
         });
 
@@ -1897,6 +1952,15 @@ export const getCustomerAppointments = async (req, res) => {
                             service_startingprice: true
                         }
                     },
+                    availability: {
+                        select: {
+                            availability_id: true,
+                            dayOfWeek: true,
+                            startTime: true,
+                            endTime: true,
+                            availability_isActive: true
+                        }
+                    },
                     appointment_rating: {
                         select: {
                             rating_value: true,
@@ -1966,6 +2030,7 @@ export const getCustomerAppointments = async (req, res) => {
                 ? a.backjob_applications[0] 
                 : null;
             
+            // Add slot times at root level for easier frontend access
             return { 
                 ...a, 
                 days_left, 
@@ -1973,7 +2038,10 @@ export const getCustomerAppointments = async (req, res) => {
                 is_rated,
                 rating_status,
                 current_backjob,
-                backjob_applications: undefined // Remove the array to avoid duplication
+                backjob_applications: undefined, // Remove the array to avoid duplication
+                slot_start_time: a.availability?.startTime || null,
+                slot_end_time: a.availability?.endTime || null,
+                slot_day_of_week: a.availability?.dayOfWeek || null
             };
         });
 

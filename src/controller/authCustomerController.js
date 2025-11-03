@@ -7,6 +7,7 @@ import { forgotrequestOTP, verifyOTPAndResetPassword, verifyOTP, cleanupOTP } fr
 import { checkOTPRateLimit, recordOTPAttempt, checkForgotPasswordRateLimit, recordForgotPasswordAttempt, resetForgotPasswordAttempts } from '../services/rateLimitUtils.js';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
 import { calculateCustomerProviderDistance } from '../utils/locationUtils.js';
+import PenaltyService from '../services/penaltyService.js';
 
 const prisma = new PrismaClient();
 
@@ -1106,42 +1107,6 @@ export const addAppointment = async (req, res) => {
             });
         }
 
-        // ✅ NEW: Prevent multiple bookings on the same date - customer can only book once per day
-        const requestedDate = new Date(scheduled_date);
-        const startOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate());
-        const endOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate() + 1);
-
-        const existingBookingOnDate = await prisma.appointment.findFirst({
-            where: {
-                customer_id: parseInt(customer_id),
-                scheduled_date: {
-                    gte: startOfDay,
-                    lt: endOfDay
-                },
-                appointment_status: {
-                    notIn: ['Cancelled', 'cancelled'] // Don't count cancelled appointments
-                }
-            }
-        });
-
-        if (existingBookingOnDate) {
-            console.log('🚫 DAILY BOOKING LIMIT EXCEEDED:', {
-                customer_id,
-                requested_date: scheduled_date,
-                existing_appointment_id: existingBookingOnDate.appointment_id,
-                existing_appointment_time: existingBookingOnDate.scheduled_date
-            });
-            return res.status(400).json({
-                message: 'You already have an appointment scheduled on this date. You can only book one appointment per day.',
-                reason: 'daily_booking_limit_exceeded',
-                existing_appointment: {
-                    appointment_id: existingBookingOnDate.appointment_id,
-                    scheduled_date: existingBookingOnDate.scheduled_date,
-                    status: existingBookingOnDate.appointment_status
-                }
-            });
-        }
-
         // Validate service listing if provided
         let serviceListing = null;
         if (service_listing_id) {
@@ -1342,7 +1307,7 @@ export const addAppointment = async (req, res) => {
 // Get all service listings (for customer browsing)
 export const getServiceListings = async (req, res) => {
     try {
-        const { provider_id, service_type, location, min_price, max_price } = req.query;
+        const { provider_id, service_type, location, min_price, max_price, include_availability } = req.query;
         
         let whereClause = {};
         
@@ -1356,6 +1321,50 @@ export const getServiceListings = async (req, res) => {
             if (max_price) whereClause.service_startingprice.lte = parseFloat(max_price);
         }
 
+        const includeProviderData = {
+            select: {
+                provider_id: true,
+                provider_first_name: true,
+                provider_last_name: true,
+                provider_email: true,
+                provider_phone_number: true,
+                provider_location: true,
+                provider_rating: true,
+                provider_isVerified: true
+            }
+        };
+
+        // If include_availability is requested, add availability data
+        if (include_availability === 'true') {
+            includeProviderData.select.provider_availability = {
+                where: {
+                    availability_isActive: true
+                },
+                select: {
+                    availability_id: true,
+                    dayOfWeek: true,
+                    startTime: true,
+                    endTime: true,
+                    availability_isActive: true,
+                    _count: {
+                        select: {
+                            appointments: {
+                                where: {
+                                    appointment_status: {
+                                        in: ['scheduled', 'confirmed', 'in-progress']
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                orderBy: [
+                    { dayOfWeek: 'asc' },
+                    { startTime: 'asc' }
+                ]
+            };
+        }
+
         const serviceListings = await prisma.serviceListing.findMany({
             where: whereClause,
             include: {
@@ -1364,18 +1373,7 @@ export const getServiceListings = async (req, res) => {
                         uploadedAt: 'asc'
                     }
                 },
-                serviceProvider: {
-                    select: {
-                        provider_id: true,
-                        provider_first_name: true,
-                        provider_last_name: true,
-                        provider_email: true,
-                        provider_phone_number: true,
-                        provider_location: true,
-                        provider_rating: true,
-                        provider_isVerified: true
-                    }
-                },
+                serviceProvider: includeProviderData,
                 specific_services: {
                     include: {
                         category: true
@@ -1406,6 +1404,41 @@ export const getServiceListings = async (req, res) => {
             );
         }
 
+        // Process availability if included
+        if (include_availability === 'true') {
+            filteredListings = filteredListings.map(listing => {
+                if (listing.serviceProvider.provider_availability) {
+                    const processedAvailability = listing.serviceProvider.provider_availability.map(slot => {
+                        const totalBookings = slot._count?.appointments || 0;
+                        const startHour = parseInt(slot.startTime.split(':')[0]);
+                        const endHour = parseInt(slot.endTime.split(':')[0]);
+                        const totalSlots = endHour - startHour;
+                        const availableSlots = Math.max(0, totalSlots - totalBookings);
+                        
+                        return {
+                            availability_id: slot.availability_id,
+                            dayOfWeek: slot.dayOfWeek,
+                            startTime: slot.startTime,
+                            endTime: slot.endTime,
+                            isActive: slot.availability_isActive,
+                            totalBookings: totalBookings,
+                            estimatedAvailableSlots: availableSlots,
+                            isFullyBooked: availableSlots === 0
+                        };
+                    });
+
+                    return {
+                        ...listing,
+                        serviceProvider: {
+                            ...listing.serviceProvider,
+                            available_time_slots: processedAvailability
+                        }
+                    };
+                }
+                return listing;
+            });
+        }
+
         return res.status(200).json({
             message: 'Service listings retrieved successfully',
             count: filteredListings.length,
@@ -1421,6 +1454,7 @@ export const getServiceListings = async (req, res) => {
 // Get specific service listing details
 export const getServiceListingDetails = async (req, res) => {
     const { service_id } = req.params;
+    const { date } = req.query; // Optional: specific date to check availability
 
     try {
         if (!service_id) {
@@ -1432,7 +1466,31 @@ export const getServiceListingDetails = async (req, res) => {
             include: {
                 serviceProvider: {
                     include: {
-                        provider_availability: true,
+                        provider_availability: {
+                            where: {
+                                availability_isActive: true
+                            },
+                            include: {
+                                appointments: date ? {
+                                    where: {
+                                        scheduled_date: new Date(date),
+                                        appointment_status: {
+                                            in: ['scheduled', 'confirmed', 'in-progress']
+                                        }
+                                    }
+                                } : {
+                                    where: {
+                                        appointment_status: {
+                                            in: ['scheduled', 'confirmed', 'in-progress']
+                                        }
+                                    }
+                                }
+                            },
+                            orderBy: [
+                                { dayOfWeek: 'asc' },
+                                { startTime: 'asc' }
+                            ]
+                        },
                         provider_ratings: {
                             include: {
                                 user: {
@@ -1461,9 +1519,53 @@ export const getServiceListingDetails = async (req, res) => {
             return res.status(404).json({ message: 'Service listing not found' });
         }
 
+        // Process availability to show available time slots
+        const processedAvailability = serviceListing.serviceProvider.provider_availability.map(slot => {
+            const totalBookings = slot.appointments?.length || 0;
+            
+            // Calculate available slots based on time range
+            // Assuming 1-hour appointment slots
+            const startHour = parseInt(slot.startTime.split(':')[0]);
+            const endHour = parseInt(slot.endTime.split(':')[0]);
+            const totalSlots = endHour - startHour;
+            const availableSlots = Math.max(0, totalSlots - totalBookings);
+            
+            return {
+                availability_id: slot.availability_id,
+                dayOfWeek: slot.dayOfWeek,
+                startTime: slot.startTime,
+                endTime: slot.endTime,
+                isActive: slot.availability_isActive,
+                totalBookings: totalBookings,
+                estimatedAvailableSlots: availableSlots,
+                isFullyBooked: availableSlots === 0,
+                bookedAppointments: slot.appointments?.map(appt => ({
+                    appointment_id: appt.appointment_id,
+                    scheduled_date: appt.scheduled_date,
+                    status: appt.appointment_status
+                })) || []
+            };
+        });
+
+        // Group by day of week for easier frontend consumption
+        const availabilityByDay = processedAvailability.reduce((acc, slot) => {
+            if (!acc[slot.dayOfWeek]) {
+                acc[slot.dayOfWeek] = [];
+            }
+            acc[slot.dayOfWeek].push(slot);
+            return acc;
+        }, {});
+
         return res.status(200).json({
             message: 'Service listing details retrieved successfully',
-            listing: serviceListing
+            listing: {
+                ...serviceListing,
+                serviceProvider: {
+                    ...serviceListing.serviceProvider,
+                    available_time_slots: processedAvailability,
+                    availability_by_day: availabilityByDay
+                }
+            }
         });
 
     } catch (err) {
@@ -1510,6 +1612,22 @@ export const getCustomerAppointments = async (req, res) => {
                         provider_location: true,
                         provider_exact_location: true
                     }
+                },
+                availability: {
+                    select: {
+                        availability_id: true,
+                        dayOfWeek: true,
+                        startTime: true,
+                        endTime: true,
+                        availability_isActive: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_startingprice: true
+                    }
                 }
             },
             orderBy: {
@@ -1517,13 +1635,21 @@ export const getCustomerAppointments = async (req, res) => {
             }
         });
 
+        // Add slot times at root level for easier access
+        const formattedAppointments = appointments.map(a => ({
+            ...a,
+            slot_start_time: a.availability?.startTime || null,
+            slot_end_time: a.availability?.endTime || null,
+            slot_day_of_week: a.availability?.dayOfWeek || null
+        }));
+
         return res.status(200).json({
             message: 'Customer appointments retrieved successfully',
             customer: {
                 customer_id: customer.user_id,
                 customer_name: `${customer.first_name} ${customer.last_name}`
             },
-            appointments: appointments
+            appointments: formattedAppointments
         });
 
     } catch (err) {
@@ -1587,6 +1713,25 @@ export const cancelAppointment = async (req, res) => {
             where: { appointment_id: parseInt(appointment_id) },
             data: { appointment_status: 'canceled' }
         });
+
+        // Auto-detect penalty violations for cancellation patterns
+        try {
+            const customerId = parseInt(customer_id);
+            
+            // Check for late cancellation (< 2 hours before appointment)
+            await PenaltyService.detectLateCancellation(customerId, parseInt(appointment_id));
+            
+            // Check for multiple cancellations on the same day
+            await PenaltyService.detectMultipleCancellationsSameDay(customerId);
+            
+            // Check for consecutive day cancellations
+            await PenaltyService.detectConsecutiveDayCancellations(customerId);
+            
+            console.log('✅ Penalty violation checks completed for customer:', customerId);
+        } catch (penaltyError) {
+            console.error('❌ Error checking penalty violations:', penaltyError);
+            // Don't fail the cancellation if penalty check fails
+        }
 
         // No need to update availability slot - the appointment is simply cancelled
         // The availability slot can be reused for the same time slot on different dates
@@ -2077,7 +2222,34 @@ export const getServiceListingsForCustomer = async (req, res) => {
                         provider_exact_location: true, // For distance calculation
                         provider_rating: true,
                         provider_isVerified: true,
-                        provider_profile_photo: true
+                        provider_profile_photo: true,
+                        provider_availability: {
+                            where: {
+                                availability_isActive: true
+                            },
+                            select: {
+                                availability_id: true,
+                                dayOfWeek: true,
+                                startTime: true,
+                                endTime: true,
+                                availability_isActive: true,
+                                _count: {
+                                    select: {
+                                        appointments: {
+                                            where: {
+                                                appointment_status: {
+                                                    in: ['scheduled', 'confirmed', 'in-progress']
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            orderBy: [
+                                { dayOfWeek: 'asc' },
+                                { startTime: 'asc' }
+                            ]
+                        }
                     }
                 },
                 specific_services: {
@@ -2146,7 +2318,7 @@ export const getServiceListingsForCustomer = async (req, res) => {
             // Get all provider IDs from the listings (use filteredListings after self-exclusion)
             const providerIds = filteredListings.map(listing => listing.serviceProvider.provider_id);
             
-            // First, get all active appointments for all providers on the requested date
+            // Get all active appointments for all providers on the requested date WITH availability_id
             const activeAppointments = await prisma.appointment.findMany({
                 where: {
                     provider_id: { in: providerIds },
@@ -2160,14 +2332,17 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 },
                 select: {
                     provider_id: true,
+                    availability_id: true,
                     appointment_status: true,
                     scheduled_date: true
                 }
             });
             
-            // Create a set of provider IDs that have active appointments on this date
-            const providersWithActiveAppointments = new Set(
-                activeAppointments.map(apt => apt.provider_id)
+            // Create a set of availability_ids that are booked (not provider IDs)
+            const bookedAvailabilityIds = new Set(
+                activeAppointments
+                    .filter(apt => apt.availability_id !== null)
+                    .map(apt => apt.availability_id)
             );
             
             // Get availability data for all providers for the requested day of week
@@ -2183,8 +2358,8 @@ export const getServiceListingsForCustomer = async (req, res) => {
             const availableProviderIds = new Set();
             
             providerAvailability.forEach(availability => {
-                // Check if this provider has any active appointments on the requested date
-                const hasActiveAppointments = providersWithActiveAppointments.has(availability.provider_id);
+                // Check if THIS SPECIFIC SLOT is booked
+                const isSlotBooked = bookedAvailabilityIds.has(availability.availability_id);
                 const isPastDate = requestedDate < new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
                 
                 // Check if booking is still allowed (for today only - until 3 PM)
@@ -2198,13 +2373,13 @@ export const getServiceListingsForCustomer = async (req, res) => {
                     isBookingAllowed = currentHour < 15;
                 }
                 
-                // Provider slot is available if:
+                // This slot is available if:
                 // 1. Not a past date
                 // 2. Booking is still allowed (before 3 PM if today)
-                // 3. No active appointments for this provider on this date
-                const isAvailable = !isPastDate && isBookingAllowed && !hasActiveAppointments;
+                // 3. This specific slot is NOT booked
+                const isSlotAvailable = !isPastDate && isBookingAllowed && !isSlotBooked;
                 
-                if (isAvailable) {
+                if (isSlotAvailable) {
                     availableProviderIds.add(availability.provider_id);
                 }
                 
@@ -2220,7 +2395,7 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 }
                 
                 availabilityInfo[availability.provider_id].totalSlots++;
-                if (isAvailable) {
+                if (isSlotAvailable) {
                     availabilityInfo[availability.provider_id].availableSlots++;
                     availabilityInfo[availability.provider_id].hasAvailability = true;
                     // Add the available slot details including availability_id
@@ -2230,7 +2405,7 @@ export const getServiceListingsForCustomer = async (req, res) => {
                         endTime: availability.endTime,
                         dayOfWeek: availability.dayOfWeek
                     });
-                } else if (hasActiveAppointments) {
+                } else if (isSlotBooked) {
                     availabilityInfo[availability.provider_id].bookedSlots++;
                 }
             });
@@ -2319,7 +2494,27 @@ export const getServiceListingsForCustomer = async (req, res) => {
                     rating: listing.serviceProvider.provider_rating || 0,
                     location: listing.serviceProvider.provider_location,
                     exact_location: listing.serviceProvider.provider_exact_location, // Include exact location for mobile app
-                    profilePhoto: listing.serviceProvider.provider_profile_photo
+                    profilePhoto: listing.serviceProvider.provider_profile_photo,
+                    // Add available time slots
+                    available_time_slots: listing.serviceProvider.provider_availability ? 
+                        listing.serviceProvider.provider_availability.map(slot => {
+                            const totalBookings = slot._count?.appointments || 0;
+                            const startHour = parseInt(slot.startTime.split(':')[0]);
+                            const endHour = parseInt(slot.endTime.split(':')[0]);
+                            const totalSlots = endHour - startHour;
+                            const availableSlots = Math.max(0, totalSlots - totalBookings);
+                            
+                            return {
+                                availability_id: slot.availability_id,
+                                dayOfWeek: slot.dayOfWeek,
+                                startTime: slot.startTime,
+                                endTime: slot.endTime,
+                                isActive: slot.availability_isActive,
+                                totalBookings: totalBookings,
+                                estimatedAvailableSlots: availableSlots,
+                                isFullyBooked: availableSlots === 0
+                            };
+                        }) : []
                 },
                 categories: listing.specific_services.map(service => service.category.category_name),
                 specificServices: listing.specific_services.map(service => ({
@@ -2849,43 +3044,6 @@ export const createAppointment = async (req, res) => {
             });
         }
 
-        // ✅ NEW: Prevent multiple bookings on the same date - customer can only book once per day
-        const requestedDate = new Date(scheduled_date);
-        const startOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate());
-        const endOfDay = new Date(requestedDate.getFullYear(), requestedDate.getMonth(), requestedDate.getDate() + 1);
-
-        const existingBookingOnDate = await prisma.appointment.findFirst({
-            where: {
-                customer_id: parseInt(customerId),
-                scheduled_date: {
-                    gte: startOfDay,
-                    lt: endOfDay
-                },
-                appointment_status: {
-                    notIn: ['Cancelled', 'cancelled'] // Don't count cancelled appointments
-                }
-            }
-        });
-
-        if (existingBookingOnDate) {
-            console.log('🚫 DAILY BOOKING LIMIT EXCEEDED:', {
-                customer_id: customerId,
-                requested_date: scheduled_date,
-                existing_appointment_id: existingBookingOnDate.appointment_id,
-                existing_appointment_time: existingBookingOnDate.scheduled_date
-            });
-            return res.status(400).json({
-                success: false,
-                message: 'You already have an appointment scheduled on this date. You can only book one appointment per day.',
-                reason: 'daily_booking_limit_exceeded',
-                existing_appointment: {
-                    appointment_id: existingBookingOnDate.appointment_id,
-                    scheduled_date: existingBookingOnDate.scheduled_date,
-                    status: existingBookingOnDate.appointment_status
-                }
-            });
-        }
-
         // Combine date and time into a proper DateTime
         const appointmentDateTime = new Date(`${scheduled_date}T${scheduled_time}:00.000Z`);
         console.log('Appointment DateTime:', appointmentDateTime);
@@ -3193,6 +3351,23 @@ export const getAppointmentDetails = async (req, res) => {
                         provider_email: true,
                         provider_phone_number: true
                     }
+                },
+                availability: {
+                    select: {
+                        availability_id: true,
+                        dayOfWeek: true,
+                        startTime: true,
+                        endTime: true,
+                        availability_isActive: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_id: true,
+                        service_title: true,
+                        service_description: true,
+                        service_startingprice: true
+                    }
                 }
             }
         });
@@ -3204,10 +3379,18 @@ export const getAppointmentDetails = async (req, res) => {
             });
         }
 
+        // Format response with slot details at root level for easier access
+        const formattedAppointment = {
+            ...appointment,
+            slot_start_time: appointment.availability?.startTime || null,
+            slot_end_time: appointment.availability?.endTime || null,
+            slot_day_of_week: appointment.availability?.dayOfWeek || null
+        };
+
         res.status(200).json({
             success: true,
             message: 'Appointment details retrieved successfully',
-            appointment: appointment
+            appointment: formattedAppointment
         });
 
     } catch (error) {
@@ -3425,6 +3608,25 @@ export const cancelAppointmentEnhanced = async (req, res) => {
                 cancellation_reason: cancellation_reason || 'No reason provided'
             }
         });
+
+        // Auto-detect penalty violations for cancellation patterns
+        try {
+            const customerId = userId;
+            
+            // Check for late cancellation (< 2 hours before appointment)
+            await PenaltyService.detectLateCancellation(customerId, parseInt(appointment_id));
+            
+            // Check for multiple cancellations on the same day
+            await PenaltyService.detectMultipleCancellationsSameDay(customerId);
+            
+            // Check for consecutive day cancellations
+            await PenaltyService.detectConsecutiveDayCancellations(customerId);
+            
+            console.log('✅ Penalty violation checks completed for customer:', customerId);
+        } catch (penaltyError) {
+            console.error('❌ Error checking penalty violations:', penaltyError);
+            // Don't fail the cancellation if penalty check fails
+        }
 
         // Send email notifications to both customer and service provider
         try {
@@ -3947,6 +4149,188 @@ export const verifyOTPAndUpdateCustomerProfile = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to update profile',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Customer reports provider no-show
+ * Can report if scheduled appointment hasn't been updated past its time slot
+ * Requires: photo evidence and description
+ */
+export const reportProviderNoShow = async (req, res) => {
+    try {
+        const customerId = req.userId; // From auth middleware
+        const { appointmentId } = req.params;
+        const { description } = req.body;
+
+        console.log('🚫 Customer reporting provider no-show:', {
+            customerId,
+            appointmentId,
+            hasPhoto: !!req.file,
+            description
+        });
+
+        // Validate required fields
+        if (!description || !req.file) {
+            return res.status(400).json({
+                success: false,
+                message: 'Photo evidence and description are required to report a no-show'
+            });
+        }
+
+        // Get appointment details with availability info
+        const appointment = await prisma.appointment.findFirst({
+            where: {
+                appointment_id: parseInt(appointmentId),
+                customer_id: customerId
+            },
+            include: {
+                customer: {
+                    select: {
+                        first_name: true,
+                        last_name: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true,
+                        provider_email: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_title: true
+                    }
+                },
+                availability: {
+                    select: {
+                        startTime: true,
+                        endTime: true
+                    }
+                }
+            }
+        });
+
+        if (!appointment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Appointment not found or does not belong to you'
+            });
+        }
+
+        // Check if appointment is still in "scheduled" status
+        if (appointment.appointment_status !== 'scheduled') {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot report no-show. Appointment must be in "scheduled" status. Current status: ${appointment.appointment_status}`
+            });
+        }
+
+        // Check if the scheduled time has passed
+        const now = new Date();
+        const scheduledDate = new Date(appointment.scheduled_date);
+        
+        // Get the end time from availability slot
+        const endTime = appointment.availability?.endTime;
+        if (!endTime) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot determine appointment end time'
+            });
+        }
+
+        // Parse end time (HH:MM format) and add to scheduled date
+        const [endHour, endMinute] = endTime.split(':').map(Number);
+        const appointmentEndTime = new Date(scheduledDate);
+        appointmentEndTime.setHours(endHour, endMinute, 0, 0);
+
+        console.log('⏱️ Time check:', {
+            scheduledDate: scheduledDate.toISOString(),
+            appointmentEndTime: appointmentEndTime.toISOString(),
+            currentTime: now.toISOString(),
+            timeSlot: `${appointment.availability.startTime} - ${endTime}`,
+            hasTimePassed: now > appointmentEndTime
+        });
+
+        // Check if current time is past the appointment end time
+        if (now <= appointmentEndTime) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot report no-show yet. The appointment time slot has not ended. Appointment ends at ${appointmentEndTime.toLocaleString()}`,
+                appointmentEndTime: appointmentEndTime.toISOString(),
+                currentTime: now.toISOString()
+            });
+        }
+
+        // Upload photo evidence to Cloudinary
+        let evidencePhotoUrl;
+        try {
+            evidencePhotoUrl = await uploadToCloudinary(req.file.buffer, 'no-show-evidence');
+            console.log('✅ Evidence photo uploaded:', evidencePhotoUrl);
+        } catch (uploadError) {
+            console.error('❌ Error uploading evidence photo:', uploadError);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to upload evidence photo'
+            });
+        }
+
+        // Update appointment status to provider_no_show
+        const updatedAppointment = await prisma.appointment.update({
+            where: { appointment_id: parseInt(appointmentId) },
+            data: {
+                appointment_status: 'provider_no_show',
+                cancellation_reason: `Customer reported provider no-show: ${description}`
+            }
+        });
+
+        // Record no-show violation for provider
+        try {
+            await PenaltyService.detectProviderNoShow(parseInt(appointmentId));
+            console.log('✅ Penalty violations checked for provider:', appointment.serviceProvider.provider_id);
+        } catch (penaltyError) {
+            console.error('❌ Error recording provider no-show penalty:', penaltyError);
+            // Continue even if penalty recording fails
+        }
+
+        // Create a no-show report record
+        const noShowReport = {
+            appointment_id: appointment.appointment_id,
+            reported_by: 'customer',
+            reporter_id: customerId,
+            evidence_photo: evidencePhotoUrl,
+            description: description,
+            reported_at: new Date(),
+            time_past_appointment: Math.floor((now - appointmentEndTime) / (1000 * 60))
+        };
+
+        console.log('📝 No-show report created:', noShowReport);
+
+        res.status(200).json({
+            success: true,
+            message: 'Provider no-show reported successfully',
+            data: {
+                appointment: {
+                    appointment_id: updatedAppointment.appointment_id,
+                    status: updatedAppointment.appointment_status,
+                    provider_name: `${appointment.serviceProvider.provider_first_name} ${appointment.serviceProvider.provider_last_name}`,
+                    service: appointment.service.service_title,
+                    scheduled_date: appointment.scheduled_date,
+                    time_slot: `${appointment.availability.startTime} - ${appointment.availability.endTime}`
+                },
+                report: noShowReport
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error reporting provider no-show:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to report no-show',
             error: error.message
         });
     }

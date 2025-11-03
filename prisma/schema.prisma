@@ -31,11 +31,16 @@ model User {
   is_activated      Boolean        @default(true)
   birthday          DateTime?
   exact_location    String?
-  user_reason       String?  
+  user_reason       String?
+  penalty_points    Int            @default(100) // Penalty system: default 100 points
+  is_suspended      Boolean        @default(false) // Auto-suspend when penalty_points <= 0
+  suspended_at      DateTime?
+  suspended_until   DateTime?      // Temporary suspension expiry
   user_appointments Appointment[]
   user_rating       Rating[]
   conversations     Conversation[]
   backjob_applications BackjobApplication[] @relation("UserBackjobs")
+  penalty_violations PenaltyViolation[] @relation("UserViolations")
 }
 
 model ServiceProviderDetails {
@@ -63,6 +68,10 @@ model ServiceProviderDetails {
   provider_birthday       DateTime?
   provider_exact_location String?
   provider_reason         String?
+  penalty_points          Int              @default(100) // Penalty system: default 100 points
+  is_suspended            Boolean          @default(false) // Auto-suspend when penalty_points <= 0
+  suspended_at            DateTime?
+  suspended_until         DateTime?        // Temporary suspension expiry
   provider_appointments   Appointment[]
   provider_availability   Availability[]
   provider_certificates   Certificate[]
@@ -71,6 +80,7 @@ model ServiceProviderDetails {
   conversations           Conversation[]
   provider_professions    ProviderProfession[]
   backjob_applications    BackjobApplication[] @relation("ProviderBackjobs")
+  penalty_violations      PenaltyViolation[] @relation("ProviderViolations")
 }
 
 model Certificate {
@@ -153,7 +163,8 @@ model Availability {
   startTime             String
   endTime               String
   provider_id           Int
-  availability_isActive Boolean                @default(true)
+  availability_isActive Boolean                @default(true) // Toggle for entire day
+  slot_isActive         Boolean                @default(true) // Toggle for individual time slot
   appointments          Appointment[]
   serviceProvider       ServiceProviderDetails @relation(fields: [provider_id], references: [provider_id])
 }
@@ -328,4 +339,78 @@ model Report {
   @@index([reporter_email])
   @@index([provider_id])
   @@index([appointment_id])
+}
+
+// Penalty System - Violation Types Definition
+model ViolationType {
+  violation_type_id   Int      @id @default(autoincrement())
+  violation_code      String   @unique // e.g., "USER_LATE_CANCEL", "PROVIDER_NO_SHOW"
+  violation_name      String   // Human-readable name
+  violation_category  String   // 'user' or 'provider'
+  penalty_points      Int      // Points to deduct
+  description         String   @db.Text
+  is_active           Boolean  @default(true)
+  requires_evidence   Boolean  @default(false) // Some violations may require proof
+  auto_detect         Boolean  @default(false) // Can be auto-detected by system
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+  violations          PenaltyViolation[]
+
+  @@index([violation_category, is_active])
+  @@index([violation_code])
+}
+
+// Penalty System - Individual Violation Records
+model PenaltyViolation {
+  violation_id        Int           @id @default(autoincrement())
+  user_id             Int?          // Null if violation is for provider
+  provider_id         Int?          // Null if violation is for user
+  violation_type_id   Int
+  appointment_id      Int?          // Related appointment (if applicable)
+  report_id           Int?          // Related report (if applicable)
+  rating_id           Int?          // Related rating (if applicable)
+  points_deducted     Int           // Points deducted for this violation
+  violation_details   String?       @db.Text // Additional context
+  evidence_urls       Json?         // Screenshots/proof if available
+  detected_by         String        @default("system") // 'system', 'admin', 'user_report'
+  detected_by_admin_id Int?         // Admin who recorded this violation
+  status              String        @default("active") // 'active', 'appealed', 'reversed', 'expired'
+  appeal_reason       String?       @db.Text
+  appeal_status       String?       // 'pending', 'approved', 'rejected'
+  appeal_reviewed_by  Int?          // Admin who reviewed appeal
+  appeal_reviewed_at  DateTime?
+  reversed_at         DateTime?     // When violation was reversed
+  reversed_by_admin_id Int?         // Admin who reversed it
+  reversal_reason     String?       @db.Text
+  created_at          DateTime      @default(now())
+  expires_at          DateTime?     // Optional: violations can expire after certain period
+
+  user                User?         @relation("UserViolations", fields: [user_id], references: [user_id])
+  provider            ServiceProviderDetails? @relation("ProviderViolations", fields: [provider_id], references: [provider_id])
+  violation_type      ViolationType @relation(fields: [violation_type_id], references: [violation_type_id])
+
+  @@index([user_id, status])
+  @@index([provider_id, status])
+  @@index([violation_type_id])
+  @@index([created_at])
+}
+
+// Penalty System - Points Restoration/Adjustment Log
+model PenaltyAdjustment {
+  adjustment_id       Int      @id @default(autoincrement())
+  user_id             Int?
+  provider_id         Int?
+  adjustment_type     String   // 'restore', 'bonus', 'penalty', 'reset'
+  points_adjusted     Int      // Positive for additions, negative for deductions
+  previous_points     Int      // Points before adjustment
+  new_points          Int      // Points after adjustment
+  reason              String   @db.Text
+  adjusted_by_admin_id Int?    // Admin who made adjustment
+  related_violation_id Int?    // If adjusting due to violation appeal
+  created_at          DateTime @default(now())
+
+  @@index([user_id])
+  @@index([provider_id])
+  @@index([adjustment_type])
+  @@index([created_at])
 }

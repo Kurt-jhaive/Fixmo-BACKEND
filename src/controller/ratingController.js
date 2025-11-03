@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { uploadToCloudinary } from '../services/cloudinaryService.js';
+import PenaltyService from '../services/penaltyService.js';
 
 const prisma = new PrismaClient();
 
@@ -153,6 +154,25 @@ export const createRating = async (req, res) => {
 
         // Update provider's average rating
         await updateProviderAverageRating(parseInt(provider_id));
+
+        // ✨ Reward penalty points for good ratings (3+ stars)
+        if (ratingNum >= 3) {
+            try {
+                console.log('🎁 Rewarding penalty points for good rating:', newRating.id);
+                
+                const reward = await PenaltyService.rewardGoodRating(newRating.id);
+                
+                if (reward && reward.success) {
+                    console.log('✅ Penalty reward granted for good rating:');
+                    console.log(`   Provider: ${reward.providerReward?.points_added || 0} points (now ${reward.providerReward?.new_points || 'N/A'})`);
+                } else {
+                    console.log('⚠️ No penalty reward granted:', reward?.message || 'No reward returned');
+                }
+            } catch (rewardError) {
+                console.error('❌ Error rewarding penalty points for rating:', rewardError);
+                // Don't fail the rating creation if reward fails
+            }
+        }
 
         res.status(201).json({
             success: true,
@@ -676,6 +696,25 @@ export const createProviderRatingForCustomer = async (req, res) => {
 
         // Update customer's average rating
         await updateCustomerAverageRating(parseInt(customer_id));
+
+        // ✨ Reward penalty points for good customer ratings (3+ stars)
+        if (ratingNum >= 3) {
+            try {
+                console.log('🎁 Rewarding penalty points for good customer rating:', newRating.id);
+                
+                const reward = await PenaltyService.rewardGoodRating(newRating.id);
+                
+                if (reward && reward.success) {
+                    console.log('✅ Penalty reward granted for good customer rating:');
+                    console.log(`   Customer: ${reward.customerReward?.points_added || 0} points (now ${reward.customerReward?.new_points || 'N/A'})`);
+                } else {
+                    console.log('⚠️ No penalty reward granted:', reward?.message || 'No reward returned');
+                }
+            } catch (rewardError) {
+                console.error('❌ Error rewarding penalty points for customer rating:', rewardError);
+                // Don't fail the rating creation if reward fails
+            }
+        }
 
         res.status(201).json({
             success: true,

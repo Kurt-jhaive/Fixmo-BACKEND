@@ -44,7 +44,8 @@ import {
   getProviderDetails,
   updateProviderDetails,
   requestProviderProfileEditOTP,
-  verifyOTPAndUpdateProviderProfile
+  verifyOTPAndUpdateProviderProfile,
+  reportCustomerNoShow
 } from '../controller/authserviceProviderController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { uploadServiceImage } from '../middleware/multer.js';
@@ -423,5 +424,9 @@ router.get('/availability-with-bookings', authMiddleware, getProviderAvailabilit
 router.get('/professions/:providerId', getProviderProfessions); // Public endpoint to get provider professions
 router.get('/details', authMiddleware, getProviderDetails); // Get own provider details (authenticated)
 router.put('/details', authMiddleware, profileUpdateUpload, updateProviderDetails); // Update own provider details (authenticated)
+
+// Report customer no-show (requires authentication and photo upload)
+const noShowUpload = multer({ storage: multer.memoryStorage() });
+router.post('/appointments/:appointmentId/report-no-show', authMiddleware, noShowUpload.single('evidence_photo'), reportCustomerNoShow);
 
 export default router;

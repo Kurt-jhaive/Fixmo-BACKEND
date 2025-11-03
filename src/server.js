@@ -20,8 +20,11 @@ import verificationRoutes from './route/verificationRoutes.js';
 import notificationRoutes from './route/notificationRoutes.js';
 import reportRoutes from './route/reportRoutes.js';
 import exportRoutes from './route/exportRoutes.js';
+import penaltyRoutes from './route/penaltyRoutes.js';
+import PenaltyService from './services/penaltyService.js';
 import { setWebSocketServer } from './controller/messageController.js';
 import { setWebSocketServer as setWarrantyJobWebSocket, initializeWarrantyExpiryJob } from './services/warrantyExpiryJob.js';
+import { initializePenaltyResetJob } from './services/penaltyResetJob.js';
 import cors from 'cors';
 import { specs, swaggerUi } from './config/swagger.js';
 import MessageWebSocketServer from './services/MessageWebSocketServer.js';
@@ -196,6 +199,7 @@ app.use('/api/verification', verificationRoutes); // Verification management rou
 app.use('/api/notifications', notificationRoutes); // Push notification management routes
 app.use('/api/reports', reportRoutes); // Report submission and management routes
 app.use('/api/admin/export', exportRoutes); // Admin export routes (CSV/PDF)
+app.use('/api/penalty', penaltyRoutes); // Penalty system routes
 app.use('/api/test', testRoutes); // Test routes for Cloudinary and other features
 
 // 404 handler for undefined routes (without wildcard)
@@ -237,6 +241,20 @@ setWarrantyJobWebSocket(messageWebSocket);
 
 // Initialize warranty expiry cleanup job
 initializeWarrantyExpiryJob();
+
+// Initialize penalty reset job (every 3 months)
+initializePenaltyResetJob();
+
+// Initialize penalty violation types in database
+(async () => {
+  try {
+    console.log('🔧 Initializing penalty violation types...');
+    await PenaltyService.initializeViolationTypes();
+    console.log('✅ Penalty violation types initialized successfully');
+  } catch (err) {
+    console.error('❌ Failed to initialize penalty violation types:', err);
+  }
+})();
 
 // ============================================
 // 🚫 NO-SHOW DETECTION JOB
@@ -337,45 +355,7 @@ httpServer.listen(port, '0.0.0.0', () => {
   console.log(`�🗄️ Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
 });
 
-// Auto-complete appointments after warranty window if customer hasn't completed
-// Runs every 6 hours to reduce load; uses warranty_days and finished_at/warranty_expires_at
-const AUTO_COMPLETE_INTERVAL_MS = 6 * 60 * 60 * 1000;
-setInterval(async () => {
-  try {
-    const now = new Date();
-    // Find appointments that are in-warranty or backjob, have warranty_expires_at in the past, and are not completed/cancelled
-    // Exclude appointments with paused warranties (backjobs)
-    const expired = await prisma.appointment.findMany({
-      where: {
-        appointment_status: { in: ['in-warranty', 'backjob'] },
-        warranty_expires_at: { lte: now },
-        warranty_paused_at: null, // Only expire non-paused warranties
-      },
-      select: { appointment_id: true, appointment_status: true }
-    });
+// NOTE: Auto-complete logic has been moved to the warranty expiry cron job (warrantyExpiryJob.js)
+// The cron job runs every hour, which is more timely than the previous 6-hour interval
+// This provides better user experience with more accurate appointment status updates
 
-    if (expired.length > 0) {
-      const ids = expired.map(a => a.appointment_id);
-      await prisma.appointment.updateMany({
-        where: { appointment_id: { in: ids } },
-        data: { appointment_status: 'completed', completed_at: now }
-      });
-      
-      // Also expire any active backjob applications for these appointments
-      await prisma.backjobApplication.updateMany({
-        where: { 
-          appointment_id: { in: ids },
-          status: { in: ['approved', 'pending'] }
-        },
-        data: { 
-          status: 'cancelled-by-admin',
-          admin_notes: 'Cancelled due to warranty expiration'
-        }
-      });
-      
-      console.log(`✅ Auto-completed ${ids.length} appointment(s) after warranty expiration and cancelled related backjobs.`);
-    }
-  } catch (err) {
-    console.error('Auto-complete job error:', err);
-  }
-}, AUTO_COMPLETE_INTERVAL_MS);

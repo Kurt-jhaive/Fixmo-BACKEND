@@ -281,9 +281,87 @@ class MessageWebSocketServer {
                 throw new Error(`Conversation is ${conversation.status} and not available for messaging`);
             }
 
-            // Check if warranty has expired
-            if (conversation.warranty_expires && new Date() > conversation.warranty_expires) {
-                throw new Error('Conversation warranty period has expired');
+            // Check if there are any active appointments with warranties
+            // Don't rely solely on conversation.warranty_expires as it might be outdated
+            const activeAppointments = await prisma.appointment.findMany({
+                where: {
+                    customer_id: conversation.customer_id,
+                    provider_id: conversation.provider_id,
+                    appointment_status: { 
+                        in: ['scheduled', 'confirmed', 'On the Way', 'in-progress', 'finished', 'in-warranty', 'backjob'] 
+                    }
+                },
+                select: {
+                    appointment_id: true,
+                    appointment_status: true,
+                    warranty_expires_at: true
+                }
+            });
+
+            // Auto-complete expired in-warranty appointments in real-time
+            const now = new Date();
+            const expiredAppointmentIds = [];
+            
+            for (const apt of activeAppointments) {
+                if ((apt.appointment_status === 'in-warranty' || apt.appointment_status === 'backjob') && 
+                    apt.warranty_expires_at && 
+                    now > apt.warranty_expires_at) {
+                    expiredAppointmentIds.push(apt.appointment_id);
+                }
+            }
+
+            // Auto-complete expired appointments
+            if (expiredAppointmentIds.length > 0) {
+                await prisma.appointment.updateMany({
+                    where: { 
+                        appointment_id: { in: expiredAppointmentIds }
+                    },
+                    data: { 
+                        appointment_status: 'completed',
+                        completed_at: now
+                    }
+                });
+                
+                // Also cancel related backjob applications
+                await prisma.backjobApplication.updateMany({
+                    where: { 
+                        appointment_id: { in: expiredAppointmentIds },
+                        status: { in: ['approved', 'pending'] }
+                    },
+                    data: { 
+                        status: 'cancelled-by-admin',
+                        admin_notes: 'Cancelled due to warranty expiration'
+                    }
+                });
+                
+                console.log(`🔄 Auto-completed ${expiredAppointmentIds.length} expired appointment(s) in conversation ${conversationId}`);
+            }
+
+            // Re-check for active appointments after auto-completion
+            const stillActiveAppointments = activeAppointments.filter(apt => 
+                !expiredAppointmentIds.includes(apt.appointment_id)
+            );
+
+            // Check if there are ANY active appointments (not just warranty-based)
+            const hasActiveAppointment = stillActiveAppointments.length > 0 && stillActiveAppointments.some(apt => {
+                // Allow messaging for ANY active appointment status
+                const activeStatuses = ['scheduled', 'confirmed', 'On the Way', 'in-progress', 'finished', 'in-warranty', 'backjob'];
+                
+                if (activeStatuses.includes(apt.appointment_status)) {
+                    // For in-warranty/backjob, also check expiry
+                    if ((apt.appointment_status === 'in-warranty' || apt.appointment_status === 'backjob') && apt.warranty_expires_at) {
+                        return now <= apt.warranty_expires_at;
+                    }
+                    // For all other active statuses, allow messaging
+                    return true;
+                }
+                return false;
+            });
+
+            // Only block if conversation is explicitly closed AND there are no active appointments
+            // Don't auto-close - just check if messaging is allowed
+            if (conversation.status === 'closed' && !hasActiveAppointment) {
+                throw new Error('This conversation has been closed - no active appointments found');
             }
 
             const roomName = `conversation_${conversationId}`;
