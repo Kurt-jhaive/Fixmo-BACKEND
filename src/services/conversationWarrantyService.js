@@ -529,7 +529,8 @@ export const autoCompleteExpiredWarranties = async () => {
             }
         });
 
-        console.log(`✅ Auto-completed ${appointmentIds.length} expired in-warranty appointment(s) and cancelled related backjobs`);
+        console.log(`✅ Automatically completed ${appointmentIds.length} appointment(s) due to warranty expiry`);
+        console.log(`📋 Auto-completed appointment IDs: ${appointmentIds.join(', ')}`);
         
         return expiredAppointments;
     } catch (error) {

@@ -14,26 +14,50 @@ class PenaltyController {
   static async getMyPenaltyInfo(req, res) {
     try {
       const userId = req.userId;
+      const providerId = req.providerId;
       const userType = req.userType; // 'customer' or 'service_provider'
+
+      console.log('🔍 getMyPenaltyInfo - Request details:', {
+        userId,
+        providerId,
+        userType
+      });
 
       let penaltyInfo;
       if (userType === 'customer') {
         const user = await prisma.user.findUnique({
           where: { user_id: userId },
           select: {
+            user_id: true,
             penalty_points: true,
             is_suspended: true,
             suspended_at: true,
             suspended_until: true,
           },
         });
+
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            message: 'User not found'
+          });
+        }
 
         const stats = await PenaltyService.getPenaltyStats(userId, null);
         penaltyInfo = { ...user, stats };
-      } else if (userType === 'service_provider') {
+        
+        console.log('✅ Customer penalty info retrieved:', {
+          userId: user.user_id,
+          penalty_points: user.penalty_points
+        });
+      } else if (userType === 'service_provider' || userType === 'provider') {
+        // Use providerId if available, otherwise fall back to userId
+        const actualProviderId = providerId || userId;
+        
         const provider = await prisma.serviceProviderDetails.findUnique({
-          where: { provider_id: userId },
+          where: { provider_id: actualProviderId },
           select: {
+            provider_id: true,
             penalty_points: true,
             is_suspended: true,
             suspended_at: true,
@@ -41,8 +65,25 @@ class PenaltyController {
           },
         });
 
-        const stats = await PenaltyService.getPenaltyStats(null, userId);
+        if (!provider) {
+          return res.status(404).json({
+            success: false,
+            message: 'Provider not found'
+          });
+        }
+
+        const stats = await PenaltyService.getPenaltyStats(null, actualProviderId);
         penaltyInfo = { ...provider, stats };
+        
+        console.log('✅ Provider penalty info retrieved:', {
+          providerId: provider.provider_id,
+          penalty_points: provider.penalty_points
+        });
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid user type'
+        });
       }
 
       res.status(200).json({
@@ -50,7 +91,7 @@ class PenaltyController {
         data: penaltyInfo,
       });
     } catch (error) {
-      console.error('Error fetching penalty info:', error);
+      console.error('❌ Error fetching penalty info:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to fetch penalty information',
@@ -65,15 +106,40 @@ class PenaltyController {
   static async getMyViolations(req, res) {
     try {
       const userId = req.userId;
+      const providerId = req.providerId;
       const userType = req.userType;
       const { status, limit = 50, offset = 0 } = req.query;
 
+      console.log('🔍 getMyViolations - Request details:', {
+        userId,
+        providerId,
+        userType,
+        status
+      });
+
+      // Use providerId if available for providers, otherwise userId
+      const actualUserId = userType === 'customer' ? userId : null;
+      const actualProviderId = (userType === 'service_provider' || userType === 'provider') 
+        ? (providerId || userId) 
+        : null;
+
+      console.log('🔍 Fetching violations for:', {
+        actualUserId,
+        actualProviderId,
+        userType
+      });
+
       const history = await PenaltyService.getPenaltyHistory({
-        userId: userType === 'customer' ? userId : null,
-        providerId: userType === 'service_provider' ? userId : null,
+        userId: actualUserId,
+        providerId: actualProviderId,
         status,
         limit: parseInt(limit),
         offset: parseInt(offset),
+      });
+
+      console.log('✅ Violations retrieved:', {
+        count: history.violations?.length || 0,
+        total: history.total || 0
       });
 
       res.status(200).json({
@@ -81,7 +147,7 @@ class PenaltyController {
         data: history,
       });
     } catch (error) {
-      console.error('Error fetching violation history:', error);
+      console.error('❌ Error fetching violation history:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to fetch violation history',
@@ -96,6 +162,7 @@ class PenaltyController {
   static async appealViolation(req, res) {
     try {
       const userId = req.userId;
+      const providerId = req.providerId;
       const userType = req.userType;
       const { violationId } = req.params;
       const { appealReason } = req.body;
@@ -107,11 +174,17 @@ class PenaltyController {
         });
       }
 
+      // Use correct ID based on user type
+      const actualUserId = userType === 'customer' ? userId : null;
+      const actualProviderId = (userType === 'service_provider' || userType === 'provider') 
+        ? (providerId || userId) 
+        : null;
+
       const result = await PenaltyService.appealViolation(
         parseInt(violationId),
         appealReason,
-        userType === 'customer' ? userId : null,
-        userType === 'service_provider' ? userId : null
+        actualUserId,
+        actualProviderId
       );
 
       res.status(200).json({
@@ -190,16 +263,30 @@ class PenaltyController {
   static async getMyAdjustments(req, res) {
     try {
       const userId = req.userId;
+      const providerId = req.providerId;
       const userType = req.userType;
       const { type, limit = 50, offset = 0 } = req.query;
+
+      console.log('🔍 getMyAdjustments - Request details:', {
+        userId,
+        providerId,
+        userType,
+        type
+      });
 
       // Build where clause
       const where = {};
       
       if (userType === 'customer') {
         where.user_id = userId;
-      } else if (userType === 'service_provider') {
-        where.provider_id = userId;
+        where.provider_id = null; // Ensure it's a customer adjustment
+        console.log('📋 Filtering adjustments for customer:', userId);
+      } else if (userType === 'service_provider' || userType === 'provider') {
+        // Use providerId if available, otherwise fall back to userId
+        const actualProviderId = providerId || userId;
+        where.provider_id = actualProviderId;
+        where.user_id = null; // Ensure it's a provider adjustment
+        console.log('📋 Filtering adjustments for provider:', actualProviderId);
       }
 
       // Filter by adjustment type if specified
@@ -211,6 +298,8 @@ class PenaltyController {
           in: ['restore', 'bonus', 'reset']
         };
       }
+
+      console.log('🔍 Query where clause:', where);
 
       const adjustments = await prisma.penaltyAdjustment.findMany({
         where,
@@ -227,11 +316,18 @@ class PenaltyController {
           created_at: true,
           adjusted_by_admin_id: true,
           related_violation_id: true,
+          user_id: true,
+          provider_id: true,
         },
       });
 
       // Get total count
       const total = await prisma.penaltyAdjustment.count({ where });
+
+      console.log('✅ Adjustments retrieved:', {
+        count: adjustments.length,
+        total
+      });
 
       res.status(200).json({
         success: true,

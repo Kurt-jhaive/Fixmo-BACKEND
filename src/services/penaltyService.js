@@ -826,7 +826,6 @@ class PenaltyService {
           gte: sevenDaysAgo,
         },
       },
-      include: { violation_type: true },
     });
 
     if (recentNoShows >= 3) {
