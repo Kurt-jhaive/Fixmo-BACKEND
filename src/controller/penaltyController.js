@@ -530,6 +530,154 @@ class PenaltyController {
   }
 
   /**
+   * Admin: Dismiss/Reverse a violation
+   */
+  static async adminReverseViolation(req, res) {
+    try {
+      const { admin_id } = req.admin;
+      const { violationId } = req.params;
+      const { reason } = req.body;
+
+      // Validate reason
+      if (!reason || reason.trim().length < 10) {
+        return res.status(400).json({
+          success: false,
+          message: 'Reason must be at least 10 characters long',
+        });
+      }
+
+      // Get violation with related data
+      const violation = await prisma.penaltyViolation.findUnique({
+        where: { violation_id: parseInt(violationId) },
+        include: {
+          violation_type: true,
+          user: {
+            select: {
+              user_id: true,
+              first_name: true,
+              last_name: true,
+              penalty_points: true,
+            },
+          },
+          provider: {
+            select: {
+              provider_id: true,
+              provider_first_name: true,
+              provider_last_name: true,
+              penalty_points: true,
+            },
+          },
+        },
+      });
+
+      if (!violation) {
+        return res.status(404).json({
+          success: false,
+          message: 'Violation not found',
+        });
+      }
+
+      if (violation.status === 'reversed') {
+        return res.status(400).json({
+          success: false,
+          message: 'Violation has already been dismissed',
+        });
+      }
+
+      // Update violation status to reversed
+      await prisma.penaltyViolation.update({
+        where: { violation_id: parseInt(violationId) },
+        data: {
+          status: 'reversed',
+          reversed_at: new Date(),
+          reversed_by_admin_id: admin_id,
+          reversal_reason: reason,
+        },
+      });
+
+      const pointsToRestore = violation.points_deducted;
+
+      // Restore points to user or provider
+      if (violation.user_id && violation.user) {
+        const currentPoints = violation.user.penalty_points;
+        const newPoints = Math.min(100, currentPoints + pointsToRestore);
+
+        await prisma.user.update({
+          where: { user_id: violation.user_id },
+          data: {
+            penalty_points: newPoints,
+            // Remove suspension if points go above 50
+            is_suspended: newPoints <= 50,
+            suspended_at: newPoints > 50 ? null : violation.user.suspended_at,
+          },
+        });
+
+        // Create adjustment log
+        await prisma.penaltyAdjustment.create({
+          data: {
+            user_id: violation.user_id,
+            adjustment_type: 'restore',
+            points_adjusted: pointsToRestore,
+            previous_points: currentPoints,
+            new_points: newPoints,
+            reason: `Violation dismissed by admin: ${reason}`,
+            adjusted_by_admin_id: admin_id,
+            related_violation_id: violation.violation_id,
+          },
+        });
+
+        console.log(`✅ Restored ${pointsToRestore} points to user ${violation.user_id} (${currentPoints} → ${newPoints})`);
+      } else if (violation.provider_id && violation.provider) {
+        const currentPoints = violation.provider.penalty_points;
+        const newPoints = Math.min(100, currentPoints + pointsToRestore);
+
+        await prisma.serviceProviderDetails.update({
+          where: { provider_id: violation.provider_id },
+          data: {
+            penalty_points: newPoints,
+            // Remove suspension if points go above 50
+            is_suspended: newPoints <= 50,
+            suspended_at: newPoints > 50 ? null : violation.provider.suspended_at,
+          },
+        });
+
+        // Create adjustment log
+        await prisma.penaltyAdjustment.create({
+          data: {
+            provider_id: violation.provider_id,
+            adjustment_type: 'restore',
+            points_adjusted: pointsToRestore,
+            previous_points: currentPoints,
+            new_points: newPoints,
+            reason: `Violation dismissed by admin: ${reason}`,
+            adjusted_by_admin_id: admin_id,
+            related_violation_id: violation.violation_id,
+          },
+        });
+
+        console.log(`✅ Restored ${pointsToRestore} points to provider ${violation.provider_id} (${currentPoints} → ${newPoints})`);
+      }
+
+      res.status(200).json({
+        success: true,
+        message: `Violation dismissed and ${pointsToRestore} points restored successfully`,
+        data: {
+          violation_id: violation.violation_id,
+          points_restored: pointsToRestore,
+          status: 'reversed',
+        },
+      });
+    } catch (error) {
+      console.error('Error dismissing violation:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to dismiss violation',
+        error: error.message,
+      });
+    }
+  }
+
+  /**
    * Admin: Manually adjust penalty points
    */
   static async adminAdjustPoints(req, res) {
@@ -724,13 +872,21 @@ class PenaltyController {
       const violationTypeIds = commonViolations.map((v) => v.violation_type_id);
       const violationTypes = await prisma.violationType.findMany({
         where: { violation_type_id: { in: violationTypeIds } },
+        select: {
+          violation_type_id: true,
+          violation_code: true,
+          violation_name: true,
+          penalty_points: true,
+        },
       });
 
       const commonViolationsWithDetails = commonViolations.map((v) => {
         const type = violationTypes.find((t) => t.violation_type_id === v.violation_type_id);
         return {
-          ...v,
-          violation_type: type,
+          violation_code: type?.violation_code || 'UNKNOWN',
+          violation_name: type?.violation_name || 'Unknown Violation',
+          penalty_points: type?.penalty_points || 0,
+          count: v._count,
         };
       });
 
@@ -997,43 +1153,68 @@ class PenaltyController {
 
       const logs = await prisma.penaltyAdjustment.findMany({
         where,
-        include: {
-          adjusted_by_admin: {
-            select: {
-              admin_id: true,
-              first_name: true,
-              last_name: true,
-              email: true,
-            },
-          },
-          user: {
-            select: {
-              user_id: true,
-              first_name: true,
-              last_name: true,
-              email: true,
-            },
-          },
-          provider: {
-            select: {
-              provider_id: true,
-              provider_first_name: true,
-              provider_last_name: true,
-              provider_email: true,
-            },
-          },
-        },
         orderBy: { created_at: 'desc' },
         take: parseInt(limit),
         skip: parseInt(offset),
       });
+
+      // Manually fetch related data for each log
+      const enrichedLogs = await Promise.all(
+        logs.map(async (log) => {
+          const enrichedLog = { ...log };
+
+          // Fetch user data if user_id exists
+          if (log.user_id) {
+            const user = await prisma.user.findUnique({
+              where: { user_id: log.user_id },
+              select: {
+                user_id: true,
+                first_name: true,
+                last_name: true,
+                email: true,
+              },
+            });
+            enrichedLog.user = user;
+          }
+
+          // Fetch provider data if provider_id exists
+          if (log.provider_id) {
+            const provider = await prisma.serviceProviderDetails.findUnique({
+              where: { provider_id: log.provider_id },
+              select: {
+                provider_id: true,
+                provider_first_name: true,
+                provider_last_name: true,
+                provider_email: true,
+              },
+            });
+            enrichedLog.provider = provider;
+          }
+
+          // Fetch admin data if adjusted_by_admin_id exists
+          if (log.adjusted_by_admin_id) {
+            const admin = await prisma.admin.findUnique({
+              where: { admin_id: log.adjusted_by_admin_id },
+              select: {
+                admin_id: true,
+                admin_name: true,
+                admin_email: true,
+                admin_username: true,
+              },
+            });
+            enrichedLog.adjusted_by_admin = admin;
+          }
+
+          return enrichedLog;
+        })
+      );
 
       const total = await prisma.penaltyAdjustment.count({ where });
 
       res.status(200).json({
         success: true,
         data: {
-          logs,
+          logs: enrichedLogs,
           pagination: {
             total,
             limit: parseInt(limit),

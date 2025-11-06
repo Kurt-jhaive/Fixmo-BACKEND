@@ -354,6 +354,63 @@ router.post('/admin/review-appeal/:violationId', adminAuthMiddleware, PenaltyCon
 
 /**
  * @swagger
+ * /api/penalty/admin/reverse-violation/{violationId}:
+ *   post:
+ *     summary: Admin - Dismiss/Reverse a violation and restore points
+ *     tags: [Penalty - Admin]
+ *     security:
+ *       - adminAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: violationId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Violation ID to dismiss
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - reason
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 minLength: 10
+ *                 description: Reason for dismissing the violation
+ *                 example: "Evidence shows user was not at fault - car breakdown verified"
+ *     responses:
+ *       200:
+ *         description: Violation dismissed and points restored successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     violation_id:
+ *                       type: integer
+ *                     points_restored:
+ *                       type: integer
+ *                     status:
+ *                       type: string
+ *       400:
+ *         description: Invalid request or violation already dismissed
+ *       404:
+ *         description: Violation not found
+ */
+router.post('/admin/reverse-violation/:violationId', adminAuthMiddleware, PenaltyController.adminReverseViolation);
+
+/**
+ * @swagger
  * /api/penalty/admin/adjust-points:
  *   post:
  *     summary: Admin - Manually adjust penalty points

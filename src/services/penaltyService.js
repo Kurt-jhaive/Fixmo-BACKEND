@@ -488,7 +488,31 @@ class PenaltyService {
     const violations = await prisma.penaltyViolation.findMany({
       where,
       include: {
-        violation_type: true,
+        violation_type: {
+          select: {
+            violation_type_id: true,
+            violation_code: true,
+            violation_name: true,
+            penalty_points: true,
+            violation_category: true,
+          },
+        },
+        user: {
+          select: {
+            user_id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+          },
+        },
+        provider: {
+          select: {
+            provider_id: true,
+            provider_first_name: true,
+            provider_last_name: true,
+            provider_email: true,
+          },
+        },
       },
       orderBy: { created_at: 'desc' },
       take: limit,
