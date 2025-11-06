@@ -2141,7 +2141,9 @@ export const getServiceListingsForCustomer = async (req, res) => {
         }
         
         // Build where clause for filtering
-        const whereClause = {};
+        const whereClause = {
+            servicelisting_isActive: true // ✅ Only fetch active service listings
+        };
         
         // Search filter
         if (search) {
@@ -2205,7 +2207,14 @@ export const getServiceListingsForCustomer = async (req, res) => {
         // Get service listings with availability data
         const serviceListings = await prisma.serviceListing.findMany({
             where: whereClause,
-            include: {
+            select: {
+                service_id: true,
+                service_title: true,
+                service_description: true,
+                service_startingprice: true,
+                servicelisting_isActive: true, // ✅ Include active status in response
+                warranty: true,
+                provider_id: true,
                 service_photos: {
                     orderBy: {
                         uploadedAt: 'asc'
@@ -2269,6 +2278,8 @@ export const getServiceListingsForCustomer = async (req, res) => {
             skip,
             take: parseInt(limit)
         });
+
+        console.log(`✅ Found ${serviceListings.length} active service listings (servicelisting_isActive = true)`);
 
         // If date filtering is requested, filter providers based on availability
         let filteredListings = serviceListings;
@@ -2486,6 +2497,8 @@ export const getServiceListingsForCustomer = async (req, res) => {
                 title: listing.service_title,
                 description: listing.service_description,
                 startingPrice: listing.service_startingprice,
+                servicelisting_isActive: listing.servicelisting_isActive, // ✅ Expose to frontend
+                warranty: listing.warranty,
                 service_photos: listing.service_photos || [], // New photos array
                 provider: {
                     id: listing.serviceProvider.provider_id,
@@ -4279,14 +4292,18 @@ export const reportProviderNoShow = async (req, res) => {
             });
         }
 
-        // Update appointment status to provider_no_show
+        // Update appointment status to provider_no_show and remove warranty
         const updatedAppointment = await prisma.appointment.update({
             where: { appointment_id: parseInt(appointmentId) },
             data: {
                 appointment_status: 'provider_no_show',
-                cancellation_reason: `Customer reported provider no-show: ${description}`
+                cancellation_reason: `Customer reported provider no-show: ${description}`,
+                warranty_days: 0, // Remove warranty for no-show
+                warranty_expires_at: null // Clear warranty expiration
             }
         });
+
+        console.log('⚠️ Warranty removed for provider no-show appointment:', appointmentId);
 
         // Record no-show violation for provider
         try {
@@ -4336,6 +4353,154 @@ export const reportProviderNoShow = async (req, res) => {
     }
 };
 
+// Finish appointment (Customer can also finish appointments)
+export const finishAppointmentCustomer = async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        const { final_price } = req.body;
+        const customerId = req.userId;
+
+        if (!customerId) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Customer ID not found in session' 
+            });
+        }
+
+        const appointment = await prisma.appointment.findUnique({
+            where: { appointment_id: parseInt(appointmentId) },
+            include: {
+                customer: {
+                    select: {
+                        user_id: true,
+                        first_name: true,
+                        last_name: true,
+                        email: true,
+                        phone_number: true
+                    }
+                },
+                service: {
+                    select: {
+                        service_title: true,
+                        service_description: true
+                    }
+                },
+                serviceProvider: {
+                    select: {
+                        provider_id: true,
+                        provider_first_name: true,
+                        provider_last_name: true
+                    }
+                }
+            }
+        });
+
+        if (!appointment) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Appointment not found' 
+            });
+        }
+
+        if (appointment.customer_id !== parseInt(customerId)) {
+            return res.status(403).json({ 
+                success: false, 
+                message: 'You can only finish your own appointments' 
+            });
+        }
+
+        // Allow finishing appointments that are 'scheduled' or 'in-progress'
+        // This helps when providers show up even if they lost internet connection
+        const allowedStatuses = ['scheduled', 'in-progress'];
+        if (!allowedStatuses.includes(appointment.appointment_status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot finish appointment with status '${appointment.appointment_status}'. Only 'scheduled' or 'in-progress' appointments can be finished.`,
+                currentStatus: appointment.appointment_status
+            });
+        }
+
+        // If this appointment was rescheduled from a backjob, mark the backjob as completed
+        const activeBackjob = await prisma.backjobApplication.findFirst({
+            where: {
+                appointment_id: parseInt(appointmentId),
+                status: 'approved'
+            }
+        });
+
+        // Use transaction to update both appointment and backjob atomically
+        const result = await prisma.$transaction(async (tx) => {
+            // Prepare update data - set to 'in-warranty' for customer confirmation
+            // This starts the warranty period and allows for warranty claims if needed
+            const updateData = { 
+                appointment_status: 'in-warranty',
+                finished_at: new Date() // Record when customer confirmed completion
+            };
+
+            // Only update final_price if provided by customer
+            if (final_price && final_price > 0) {
+                updateData.final_price = parseFloat(final_price);
+            }
+
+            // Update appointment status
+            const updatedAppointment = await tx.appointment.update({
+                where: { appointment_id: parseInt(appointmentId) },
+                data: updateData,
+                include: {
+                    customer: {
+                        select: {
+                            user_id: true,
+                            first_name: true,
+                            last_name: true,
+                            email: true,
+                            phone_number: true
+                        }
+                    },
+                    service: {
+                        select: {
+                            service_title: true,
+                            service_description: true
+                        }
+                    },
+                    serviceProvider: {
+                        select: {
+                            provider_id: true,
+                            provider_first_name: true,
+                            provider_last_name: true
+                        }
+                    }
+                }
+            });
+
+            // If there's an active backjob, mark it as completed
+            if (activeBackjob) {
+                await tx.backjobApplication.update({
+                    where: { backjob_id: activeBackjob.backjob_id },
+                    data: { 
+                        status: 'completed',
+                        resolved_at: new Date()
+                    }
+                });
+                console.log(`✅ Marked backjob ${activeBackjob.backjob_id} as completed after appointment finished by customer`);
+            }
+
+            return updatedAppointment;
+        });
+
+        res.status(200).json({
+            success: true,
+            message: 'Appointment confirmed and warranty period started',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error finishing appointment (customer):', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
 
 
 

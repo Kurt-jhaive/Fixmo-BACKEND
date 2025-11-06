@@ -115,17 +115,46 @@ export const uploadCertificate = async (req, res) => {
         });
 
         if (existingCertNumber) {
-            // Delete uploaded file if certificate number already exists
-            try {
-                await fs.unlink(req.file.path);
-            } catch (unlinkError) {
-                console.error('Error deleting file:', unlinkError);
-            }
+            // Check if existing certificate is expired or rejected
+            const isExpired = existingCertNumber.expiry_date && new Date(existingCertNumber.expiry_date) < new Date();
+            const isRejected = existingCertNumber.certificate_status === 'Rejected';
             
-            return res.status(400).json({
-                success: false,
-                message: 'Certificate number already exists. Each certificate must have a unique number.'
-            });
+            if (isExpired || isRejected) {
+                console.log(`🔄 Resubmitting ${isExpired ? 'expired' : 'rejected'} certificate ${certificateNumber}`);
+                
+                // Update existing certificate with new file
+                const updatedCertificate = await prisma.certificate.update({
+                    where: { certificate_id: existingCertNumber.certificate_id },
+                    data: {
+                        certificate_file_path: `/uploads/certificates/${req.file.filename}`,
+                        expiry_date: expiryDate ? new Date(expiryDate) : null,
+                        certificate_status: 'Pending', // Reset to pending for review
+                        certificate_reason: null, // Clear rejection reason
+                        reviewed_by_admin_id: null,
+                        reviewed_at: null
+                    }
+                });
+                
+                return res.status(200).json({
+                    success: true,
+                    message: `Certificate resubmitted successfully (was ${isExpired ? 'expired' : 'rejected'})`,
+                    data: updatedCertificate,
+                    resubmitted: true
+                });
+            } else {
+                // Delete uploaded file if certificate number already exists with valid status
+                try {
+                    await fs.unlink(req.file.path);
+                } catch (unlinkError) {
+                    console.error('Error deleting file:', unlinkError);
+                }
+                
+                return res.status(400).json({
+                    success: false,
+                    message: 'Certificate number already exists with valid status. Cannot resubmit.',
+                    certificate_status: existingCertNumber.certificate_status
+                });
+            }
         }
 
         // 2. Check if provider already has this certificate type
@@ -137,17 +166,47 @@ export const uploadCertificate = async (req, res) => {
         });
 
         if (existingCertType) {
-            // Delete uploaded file if certificate type already exists for this provider
-            try {
-                await fs.unlink(req.file.path);
-            } catch (unlinkError) {
-                console.error('Error deleting file:', unlinkError);
-            }
+            // Check if existing certificate is expired or rejected
+            const isExpired = existingCertType.expiry_date && new Date(existingCertType.expiry_date) < new Date();
+            const isRejected = existingCertType.certificate_status === 'Rejected';
             
-            return res.status(400).json({
-                success: false,
-                message: `You already have a "${certificateName}" certificate. You cannot upload duplicate certificate types.`
-            });
+            if (isExpired || isRejected) {
+                console.log(`🔄 Resubmitting ${isExpired ? 'expired' : 'rejected'} certificate type ${certificateName}`);
+                
+                // Update existing certificate with new file and number
+                const updatedCertificate = await prisma.certificate.update({
+                    where: { certificate_id: existingCertType.certificate_id },
+                    data: {
+                        certificate_number: certificateNumber, // Update with new number
+                        certificate_file_path: `/uploads/certificates/${req.file.filename}`,
+                        expiry_date: expiryDate ? new Date(expiryDate) : null,
+                        certificate_status: 'Pending', // Reset to pending for review
+                        certificate_reason: null, // Clear rejection reason
+                        reviewed_by_admin_id: null,
+                        reviewed_at: null
+                    }
+                });
+                
+                return res.status(200).json({
+                    success: true,
+                    message: `Certificate resubmitted successfully (was ${isExpired ? 'expired' : 'rejected'})`,
+                    data: updatedCertificate,
+                    resubmitted: true
+                });
+            } else {
+                // Delete uploaded file if certificate type already exists for this provider
+                try {
+                    await fs.unlink(req.file.path);
+                } catch (unlinkError) {
+                    console.error('Error deleting file:', unlinkError);
+                }
+                
+                return res.status(400).json({
+                    success: false,
+                    message: `You already have a "${certificateName}" certificate with valid status. Cannot upload duplicate.`,
+                    certificate_status: existingCertType.certificate_status
+                });
+            }
         }
 
         // Create the certificate record

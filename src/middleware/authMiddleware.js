@@ -24,7 +24,17 @@ function authMiddleware(req, res, next) {
         }
 
         req.userId = decoded.userId || decoded.id // Handle both formats
+        req.providerId = decoded.providerId // Extract providerId for provider tokens
         req.userType = decoded.userType // Extract userType from token
+        
+        // Debug log to help troubleshoot
+        console.log('🔐 Auth middleware - Decoded token:', {
+            userId: req.userId,
+            providerId: req.providerId,
+            userType: req.userType,
+            email: decoded.email
+        });
+        
         next()
     })
 }

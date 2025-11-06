@@ -3279,10 +3279,12 @@ export const finishAppointment = async (req, res) => {
             });
         }
 
-        if (!final_price || final_price <= 0) {
+        // Make final_price optional - provider can finish without setting price
+        // or update it if customer already finished
+        if (final_price && final_price <= 0) {
             return res.status(400).json({
                 success: false,
-                message: 'Valid final price is required'
+                message: 'Final price must be greater than 0 if provided'
             });
         }
 
@@ -3321,13 +3323,20 @@ export const finishAppointment = async (req, res) => {
 
         // Use transaction to update both appointment and backjob atomically
         const result = await prisma.$transaction(async (tx) => {
+            // Prepare update data
+            const updateData = { 
+                appointment_status: 'finished'
+            };
+
+            // Only update final_price if provided
+            if (final_price && final_price > 0) {
+                updateData.final_price = parseFloat(final_price);
+            }
+
             // Update appointment status
             const updatedAppointment = await tx.appointment.update({
                 where: { appointment_id: parseInt(appointmentId) },
-                data: { 
-                    appointment_status: 'finished',
-                    final_price: parseFloat(final_price)
-                },
+                data: updateData,
                 include: {
                     customer: {
                         select: {
@@ -3364,7 +3373,7 @@ export const finishAppointment = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message: 'Appointment finished with final price',
+            message: final_price ? 'Appointment finished with final price' : 'Appointment finished successfully',
             data: result
         });
     } catch (error) {
@@ -4039,12 +4048,12 @@ export const requestProviderProfileEditOTP = async (req, res) => {
 
 /**
  * Step 2: Verify OTP and update provider profile
- * Updates provider_phone_number, provider_email, provider_location, and exact_location
+ * Updates provider_phone_number, provider_email, provider_location, and provider_exact_location
  */
 export const verifyOTPAndUpdateProviderProfile = async (req, res) => {
     try {
         const providerId = req.userId; // From auth middleware
-        const { otp, provider_phone_number, provider_email, provider_location, exact_location } = req.body;
+        const { otp, provider_phone_number, provider_email, provider_location, provider_exact_location } = req.body;
 
         // Validate OTP is provided
         if (!otp) {
@@ -4055,10 +4064,10 @@ export const verifyOTPAndUpdateProviderProfile = async (req, res) => {
         }
 
         // Validate at least one field is provided for update
-        if (!provider_phone_number && !provider_email && !provider_location && !exact_location) {
+        if (!provider_phone_number && !provider_email && !provider_location && !provider_exact_location) {
             return res.status(400).json({
                 success: false,
-                message: 'At least one field (provider_phone_number, provider_email, provider_location, or exact_location) is required'
+                message: 'At least one field (provider_phone_number, provider_email, provider_location, or provider_exact_location) is required'
             });
         }
 
@@ -4157,8 +4166,8 @@ export const verifyOTPAndUpdateProviderProfile = async (req, res) => {
             updateData.provider_location = provider_location;
         }
 
-        if (exact_location) {
-            updateData.exact_location = exact_location;
+        if (provider_exact_location) {
+            updateData.provider_exact_location = provider_exact_location;
         }
 
         // Update provider profile
@@ -4173,7 +4182,7 @@ export const verifyOTPAndUpdateProviderProfile = async (req, res) => {
                 provider_email: true,
                 provider_phone_number: true,
                 provider_location: true,
-                exact_location: true,
+                provider_exact_location: true,
                 provider_profile_photo: true
             }
         });
@@ -4260,7 +4269,7 @@ export const reportCustomerNoShow = async (req, res) => {
         }
 
         // Check if appointment status is "On the Way"
-        if (appointment.appointment_status !== 'On the Way') {
+        if (appointment.appointment_status !== 'confirmed') {
             return res.status(400).json({
                 success: false,
                 message: `Cannot report no-show. Appointment must be in "On the Way" status. Current status: ${appointment.appointment_status}`
@@ -4279,15 +4288,7 @@ export const reportCustomerNoShow = async (req, res) => {
             gracePeriodMet: timeDiffMinutes >= 45
         });
 
-        if (timeDiffMinutes < 45) {
-            return res.status(400).json({
-                success: false,
-                message: `Grace period not met. You can report a no-show after 45 minutes. Time elapsed: ${Math.floor(timeDiffMinutes)} minutes`,
-                timeElapsed: Math.floor(timeDiffMinutes),
-                gracePeriod: 45,
-                canReportAt: new Date(scheduledTime.getTime() + 45 * 60 * 1000).toISOString()
-            });
-        }
+
 
         // Upload photo evidence to Cloudinary
         let evidencePhotoUrl;
@@ -4302,14 +4303,18 @@ export const reportCustomerNoShow = async (req, res) => {
             });
         }
 
-        // Update appointment status to user_no_show
+        // Update appointment status to user_no_show and remove warranty
         const updatedAppointment = await prisma.appointment.update({
             where: { appointment_id: parseInt(appointmentId) },
             data: {
                 appointment_status: 'user_no_show',
-                cancellation_reason: `Provider reported customer no-show: ${description}`
+                cancellation_reason: `Provider reported customer no-show: ${description}`,
+                warranty_days: 0, // Remove warranty for no-show
+                warranty_expires_at: null // Clear warranty expiration
             }
         });
+
+        console.log('⚠️ Warranty removed for no-show appointment:', appointmentId);
 
         // Record no-show violation and trigger penalty detection
         try {
