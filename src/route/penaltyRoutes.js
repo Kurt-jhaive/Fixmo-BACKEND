@@ -1,7 +1,7 @@
 import express from 'express';
 import PenaltyController from '../controller/penaltyController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
-import { adminAuthMiddleware } from '../middleware/adminAuthMiddleware.js';
+import { adminAuthMiddleware, operationsOrSuperAdminMiddleware } from '../middleware/adminAuthMiddleware.js';
 
 const router = express.Router();
 
@@ -259,7 +259,7 @@ router.get('/violation-types', PenaltyController.getViolationTypes);
  *       400:
  *         description: Invalid request
  */
-router.post('/admin/record-violation', adminAuthMiddleware, PenaltyController.adminRecordViolation);
+router.post('/admin/record-violation', adminAuthMiddleware, operationsOrSuperAdminMiddleware, PenaltyController.adminRecordViolation);
 
 /**
  * @swagger
@@ -350,7 +350,64 @@ router.get('/admin/pending-appeals', adminAuthMiddleware, PenaltyController.admi
  *       200:
  *         description: Appeal reviewed successfully
  */
-router.post('/admin/review-appeal/:violationId', adminAuthMiddleware, PenaltyController.adminReviewAppeal);
+router.post('/admin/review-appeal/:violationId', adminAuthMiddleware, operationsOrSuperAdminMiddleware, PenaltyController.adminReviewAppeal);
+
+/**
+ * @swagger
+ * /api/penalty/admin/reverse-violation/{violationId}:
+ *   post:
+ *     summary: Admin - Dismiss/Reverse a violation and restore points
+ *     tags: [Penalty - Admin]
+ *     security:
+ *       - adminAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: violationId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Violation ID to dismiss
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - reason
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 minLength: 10
+ *                 description: Reason for dismissing the violation
+ *                 example: "Evidence shows user was not at fault - car breakdown verified"
+ *     responses:
+ *       200:
+ *         description: Violation dismissed and points restored successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     violation_id:
+ *                       type: integer
+ *                     points_restored:
+ *                       type: integer
+ *                     status:
+ *                       type: string
+ *       400:
+ *         description: Invalid request or violation already dismissed
+ *       404:
+ *         description: Violation not found
+ */
+router.post('/admin/reverse-violation/:violationId', adminAuthMiddleware, operationsOrSuperAdminMiddleware, PenaltyController.adminReverseViolation);
 
 /**
  * @swagger
@@ -393,7 +450,7 @@ router.post('/admin/review-appeal/:violationId', adminAuthMiddleware, PenaltyCon
  *       200:
  *         description: Points adjusted successfully
  */
-router.post('/admin/adjust-points', adminAuthMiddleware, PenaltyController.adminAdjustPoints);
+router.post('/admin/adjust-points', adminAuthMiddleware, operationsOrSuperAdminMiddleware, PenaltyController.adminAdjustPoints);
 
 /**
  * @swagger
@@ -430,7 +487,7 @@ router.get('/admin/stats', adminAuthMiddleware, PenaltyController.adminGetPenalt
  *       200:
  *         description: Violation types initialized successfully
  */
-router.post('/admin/initialize-violation-types', adminAuthMiddleware, PenaltyController.adminInitializeViolationTypes);
+router.post('/admin/initialize-violation-types', adminAuthMiddleware, operationsOrSuperAdminMiddleware, PenaltyController.adminInitializeViolationTypes);
 
 /**
  * @swagger
@@ -485,7 +542,7 @@ router.get('/admin/dashboard', adminAuthMiddleware, PenaltyController.adminGetDa
  *       200:
  *         description: Suspension managed successfully
  */
-router.post('/admin/manage-suspension', adminAuthMiddleware, PenaltyController.adminManageSuspension);
+router.post('/admin/manage-suspension', adminAuthMiddleware, operationsOrSuperAdminMiddleware, PenaltyController.adminManageSuspension);
 
 /**
  * @swagger
@@ -524,7 +581,7 @@ router.post('/admin/manage-suspension', adminAuthMiddleware, PenaltyController.a
  *       200:
  *         description: Points reset successfully
  */
-router.post('/admin/reset-points', adminAuthMiddleware, PenaltyController.adminResetPoints);
+router.post('/admin/reset-points', adminAuthMiddleware, operationsOrSuperAdminMiddleware, PenaltyController.adminResetPoints);
 
 /**
  * @swagger
@@ -612,6 +669,6 @@ router.get('/admin/restricted-accounts', adminAuthMiddleware, PenaltyController.
  *       200:
  *         description: Penalty reset triggered successfully
  */
-router.post('/admin/trigger-quarterly-reset', adminAuthMiddleware, PenaltyController.adminManualPenaltyReset);
+router.post('/admin/trigger-quarterly-reset', adminAuthMiddleware, operationsOrSuperAdminMiddleware, PenaltyController.adminManualPenaltyReset);
 
 export default router;

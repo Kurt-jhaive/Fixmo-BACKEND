@@ -222,13 +222,20 @@ model OTPVerification {
   verified   Boolean  @default(false)
 }
 
+enum AdminRole {
+  super_admin
+  admin
+  operations
+  verification
+}
+
 model Admin {
   admin_id       Int      @id @default(autoincrement())
   admin_username String   @unique
   admin_email    String   @unique
   admin_password String
   admin_name     String
-  admin_role     String   @default("admin")
+  admin_role     AdminRole @default(admin)
   created_at     DateTime @default(now())
   last_login     DateTime?
   is_active      Boolean  @default(true)

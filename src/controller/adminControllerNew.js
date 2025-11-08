@@ -11,7 +11,9 @@ import {
     sendProviderRejectionEmail,
     sendCertificateRejectionEmail,
     sendAdminInvitationEmail,
-    sendAdminPasswordResetEmail
+    sendAdminPasswordResetEmail,
+    sendProviderDeactivationCancellationToCustomer,
+    sendProviderDeactivationCancellationToProvider
 } from '../services/mailer.js';
 import notificationService from '../services/notificationService.js';
 
@@ -283,13 +285,37 @@ class AdminController {
                 }
             });
 
-        const usersWithFixedPaths = users.map(user => ({
-            ...user,
-            profile_photo: AdminController.fixImagePath(user.profile_photo),
-            valid_id: AdminController.fixImagePath(user.valid_id)
-        }));
+            // Fetch admin names for verified_by and deactivated_by
+            const usersWithAdminNames = await Promise.all(users.map(async (user) => {
+                let verifiedByAdmin = null;
+                let deactivatedByAdmin = null;
 
-            res.json({ users: usersWithFixedPaths });
+                if (user.verified_by_admin_id) {
+                    const admin = await prisma.admin.findUnique({
+                        where: { admin_id: user.verified_by_admin_id },
+                        select: { admin_name: true, admin_email: true }
+                    });
+                    verifiedByAdmin = admin ? { name: admin.admin_name, email: admin.admin_email } : null;
+                }
+
+                if (user.deactivated_by_admin_id) {
+                    const admin = await prisma.admin.findUnique({
+                        where: { admin_id: user.deactivated_by_admin_id },
+                        select: { admin_name: true, admin_email: true }
+                    });
+                    deactivatedByAdmin = admin ? { name: admin.admin_name, email: admin.admin_email } : null;
+                }
+
+                return {
+                    ...user,
+                    profile_photo: AdminController.fixImagePath(user.profile_photo),
+                    valid_id: AdminController.fixImagePath(user.valid_id),
+                    verified_by_admin: verifiedByAdmin,
+                    deactivated_by_admin: deactivatedByAdmin
+                };
+            }));
+
+            res.json({ users: usersWithAdminNames });
         } catch (error) {
             console.error('Error fetching users:', error);
             res.status(500).json({ message: 'Internal server error' });
@@ -344,7 +370,7 @@ class AdminController {
     async verifyUser(req, res) {
         try {
             const { userId } = req.params;
-            const adminId = req.userId; // Get admin ID from auth middleware
+            const adminId = req.admin.admin_id; // Get admin ID from auth middleware
 
             const user = await prisma.user.update({
                 where: { user_id: parseInt(userId) },
@@ -396,7 +422,7 @@ class AdminController {
         try {
             const { userId } = req.params;
             const { reason } = req.body;
-            const adminId = req.userId; // Get admin ID from auth middleware
+            const adminId = req.admin.admin_id; // Get admin ID from auth middleware
 
             if (!reason) {
                 return res.status(400).json({ message: 'Deactivation reason is required' });
@@ -434,7 +460,7 @@ class AdminController {
         try {
             const { userId } = req.params;
             const { reason } = req.body;
-            const adminId = req.userId; // Get admin ID from auth middleware
+            const adminId = req.admin.admin_id; // Get admin ID from auth middleware
 
             if (!reason) {
                 return res.status(400).json({ message: 'Rejection reason is required' });
@@ -500,13 +526,37 @@ class AdminController {
                 }
             });
 
-            const providersWithFixedPaths = providers.map(provider => ({
-                ...provider,
-                provider_profile_photo: AdminController.fixImagePath(provider.provider_profile_photo),
-                provider_valid_id: AdminController.fixImagePath(provider.provider_valid_id)
+            // Fetch admin names for verified_by and deactivated_by
+            const providersWithAdminNames = await Promise.all(providers.map(async (provider) => {
+                let verifiedByAdmin = null;
+                let deactivatedByAdmin = null;
+
+                if (provider.verified_by_admin_id) {
+                    const admin = await prisma.admin.findUnique({
+                        where: { admin_id: provider.verified_by_admin_id },
+                        select: { admin_name: true, admin_email: true }
+                    });
+                    verifiedByAdmin = admin ? { name: admin.admin_name, email: admin.admin_email } : null;
+                }
+
+                if (provider.deactivated_by_admin_id) {
+                    const admin = await prisma.admin.findUnique({
+                        where: { admin_id: provider.deactivated_by_admin_id },
+                        select: { admin_name: true, admin_email: true }
+                    });
+                    deactivatedByAdmin = admin ? { name: admin.admin_name, email: admin.admin_email } : null;
+                }
+
+                return {
+                    ...provider,
+                    provider_profile_photo: AdminController.fixImagePath(provider.provider_profile_photo),
+                    provider_valid_id: AdminController.fixImagePath(provider.provider_valid_id),
+                    verified_by_admin: verifiedByAdmin,
+                    deactivated_by_admin: deactivatedByAdmin
+                };
             }));
 
-            res.json({ providers: providersWithFixedPaths });
+            res.json({ providers: providersWithAdminNames });
         } catch (error) {
             console.error('Error fetching providers:', error);
             res.status(500).json({ message: 'Internal server error' });
@@ -553,7 +603,7 @@ class AdminController {
     async verifyProvider(req, res) {
         try {
             const { providerId } = req.params;
-            const adminId = req.userId; // Get admin ID from auth middleware
+            const adminId = req.admin.admin_id; // Get admin ID from auth middleware
 
             const provider = await prisma.serviceProviderDetails.update({
                 where: { provider_id: parseInt(providerId) },
@@ -605,12 +655,46 @@ class AdminController {
         try {
             const { providerId } = req.params;
             const { reason } = req.body;
-            const adminId = req.userId; // Get admin ID from auth middleware
+            const adminId = req.admin.admin_id; // Get admin ID from auth middleware
 
             if (!reason) {
                 return res.status(400).json({ message: 'Deactivation reason is required' });
             }
 
+            // First, get all active appointments (scheduled, confirmed, in-progress)
+            const activeAppointments = await prisma.appointment.findMany({
+                where: {
+                    provider_id: parseInt(providerId),
+                    appointment_status: {
+                        in: ['scheduled', 'confirmed', 'in-progress']
+                    }
+                },
+                include: {
+                    customer: {
+                        select: {
+                            user_id: true,
+                            first_name: true,
+                            last_name: true,
+                            email: true
+                        }
+                    },
+                    serviceProvider: {
+                        select: {
+                            provider_id: true,
+                            provider_first_name: true,
+                            provider_last_name: true,
+                            provider_email: true
+                        }
+                    },
+                    service: {
+                        select: {
+                            service_title: true
+                        }
+                    }
+                }
+            });
+
+            // Deactivate the provider
             const provider = await prisma.serviceProviderDetails.update({
                 where: { provider_id: parseInt(providerId) },
                 data: { 
@@ -620,11 +704,69 @@ class AdminController {
                 }
             });
 
-            // Send deactivation email
+            // Cancel all active appointments
+            if (activeAppointments.length > 0) {
+                const cancellationReason = `Service provider account has been deactivated by admin. Reason: ${reason}`;
+
+                // Update all appointments to cancelled
+                await prisma.appointment.updateMany({
+                    where: {
+                        provider_id: parseInt(providerId),
+                        appointment_status: {
+                            in: ['scheduled', 'confirmed', 'in-progress']
+                        }
+                    },
+                    data: {
+                        appointment_status: 'cancelled',
+                        cancellation_reason: cancellationReason,
+                        cancelled_by_admin_id: adminId
+                    }
+                });
+
+                // Send email notifications to all affected customers
+                const emailPromises = activeAppointments.map(async (appointment) => {
+                    try {
+                        await sendProviderDeactivationCancellationToCustomer(
+                            appointment.customer.email,
+                            {
+                                customerName: `${appointment.customer.first_name} ${appointment.customer.last_name}`,
+                                serviceTitle: appointment.service.service_title,
+                                providerName: `${appointment.serviceProvider.provider_first_name} ${appointment.serviceProvider.provider_last_name}`,
+                                scheduledDate: appointment.scheduled_date,
+                                appointmentId: appointment.appointment_id,
+                                deactivationReason: reason
+                            }
+                        );
+                        console.log(`✅ Cancellation email sent to customer: ${appointment.customer.email}`);
+                    } catch (emailError) {
+                        console.error(`❌ Error sending cancellation email to customer ${appointment.customer.email}:`, emailError);
+                    }
+                });
+
+                // Wait for all customer emails to be sent
+                await Promise.all(emailPromises);
+
+                // Send summary email to provider
+                try {
+                    await sendProviderDeactivationCancellationToProvider(
+                        provider.provider_email,
+                        {
+                            providerName: `${provider.provider_first_name} ${provider.provider_last_name}`,
+                            appointmentCount: activeAppointments.length,
+                            deactivationReason: reason
+                        }
+                    );
+                    console.log(`✅ Deactivation summary email sent to provider: ${provider.provider_email}`);
+                } catch (emailError) {
+                    console.error('❌ Error sending summary email to provider:', emailError);
+                }
+            }
+
+            // Send standard deactivation email to provider
             try {
                 await sendProviderDeactivationEmail(provider.provider_email, {
-                    firstName: provider.provider_firstname,
-                    lastName: provider.provider_lastname,
+                    firstName: provider.provider_first_name,
+                    lastName: provider.provider_last_name,
                     businessName: provider.business_name
                 }, reason);
             } catch (emailError) {
@@ -632,7 +774,11 @@ class AdminController {
                 // Don't fail the deactivation if email fails
             }
 
-            res.json({ message: 'Provider deactivated successfully', provider });
+            res.json({ 
+                message: 'Provider deactivated successfully', 
+                provider,
+                cancelledAppointments: activeAppointments.length
+            });
         } catch (error) {
             console.error('Error deactivating provider:', error);
             res.status(500).json({ message: 'Internal server error' });
@@ -643,7 +789,7 @@ class AdminController {
         try {
             const { providerId } = req.params;
             const { reason } = req.body;
-            const adminId = req.userId; // Get admin ID from auth middleware
+            const adminId = req.admin.admin_id; // Get admin ID from auth middleware
 
             if (!reason) {
                 return res.status(400).json({ message: 'Rejection reason is required' });
@@ -683,7 +829,70 @@ class AdminController {
     // Certificate Management
     async getCertificates(req, res) {
         try {
+            const { 
+                certificate_status, 
+                search, 
+                provider_id, 
+                start_date, 
+                end_date 
+            } = req.query;
+
+            // Build where clause for filtering
+            const whereClause = {};
+
+            // Filter by certificate status
+            if (certificate_status) {
+                // Normalize status values
+                const statusMapping = {
+                    'pending': 'Pending',
+                    'approved': 'Approved',
+                    'valid': 'Approved', // Treat 'valid' as 'Approved'
+                    'rejected': 'Rejected',
+                    'expired': 'Expired'
+                };
+                
+                const normalizedStatus = statusMapping[certificate_status.toLowerCase()];
+                if (normalizedStatus) {
+                    whereClause.certificate_status = normalizedStatus;
+                }
+            }
+
+            // Filter by provider ID
+            if (provider_id) {
+                whereClause.provider_id = parseInt(provider_id);
+            }
+
+            // Filter by date range
+            if (start_date || end_date) {
+                whereClause.created_at = {};
+                if (start_date) {
+                    whereClause.created_at.gte = new Date(start_date);
+                }
+                if (end_date) {
+                    whereClause.created_at.lte = new Date(end_date);
+                }
+            }
+
+            // Search functionality (provider name, certificate name, type, number)
+            if (search && search.trim()) {
+                const searchTerm = search.trim();
+                whereClause.OR = [
+                    { certificate_name: { contains: searchTerm, mode: 'insensitive' } },
+                    { certificate_number: { contains: searchTerm, mode: 'insensitive' } },
+                    {
+                        provider: {
+                            OR: [
+                                { provider_first_name: { contains: searchTerm, mode: 'insensitive' } },
+                                { provider_last_name: { contains: searchTerm, mode: 'insensitive' } },
+                                { provider_email: { contains: searchTerm, mode: 'insensitive' } }
+                            ]
+                        }
+                    }
+                ];
+            }
+
             const certificates = await prisma.certificate.findMany({
+                where: whereClause,
                 orderBy: { created_at: 'desc' },
                 include: {
                     provider: {
@@ -699,16 +908,43 @@ class AdminController {
                 }
             });
 
-            const formattedCertificates = certificates.map(cert => ({
-                ...cert,
-                certificate_file_path: AdminController.fixImagePath(cert.certificate_file_path),
-                provider_name: `${cert.provider.provider_first_name} ${cert.provider.provider_last_name}`,
-                provider_email: cert.provider.provider_email,
-                provider_phone: cert.provider.provider_phone_number,
-                provider_verified: cert.provider.provider_isVerified
+            // Fetch admin names for reviewed_by
+            const certificatesWithAdminNames = await Promise.all(certificates.map(async (cert) => {
+                let reviewedByAdmin = null;
+
+                if (cert.reviewed_by_admin_id) {
+                    const admin = await prisma.admin.findUnique({
+                        where: { admin_id: cert.reviewed_by_admin_id },
+                        select: { admin_name: true, admin_email: true }
+                    });
+                    reviewedByAdmin = admin ? { name: admin.admin_name, email: admin.admin_email } : null;
+                }
+
+                return {
+                    ...cert,
+                    certificate_file_path: AdminController.fixImagePath(cert.certificate_file_path),
+                    provider_name: `${cert.provider.provider_first_name} ${cert.provider.provider_last_name}`,
+                    provider_email: cert.provider.provider_email,
+                    provider_phone: cert.provider.provider_phone_number,
+                    provider_verified: cert.provider.provider_isVerified,
+                    reviewed_by_admin: reviewedByAdmin
+                };
             }));
 
-            res.json({ certificates: formattedCertificates });
+            // Get total count for pagination (using same filters)
+            const totalCount = await prisma.certificate.count({ where: whereClause });
+
+            res.json({ 
+                certificates: certificatesWithAdminNames,
+                total: totalCount,
+                filters: {
+                    certificate_status: certificate_status || null,
+                    search: search || null,
+                    provider_id: provider_id || null,
+                    start_date: start_date || null,
+                    end_date: end_date || null
+                }
+            });
         } catch (error) {
             console.error('Error fetching certificates:', error);
             res.status(500).json({ message: 'Internal server error' });
@@ -749,6 +985,16 @@ class AdminController {
                 return res.status(404).json({ message: 'Certificate not found' });
             }
 
+            // Fetch admin name for reviewed_by
+            let reviewedByAdmin = null;
+            if (certificate.reviewed_by_admin_id) {
+                const admin = await prisma.admin.findUnique({
+                    where: { admin_id: certificate.reviewed_by_admin_id },
+                    select: { admin_name: true, admin_email: true }
+                });
+                reviewedByAdmin = admin ? { name: admin.admin_name, email: admin.admin_email } : null;
+            }
+
             const formattedCertificate = {
                 ...certificate,
                 certificate_file_path: AdminController.fixImagePath(certificate.certificate_file_path),
@@ -756,6 +1002,7 @@ class AdminController {
                 provider_email: certificate.provider.provider_email,
                 provider_phone: certificate.provider.provider_phone_number,
                 provider_verified: certificate.provider.provider_isVerified,
+                reviewed_by_admin: reviewedByAdmin,
                 covered_services: certificate.CoveredService.map(cs => ({
                     service_title: cs.specific_service.specific_service_title,
                     service_description: cs.specific_service.specific_service_description
@@ -772,7 +1019,7 @@ class AdminController {
     async approveCertificate(req, res) {
         try {
             const { certificateId } = req.params;
-            const adminId = req.userId; // Get admin ID from auth middleware
+            const adminId = req.admin.admin_id; // Get admin ID from auth middleware
 
             const certificate = await prisma.certificate.update({
                 where: { certificate_id: parseInt(certificateId) },
@@ -822,7 +1069,7 @@ class AdminController {
         try {
             const { certificateId } = req.params;
             const { reason } = req.body;
-            const adminId = req.userId; // Get admin ID from auth middleware
+            const adminId = req.admin.admin_id; // Get admin ID from auth middleware
 
             if (!reason) {
                 return res.status(400).json({ message: 'Rejection reason is required' });
@@ -1062,10 +1309,10 @@ class AdminController {
             }
 
             // Validate role
-            const validRoles = ['admin', 'super_admin'];
+            const validRoles = ['super_admin', 'admin', 'operations', 'verification'];
             if (!validRoles.includes(role)) {
                 return res.status(400).json({ 
-                    message: 'Invalid role. Must be admin or super_admin' 
+                    message: 'Invalid role. Must be one of: super_admin, admin, operations, verification' 
                 });
             }
 

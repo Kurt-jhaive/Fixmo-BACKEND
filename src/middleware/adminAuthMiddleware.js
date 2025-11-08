@@ -103,6 +103,35 @@ export const superAdminMiddleware = (req, res, next) => {
 };
 
 /**
+ * Middleware to check if admin has operations or super_admin role
+ * Must be used after adminAuthMiddleware
+ * Used for penalty management routes
+ */
+export const operationsOrSuperAdminMiddleware = (req, res, next) => {
+    try {
+        if (!req.admin) {
+            return res.status(401).json({ 
+                message: 'Access denied. Admin authentication required.' 
+            });
+        }
+
+        const allowedRoles = ['super_admin', 'operations'];
+        if (!allowedRoles.includes(req.admin.admin_role)) {
+            return res.status(403).json({ 
+                message: 'Access denied. Operations or Super Admin privileges required.' 
+            });
+        }
+
+        next();
+    } catch (error) {
+        console.error('Operations/Super admin middleware error:', error);
+        return res.status(500).json({ 
+            message: 'Internal server error.' 
+        });
+    }
+};
+
+/**
  * Middleware to check if admin must change password
  * Returns appropriate response if password change is required
  */
@@ -139,5 +168,6 @@ export const checkPasswordChangeRequired = (req, res, next) => {
 export default { 
     adminAuthMiddleware, 
     superAdminMiddleware, 
+    operationsOrSuperAdminMiddleware,
     checkPasswordChangeRequired 
 };
