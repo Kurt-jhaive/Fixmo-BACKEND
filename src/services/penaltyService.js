@@ -1,4 +1,8 @@
 import prisma from '../prismaclient.js';
+import { 
+  sendProviderDeactivationCancellationToCustomer, 
+  sendProviderDeactivationCancellationToProvider 
+} from './mailer.js';
 
 /**
  * Penalty Service
@@ -226,6 +230,150 @@ class PenaltyService {
   }
 
   /**
+   * Cancel all active appointments when user/provider is auto-deactivated
+   * @param {Object} params - Cancel parameters
+   */
+  static async cancelActiveAppointments({ userId, providerId, reason }) {
+    try {
+      console.log(`🔍 Checking appointments for ${userId ? 'user' : 'provider'} ${userId || providerId}`);
+      
+      const whereClause = userId 
+        ? { customer_id: userId }
+        : { provider_id: providerId };
+
+      console.log('📋 Where clause:', JSON.stringify(whereClause));
+
+      // Find all active appointments
+      const activeAppointments = await prisma.appointment.findMany({
+        where: {
+          ...whereClause,
+          appointment_status: {
+            in: ['scheduled', 'confirmed', 'in-progress']
+          }
+        },
+        include: {
+          customer: {
+            select: {
+              user_id: true,
+              first_name: true,
+              last_name: true,
+              email: true
+            }
+          },
+          serviceProvider: {
+            select: {
+              provider_id: true,
+              provider_first_name: true,
+              provider_last_name: true,
+              provider_email: true
+            }
+          },
+          service: {
+            select: {
+              service_title: true
+            }
+          }
+        }
+      });
+
+      console.log(`📊 Found ${activeAppointments.length} active appointment(s)`);
+
+      if (activeAppointments.length === 0) {
+        console.log(`ℹ️  No active appointments to cancel for ${userId ? 'user' : 'provider'} ${userId || providerId}`);
+        return 0;
+      }
+
+      // Cancel all appointments
+      const cancellationReason = `Account automatically suspended due to low penalty points (≤50). ${reason || ''}`;
+      
+      console.log(`🔄 Updating appointments to cancelled status...`);
+      
+      const updateResult = await prisma.appointment.updateMany({
+        where: {
+          ...whereClause,
+          appointment_status: {
+            in: ['scheduled', 'confirmed', 'in-progress']
+          }
+        },
+        data: {
+          appointment_status: 'cancelled',
+          cancellation_reason: cancellationReason
+        }
+      });
+
+      console.log(`✅ Updated ${updateResult.count} appointment(s) to cancelled`);
+
+      // Send emails to all affected parties
+      console.log(`📧 Sending cancellation emails...`);
+      
+      for (const appointment of activeAppointments) {
+        try {
+          // Send to customer
+          await sendProviderDeactivationCancellationToCustomer(
+            appointment.customer.email,
+            {
+              customerName: `${appointment.customer.first_name} ${appointment.customer.last_name}`,
+              serviceTitle: appointment.service.service_title,
+              providerName: `${appointment.serviceProvider.provider_first_name} ${appointment.serviceProvider.provider_last_name}`,
+              scheduledDate: appointment.scheduled_date,
+              appointmentId: appointment.appointment_id,
+              deactivationReason: 'Account suspended due to penalty point violations'
+            }
+          );
+          console.log(`✅ Cancellation email sent to customer: ${appointment.customer.email}`);
+        } catch (emailError) {
+          console.error(`❌ Error sending email to customer ${appointment.customer.email}:`, emailError);
+        }
+
+        // Send to provider (if provider is NOT the one being deactivated)
+        if (providerId && appointment.provider_id !== providerId) {
+          try {
+            await sendProviderDeactivationCancellationToCustomer(
+              appointment.serviceProvider.provider_email,
+              {
+                customerName: `${appointment.customer.first_name} ${appointment.customer.last_name}`,
+                serviceTitle: appointment.service.service_title,
+                providerName: `${appointment.serviceProvider.provider_first_name} ${appointment.serviceProvider.provider_last_name}`,
+                scheduledDate: appointment.scheduled_date,
+                appointmentId: appointment.appointment_id,
+                deactivationReason: 'Customer account suspended due to penalty point violations'
+              }
+            );
+          } catch (emailError) {
+            console.error(`❌ Error sending email to provider:`, emailError);
+          }
+        }
+      }
+
+      // Send summary to the deactivated party
+      if (providerId) {
+        const provider = activeAppointments[0]?.serviceProvider;
+        if (provider) {
+          try {
+            await sendProviderDeactivationCancellationToProvider(
+              provider.provider_email,
+              {
+                providerName: `${provider.provider_first_name} ${provider.provider_last_name}`,
+                appointmentCount: activeAppointments.length,
+                deactivationReason: 'Your penalty points dropped to 50 or below'
+              }
+            );
+            console.log(`✅ Summary email sent to provider: ${provider.provider_email}`);
+          } catch (emailError) {
+            console.error(`❌ Error sending summary to provider:`, emailError);
+          }
+        }
+      }
+
+      console.log(`✅ Cancelled ${activeAppointments.length} active appointment(s) for ${userId ? 'user' : 'provider'} ${userId || providerId}`);
+      return activeAppointments.length;
+    } catch (error) {
+      console.error('❌ Error cancelling appointments:', error);
+      return 0;
+    }
+  }
+
+  /**
    * Record a violation for a user or provider
    * @param {Object} data - Violation data
    * @returns {Object} Created violation record
@@ -336,8 +484,18 @@ class PenaltyService {
         },
       });
 
+      // Cancel active appointments if transitioning to deactivated state
       if (shouldDeactivate && previousPoints > 50) {
         console.log(`⚠️  User ${userId} auto-deactivated - penalty points dropped to ${newPoints} (≤ 50). Account status set to inactive.`);
+        console.log(`🔄 Cancelling all active appointments for user ${userId}...`);
+        
+        // Cancel all active appointments
+        const cancelledCount = await this.cancelActiveAppointments({
+          userId,
+          reason: 'Account automatically suspended due to penalty violations'
+        });
+        
+        console.log(`✅ Cancelled ${cancelledCount} appointment(s) for user ${userId}`);
       }
 
       return { previousPoints, newPoints, suspended: shouldDeactivate, deactivated: shouldDeactivate };
@@ -379,8 +537,18 @@ class PenaltyService {
         },
       });
 
+      // Cancel active appointments if transitioning to deactivated state
       if (shouldDeactivate && previousPoints > 50) {
         console.log(`⚠️  Provider ${providerId} auto-deactivated - penalty points dropped to ${newPoints} (≤ 50). Account status set to inactive.`);
+        console.log(`🔄 Cancelling all active appointments for provider ${providerId}...`);
+        
+        // Cancel all active appointments
+        const cancelledCount = await this.cancelActiveAppointments({
+          providerId,
+          reason: 'Account automatically suspended due to penalty violations'
+        });
+        
+        console.log(`✅ Cancelled ${cancelledCount} appointment(s) for provider ${providerId}`);
       }
 
       return { previousPoints, newPoints, suspended: shouldDeactivate, deactivated: shouldDeactivate };

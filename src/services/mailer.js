@@ -1687,3 +1687,158 @@ export const sendAppointmentStatusUpdateEmail = async (customerEmail, statusDeta
 
     await transporter.sendMail(mailOptions);
 };
+
+/**
+ * Send appointment cancellation email to customer when provider is deactivated
+ */
+export const sendProviderDeactivationCancellationToCustomer = async (customerEmail, cancellationDetails) => {
+    const { 
+        customerName, 
+        serviceTitle, 
+        providerName,
+        scheduledDate, 
+        appointmentId,
+        deactivationReason 
+    } = cancellationDetails;
+    
+    const formattedDate = new Date(scheduledDate).toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+    });
+
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: customerEmail,
+        subject: `Appointment Cancelled - Provider Account Deactivated`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #e74c3c; margin-bottom: 10px;">⚠️ Appointment Cancelled</h1>
+                        <p style="color: #666; font-size: 16px;">Your appointment has been automatically cancelled</p>
+                    </div>
+                    
+                    <div style="background-color: #f8d7da; padding: 20px; border-radius: 8px; margin-bottom: 25px; border-left: 4px solid #e74c3c;">
+                        <h3 style="margin-top: 0; color: #721c24;">Cancelled Appointment Details</h3>
+                        <p><strong>Appointment ID:</strong> #${appointmentId}</p>
+                        <p><strong>Customer:</strong> ${customerName}</p>
+                        <p><strong>Service:</strong> ${serviceTitle}</p>
+                        <p><strong>Provider:</strong> ${providerName}</p>
+                        <p><strong>Scheduled Date:</strong> ${formattedDate}</p>
+                    </div>
+
+                    <div style="background-color: #fff3cd; padding: 20px; border-radius: 8px; margin-bottom: 25px; border-left: 4px solid #ffc107;">
+                        <h3 style="margin-top: 0; color: #856404;">❗ Reason for Cancellation</h3>
+                        <p style="margin-bottom: 0; color: #856404;"><strong>The service provider's account has been deactivated.</strong></p>
+                        ${deactivationReason ? `<p style="margin-top: 10px; color: #856404;">Admin Note: ${deactivationReason}</p>` : ''}
+                    </div>
+
+                    <div style="background-color: #d4edda; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #155724;">📋 What's Next?</h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #155724;">
+                            <li>This appointment has been automatically cancelled</li>
+                            <li>No charges will be applied for this cancellation</li>
+                            <li>You can book a new service with another provider from your dashboard</li>
+                            <li>We apologize for any inconvenience this may have caused</li>
+                        </ul>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #007bff; border-radius: 8px; margin-top: 30px;">
+                        <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/services" style="color: white; text-decoration: none; font-weight: bold; font-size: 16px;">
+                            🔍 Browse Other Service Providers
+                        </a>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-top: 20px;">
+                        <p style="color: #666; margin-bottom: 10px;">Need help? Contact us:</p>
+                        <p style="color: #007bff; margin: 0;">support@fixmo.com</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            This is an automated notification from Fixmo.<br>
+                            Please do not reply to this email.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
+
+/**
+ * Send appointment cancellation email to provider when their account is deactivated
+ */
+export const sendProviderDeactivationCancellationToProvider = async (providerEmail, cancellationDetails) => {
+    const { 
+        providerName,
+        appointmentCount,
+        deactivationReason 
+    } = cancellationDetails;
+
+    const mailOptions = {
+        from: process.env.MAILER_USER,
+        to: providerEmail,
+        subject: `Account Deactivated - ${appointmentCount} Appointment(s) Cancelled`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+                <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #e74c3c; margin-bottom: 10px;">⚠️ Account Deactivated</h1>
+                        <p style="color: #666; font-size: 16px;">Your service provider account has been deactivated</p>
+                    </div>
+                    
+                    <div style="background-color: #f8d7da; padding: 20px; border-radius: 8px; margin-bottom: 25px; border-left: 4px solid #e74c3c;">
+                        <h3 style="margin-top: 0; color: #721c24;">Account Status</h3>
+                        <p style="margin-bottom: 10px;"><strong>Provider:</strong> ${providerName}</p>
+                        <p style="margin-bottom: 10px;"><strong>Status:</strong> <span style="color: #e74c3c; font-weight: bold;">DEACTIVATED</span></p>
+                        <p style="margin-bottom: 0;"><strong>Appointments Cancelled:</strong> ${appointmentCount}</p>
+                    </div>
+
+                    <div style="background-color: #fff3cd; padding: 20px; border-radius: 8px; margin-bottom: 25px; border-left: 4px solid #ffc107;">
+                        <h3 style="margin-top: 0; color: #856404;">Reason for Deactivation</h3>
+                        <p style="margin-bottom: 0; color: #856404;">${deactivationReason || 'Administrative decision'}</p>
+                    </div>
+
+                    <div style="background-color: #d1ecf1; padding: 20px; border-radius: 8px; margin-bottom: 25px; border-left: 4px solid #0c5460;">
+                        <h3 style="margin-top: 0; color: #0c5460;">📢 Important Information</h3>
+                        <ul style="margin: 0; padding-left: 20px; color: #0c5460;">
+                            <li>All active appointments (Scheduled, Confirmed, In-Progress) have been automatically cancelled</li>
+                            <li>Your customers have been notified about the cancellations</li>
+                            <li>You will not be able to accept new bookings while your account is deactivated</li>
+                            <li>Your profile is no longer visible to customers</li>
+                        </ul>
+                    </div>
+
+                    <div style="background-color: #d4edda; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                        <h3 style="margin-top: 0; color: #155724;">What Can You Do?</h3>
+                        <p style="margin: 0; color: #155724;">
+                            If you believe this deactivation was made in error or if you have questions about your account status, 
+                            please contact our support team immediately.
+                        </p>
+                    </div>
+
+                    <div style="text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 8px; margin-top: 30px;">
+                        <p style="color: #666; margin-bottom: 10px;"><strong>Contact Support:</strong></p>
+                        <p style="color: #007bff; margin: 0;">support@fixmo.com</p>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 30px;">
+                        <p style="color: #888; font-size: 12px;">
+                            This is an automated notification from Fixmo.<br>
+                            Please do not reply to this email.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+    
+    await transporter.sendMail(mailOptions);
+};
