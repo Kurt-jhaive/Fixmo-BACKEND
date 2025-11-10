@@ -1054,7 +1054,7 @@ class PenaltyService {
   /**
    * Appeal a violation
    */
-  static async appealViolation(violationId, appealReason, userId, providerId) {
+  static async appealViolation(violationId, appealReason, userId, providerId, evidenceUrls = null) {
     const violation = await prisma.penaltyViolation.findUnique({
       where: { violation_id: violationId },
     });
@@ -1071,17 +1071,31 @@ class PenaltyService {
       throw new Error('Unauthorized to appeal this violation');
     }
 
+    // Prepare update data
+    const updateData = {
+      status: 'appealed',
+      appeal_reason: appealReason,
+      appeal_status: 'pending',
+    };
+
+    // Add evidence URLs if provided
+    if (evidenceUrls && evidenceUrls.length > 0) {
+      // Merge with existing evidence if any
+      const existingEvidence = violation.evidence_urls || [];
+      updateData.evidence_urls = [...existingEvidence, ...evidenceUrls];
+    }
+
     // Update violation with appeal
     await prisma.penaltyViolation.update({
       where: { violation_id: violationId },
-      data: {
-        status: 'appealed',
-        appeal_reason: appealReason,
-        appeal_status: 'pending',
-      },
+      data: updateData,
     });
 
-    return { success: true, message: 'Appeal submitted successfully' };
+    return { 
+      success: true, 
+      message: 'Appeal submitted successfully',
+      evidenceUploaded: evidenceUrls ? evidenceUrls.length : 0
+    };
   }
 
   /**

@@ -1,6 +1,7 @@
 import PenaltyService from '../services/penaltyService.js';
 import prisma from '../prismaclient.js';
 import { manualPenaltyReset } from '../services/penaltyResetJob.js';
+import { uploadToCloudinary } from '../services/cloudinaryService.js';
 
 /**
  * Penalty Controller
@@ -174,6 +175,27 @@ class PenaltyController {
         });
       }
 
+      // Upload evidence files to Cloudinary if provided
+      let evidenceUrls = [];
+      if (req.files && req.files.length > 0) {
+        console.log(`📤 Uploading ${req.files.length} evidence files to Cloudinary...`);
+        
+        for (const file of req.files) {
+          try {
+            const folderName = userType === 'customer' 
+              ? `penalty-evidence/users/${userId}`
+              : `penalty-evidence/providers/${providerId || userId}`;
+            
+            const cloudinaryUrl = await uploadToCloudinary(file.buffer, folderName);
+            evidenceUrls.push(cloudinaryUrl);
+            console.log('✅ Evidence uploaded:', cloudinaryUrl);
+          } catch (uploadError) {
+            console.error('❌ Error uploading evidence file:', uploadError);
+            // Continue with other files even if one fails
+          }
+        }
+      }
+
       // Use correct ID based on user type
       const actualUserId = userType === 'customer' ? userId : null;
       const actualProviderId = (userType === 'service_provider' || userType === 'provider') 
@@ -184,13 +206,18 @@ class PenaltyController {
         parseInt(violationId),
         appealReason,
         actualUserId,
-        actualProviderId
+        actualProviderId,
+        evidenceUrls.length > 0 ? evidenceUrls : null
       );
 
       res.status(200).json({
         success: true,
         message: 'Appeal submitted successfully. An admin will review it shortly.',
-        data: result,
+        data: {
+          ...result,
+          evidenceCount: evidenceUrls.length,
+          evidenceUrls: evidenceUrls
+        },
       });
     } catch (error) {
       console.error('Error submitting appeal:', error);
@@ -384,6 +411,33 @@ class PenaltyController {
         });
       }
 
+      // Upload evidence files to Cloudinary if provided
+      let uploadedEvidenceUrls = [];
+      if (req.files && req.files.length > 0) {
+        console.log(`📤 Admin uploading ${req.files.length} evidence files to Cloudinary...`);
+        
+        for (const file of req.files) {
+          try {
+            const folderName = userId 
+              ? `penalty-evidence/admin/users/${userId}`
+              : `penalty-evidence/admin/providers/${providerId}`;
+            
+            const cloudinaryUrl = await uploadToCloudinary(file.buffer, folderName);
+            uploadedEvidenceUrls.push(cloudinaryUrl);
+            console.log('✅ Admin evidence uploaded:', cloudinaryUrl);
+          } catch (uploadError) {
+            console.error('❌ Error uploading admin evidence file:', uploadError);
+            // Continue with other files even if one fails
+          }
+        }
+      }
+
+      // Merge uploaded URLs with any provided URLs
+      const allEvidenceUrls = [
+        ...(evidenceUrls || []),
+        ...uploadedEvidenceUrls
+      ];
+
       const violation = await PenaltyService.recordViolation({
         userId,
         providerId,
@@ -392,7 +446,7 @@ class PenaltyController {
         reportId,
         ratingId,
         violationDetails,
-        evidenceUrls,
+        evidenceUrls: allEvidenceUrls.length > 0 ? allEvidenceUrls : null,
         detectedBy: 'admin',
         detectedByAdminId: admin_id,
       });
@@ -400,7 +454,11 @@ class PenaltyController {
       res.status(201).json({
         success: true,
         message: 'Violation recorded successfully',
-        data: violation,
+        data: {
+          ...violation,
+          evidenceCount: allEvidenceUrls.length,
+          uploadedFiles: uploadedEvidenceUrls.length
+        },
       });
     } catch (error) {
       console.error('Error recording violation:', error);

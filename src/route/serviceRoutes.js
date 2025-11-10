@@ -26,7 +26,7 @@ router.use(requireAuth('provider'));
 router.get('/services', getProviderServices);
 router.get('/services/:serviceId', getServiceById);
 router.post('/services', uploadMultipleServicePhotos.array('service_photos', 5), createService);
-router.put('/services/:serviceId', updateService);
+router.put('/services/:serviceId', uploadMultipleServicePhotos.array('service_photos', 5), updateService);
 router.delete('/services/:serviceId', deleteService);
 router.patch('/services/:serviceId/toggle', toggleServiceAvailability);
 

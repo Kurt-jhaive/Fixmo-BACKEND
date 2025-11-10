@@ -1,29 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs/promises';
+import { uploadToCloudinary, deleteFromCloudinary, extractPublicId } from '../services/cloudinaryService.js';
 
 const prisma = new PrismaClient();
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-    destination: async (req, file, cb) => {
-        const uploadDir = path.join(process.cwd(), 'uploads', 'certificates');
-        try {
-            await fs.mkdir(uploadDir, { recursive: true });
-            cb(null, uploadDir);
-        } catch (error) {
-            cb(error);
-        }
-    },
-    filename: (req, file, cb) => {
-        const providerId = req.userId;
-        const timestamp = Date.now();
-        const ext = path.extname(file.originalname);
-        const filename = `cert_${providerId}_${timestamp}${ext}`;
-        cb(null, filename);
-    }
-});
+// Configure multer for memory storage (for Cloudinary upload)
+const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
     // Allow images and documents for certificates
@@ -108,6 +90,10 @@ export const uploadCertificate = async (req, res) => {
             });
         }
 
+        // Upload to Cloudinary
+        const folderName = `fixmo/certificates/provider_${providerId}`;
+        const certificateFileUrl = await uploadToCloudinary(req.file.buffer, folderName);
+
         // Check for duplicates
         // 1. Check if certificate number already exists
         const existingCertNumber = await prisma.certificate.findUnique({
@@ -126,7 +112,7 @@ export const uploadCertificate = async (req, res) => {
                 const updatedCertificate = await prisma.certificate.update({
                     where: { certificate_id: existingCertNumber.certificate_id },
                     data: {
-                        certificate_file_path: `/uploads/certificates/${req.file.filename}`,
+                        certificate_file_path: certificateFileUrl,
                         expiry_date: expiryDate ? new Date(expiryDate) : null,
                         certificate_status: 'Pending', // Reset to pending for review
                         certificate_reason: null, // Clear rejection reason
@@ -142,13 +128,6 @@ export const uploadCertificate = async (req, res) => {
                     resubmitted: true
                 });
             } else {
-                // Delete uploaded file if certificate number already exists with valid status
-                try {
-                    await fs.unlink(req.file.path);
-                } catch (unlinkError) {
-                    console.error('Error deleting file:', unlinkError);
-                }
-                
                 return res.status(400).json({
                     success: false,
                     message: 'Certificate number already exists with valid status. Cannot resubmit.',
@@ -178,7 +157,7 @@ export const uploadCertificate = async (req, res) => {
                     where: { certificate_id: existingCertType.certificate_id },
                     data: {
                         certificate_number: certificateNumber, // Update with new number
-                        certificate_file_path: `/uploads/certificates/${req.file.filename}`,
+                        certificate_file_path: certificateFileUrl,
                         expiry_date: expiryDate ? new Date(expiryDate) : null,
                         certificate_status: 'Pending', // Reset to pending for review
                         certificate_reason: null, // Clear rejection reason
@@ -194,13 +173,6 @@ export const uploadCertificate = async (req, res) => {
                     resubmitted: true
                 });
             } else {
-                // Delete uploaded file if certificate type already exists for this provider
-                try {
-                    await fs.unlink(req.file.path);
-                } catch (unlinkError) {
-                    console.error('Error deleting file:', unlinkError);
-                }
-                
                 return res.status(400).json({
                     success: false,
                     message: `You already have a "${certificateName}" certificate with valid status. Cannot upload duplicate.`,
@@ -214,7 +186,7 @@ export const uploadCertificate = async (req, res) => {
             data: {
                 certificate_name: certificateName,
                 certificate_number: certificateNumber,
-                certificate_file_path: `/uploads/certificates/${req.file.filename}`,
+                certificate_file_path: certificateFileUrl,
                 expiry_date: expiryDate ? new Date(expiryDate) : null,
                 provider_id: providerId,
                 certificate_status: 'Pending' // Default status
@@ -229,15 +201,6 @@ export const uploadCertificate = async (req, res) => {
 
     } catch (error) {
         console.error('Error uploading certificate:', error);
-        
-        // Clean up uploaded file on error
-        if (req.file) {
-            try {
-                await fs.unlink(req.file.path);
-            } catch (unlinkError) {
-                console.error('Error deleting file on error:', unlinkError);
-            }
-        }
         
         res.status(500).json({
             success: false,
@@ -288,13 +251,16 @@ export const deleteCertificate = async (req, res) => {
             });
         }
 
-        // Delete the certificate file
+        // Delete the certificate file from Cloudinary
         if (certificate.certificate_file_path) {
-            const filePath = path.join(process.cwd(), 'public', certificate.certificate_file_path);
             try {
-                await fs.unlink(filePath);
+                const publicId = extractPublicId(certificate.certificate_file_path);
+                if (publicId) {
+                    await deleteFromCloudinary(publicId);
+                    console.log('Certificate file deleted from Cloudinary:', publicId);
+                }
             } catch (fileError) {
-                console.error('Error deleting certificate file:', fileError);
+                console.error('Error deleting certificate file from Cloudinary:', fileError);
                 // Continue with database deletion even if file deletion fails
             }
         }

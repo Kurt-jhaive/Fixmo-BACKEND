@@ -2,6 +2,7 @@ import express from 'express';
 import PenaltyController from '../controller/penaltyController.js';
 import authMiddleware from '../middleware/authMiddleware.js';
 import { adminAuthMiddleware, operationsOrSuperAdminMiddleware } from '../middleware/adminAuthMiddleware.js';
+import { uploadPenaltyEvidence } from '../middleware/multer.js';
 
 const router = express.Router();
 
@@ -89,13 +90,19 @@ router.get('/my-violations', authMiddleware, PenaltyController.getMyViolations);
  *                 type: string
  *                 minLength: 10
  *                 description: Reason for appealing the violation
+ *               evidence:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *                 description: Evidence files (images/videos) to support the appeal
  *     responses:
  *       200:
  *         description: Appeal submitted successfully
  *       400:
  *         description: Invalid request
  */
-router.post('/appeal/:violationId', authMiddleware, PenaltyController.appealViolation);
+router.post('/appeal/:violationId', authMiddleware, uploadPenaltyEvidence.array('evidence', 5), PenaltyController.appealViolation);
 
 /**
  * @swagger
@@ -253,13 +260,19 @@ router.get('/violation-types', PenaltyController.getViolationTypes);
  *                 items:
  *                   type: string
  *                 description: URLs of evidence/screenshots
+ *               evidence:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *                 description: Evidence files (images/videos) to upload
  *     responses:
  *       201:
  *         description: Violation recorded successfully
  *       400:
  *         description: Invalid request
  */
-router.post('/admin/record-violation', adminAuthMiddleware, operationsOrSuperAdminMiddleware, PenaltyController.adminRecordViolation);
+router.post('/admin/record-violation', adminAuthMiddleware, operationsOrSuperAdminMiddleware, uploadPenaltyEvidence.array('evidence', 5), PenaltyController.adminRecordViolation);
 
 /**
  * @swagger
