@@ -25,6 +25,7 @@ import PenaltyService from './services/penaltyService.js';
 import { setWebSocketServer } from './controller/messageController.js';
 import { setWebSocketServer as setWarrantyJobWebSocket, initializeWarrantyExpiryJob } from './services/warrantyExpiryJob.js';
 import { initializePenaltyResetJob } from './services/penaltyResetJob.js';
+import { initCertificateExpiryJobs } from './services/certificateExpiryJob.js';
 import cors from 'cors';
 import { specs, swaggerUi } from './config/swagger.js';
 import MessageWebSocketServer from './services/MessageWebSocketServer.js';
@@ -245,6 +246,9 @@ initializeWarrantyExpiryJob();
 // Initialize penalty reset job (every 3 months)
 initializePenaltyResetJob();
 
+// Initialize certificate expiry checking job
+initCertificateExpiryJobs();
+
 // Initialize penalty violation types in database
 (async () => {
   try {
@@ -268,7 +272,8 @@ httpServer.listen(port, '0.0.0.0', () => {
   console.log(`📱 Ready for React Native connections`);
   console.log(`💬 WebSocket server initialized for real-time messaging`);
   console.log(`⏰ Warranty expiry cleanup job initialized`);
-  console.log(`🚫 No-show detection: Manual reporting only (via customer reports)`);
+  console.log(`� Certificate expiry checking job initialized`);
+  console.log(`�🚫 No-show detection: Manual reporting only (via customer reports)`);
   console.log(`🗄️ Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
 });
 

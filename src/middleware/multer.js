@@ -212,6 +212,34 @@ const uploadBackjobEvidence = multer({
     }
 });
 
+// Penalty evidence storage configuration - Use memory storage for Cloudinary
+const penaltyEvidenceStorage = multer.memoryStorage();
+
+// Penalty evidence file filter (images and videos)
+const penaltyEvidenceFilter = (req, file, cb) => {
+    // Allow images and videos for penalty evidence
+    const allowedTypes = [
+        'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+        'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 'video/webm'
+    ];
+    
+    if (allowedTypes.includes(file.mimetype)) {
+        cb(null, true);
+    } else {
+        cb(new Error('Only image and video files are allowed for penalty evidence!'), false);
+    }
+};
+
+// Multer upload configuration for penalty evidence
+const uploadPenaltyEvidence = multer({
+    storage: penaltyEvidenceStorage,
+    fileFilter: penaltyEvidenceFilter,
+    limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB limit for evidence files
+        files: 5 // Maximum 5 evidence files
+    }
+});
+
 // Use memory storage for Vercel compatibility (serverless environment)
 const upload = multer({ storage: multer.memoryStorage() }); // Changed from diskStorage to memoryStorage
 
@@ -222,5 +250,6 @@ export {
     processServiceImage, 
     uploadRatingPhoto,
     uploadMultipleServicePhotos,
-    uploadBackjobEvidence
+    uploadBackjobEvidence,
+    uploadPenaltyEvidence
 };

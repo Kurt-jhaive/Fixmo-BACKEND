@@ -656,7 +656,9 @@ export const resubmitCustomerVerification = async (req, res) => {
             valid_id: valid_id_url,
             verification_status: 'pending',
             verification_submitted_at: new Date(),
-            rejection_reason: null
+            rejection_reason: null,
+            verified_by_admin_id: null,  // Reset admin who verified
+            verification_reviewed_at: null  // Reset review timestamp
         };
 
         // Update profile photo if provided
@@ -729,7 +731,8 @@ export const resubmitProviderVerification = async (req, res) => {
             provider_last_name,
             provider_birthday,
             provider_location,
-            exact_location
+            exact_location,
+            provider_uli
         } = req.body;
 
         // Check if files are uploaded via multer
@@ -825,7 +828,9 @@ export const resubmitProviderVerification = async (req, res) => {
             provider_valid_id: valid_id_url,
             verification_status: 'pending',
             verification_submitted_at: new Date(),
-            rejection_reason: null
+            rejection_reason: null,
+            verified_by_admin_id: null,  // Reset admin who verified
+            verification_reviewed_at: null  // Reset review timestamp
         };
 
         // Update profile photo if provided
@@ -851,7 +856,11 @@ export const resubmitProviderVerification = async (req, res) => {
         }
 
         if (exact_location) {
-            updateData.exact_location = exact_location;
+            updateData.provider_exact_location = exact_location;  // Fixed: was 'exact_location', should be 'provider_exact_location'
+        }
+
+        if (provider_uli) {
+            updateData.provider_uli = provider_uli;
         }
 
         // Update provider details
