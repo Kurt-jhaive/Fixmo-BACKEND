@@ -29,7 +29,7 @@ class PenaltyService {
         violation_code: 'USER_NO_SHOW',
         violation_name: 'No-Show',
         violation_category: 'user',
-        penalty_points: 10,
+        penalty_points: 20,
         description: 'Failing to attend a booked service without cancellation',
         requires_evidence: false,
         auto_detect: true,
@@ -38,8 +38,8 @@ class PenaltyService {
         violation_code: 'USER_REPEATED_NO_SHOW',
         violation_name: 'Repeated No-Shows',
         violation_category: 'user',
-        penalty_points: 25,
-        description: 'Three or more no-shows within seven days',
+        penalty_points: 30,
+        description: 'Four or more no-shows within seven days',
         requires_evidence: false,
         auto_detect: true,
       },
@@ -112,7 +112,7 @@ class PenaltyService {
         violation_code: 'PROVIDER_CANCEL_BOOKING',
         violation_name: 'Booking Cancellation',
         violation_category: 'provider',
-        penalty_points: 15,
+        penalty_points: 5,
         description: 'Cancelling a confirmed booking',
         requires_evidence: false,
         auto_detect: true,
@@ -131,7 +131,7 @@ class PenaltyService {
         violation_name: 'Repeated No-Shows',
         violation_category: 'provider',
         penalty_points: 30,
-        description: 'Two or more no-shows within seven days',
+        description: 'Four or more no-shows within seven days',
         requires_evidence: false,
         auto_detect: true,
       },
@@ -769,30 +769,59 @@ class PenaltyService {
 
     // Check if appointment is marked as provider no-show
     if (appointment.appointment_status === 'provider_no_show') {
-      // Check for repeated no-shows
-      const repeated = await this.checkRepeatedViolations({
+      // Record single no-show penalty first
+      await this.recordViolation({
         providerId: appointment.provider_id,
         violationCode: 'PROVIDER_NO_SHOW',
-        days: 7,
+        appointmentId: appointment.appointment_id,
+        detectedBy: 'system',
       });
 
-      if (repeated.count >= 2) {
-        // Apply repeated no-show penalty
-        await this.recordViolation({
-          providerId: appointment.provider_id,
-          violationCode: 'PROVIDER_REPEATED_NO_SHOW',
-          appointmentId: appointment.appointment_id,
-          violationDetails: `Provider has ${repeated.count} no-shows in the past 7 days`,
-          detectedBy: 'system',
+      // Check for repeated no-shows (4 or more in 7 days)
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const recentNoShows = await prisma.penaltyViolation.count({
+        where: {
+          provider_id: appointment.provider_id,
+          violation_type: {
+            violation_code: 'PROVIDER_NO_SHOW',
+          },
+          created_at: {
+            gte: sevenDaysAgo,
+          },
+        },
+      });
+
+      console.log(`📊 Provider no-shows in last 7 days: ${recentNoShows}/4 for provider ${appointment.provider_id}`);
+
+      if (recentNoShows >= 4) {
+        // Check if repeated no-show violation already recorded
+        const existingRepeatedViolation = await prisma.penaltyViolation.findFirst({
+          where: {
+            provider_id: appointment.provider_id,
+            violation_type: {
+              violation_code: 'PROVIDER_REPEATED_NO_SHOW',
+            },
+            created_at: {
+              gte: sevenDaysAgo,
+            },
+          },
+          include: { violation_type: true },
         });
-      } else {
-        // Regular no-show penalty
-        await this.recordViolation({
-          providerId: appointment.provider_id,
-          violationCode: 'PROVIDER_NO_SHOW',
-          appointmentId: appointment.appointment_id,
-          detectedBy: 'system',
-        });
+
+        if (!existingRepeatedViolation) {
+          // Apply repeated no-show penalty (30 points)
+          await this.recordViolation({
+            providerId: appointment.provider_id,
+            violationCode: 'PROVIDER_REPEATED_NO_SHOW',
+            appointmentId: appointment.appointment_id,
+            violationDetails: `Provider has ${recentNoShows} no-shows in the past 7 days`,
+            detectedBy: 'system',
+          });
+
+          console.log(`⚠️ Provider ${appointment.provider_id} violated: ${recentNoShows} no-shows in 7 days - 30 points deducted`);
+        }
       }
 
       return true;
@@ -1001,7 +1030,7 @@ class PenaltyService {
   }
 
   /**
-   * Auto-detect repeated no-shows within 7 days (3 times = 25 points)
+   * Auto-detect repeated no-shows within 7 days (4 times = 30 points)
    */
   static async detectRepeatedNoShows(userId) {
     const sevenDaysAgo = new Date();
@@ -1020,7 +1049,9 @@ class PenaltyService {
       },
     });
 
-    if (recentNoShows >= 3) {
+    console.log(`📊 No-shows in last 7 days: ${recentNoShows}/4 for user ${userId}`);
+
+    if (recentNoShows >= 4) {
       // Check if repeated no-show violation already recorded
       const existingRepeatedViolation = await prisma.penaltyViolation.findFirst({
         where: {
@@ -1039,11 +1070,11 @@ class PenaltyService {
         await this.recordViolation({
           userId,
           violationCode: 'USER_REPEATED_NO_SHOW',
-          violationDetails: `Three no-shows within seven days`,
+          violationDetails: `Four no-shows within seven days`,
           detectedBy: 'system',
         });
 
-        console.log(`⚠️ User ${userId} violated: ${recentNoShows} no-shows in 7 days`);
+        console.log(`⚠️ User ${userId} violated: ${recentNoShows} no-shows in 7 days - 30 points deducted`);
         return true;
       }
     }
