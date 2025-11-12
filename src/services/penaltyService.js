@@ -118,6 +118,15 @@ class PenaltyService {
         auto_detect: true,
       },
       {
+        violation_code: 'PROVIDER_LATE_CANCEL',
+        violation_name: 'Late Cancellation',
+        violation_category: 'provider',
+        penalty_points: 10,
+        description: 'Cancelling an appointment less than 3 hours before the scheduled time',
+        requires_evidence: false,
+        auto_detect: true,
+      },
+      {
         violation_code: 'PROVIDER_NO_SHOW',
         violation_name: 'No-Show',
         violation_category: 'provider',
@@ -752,6 +761,65 @@ class PenaltyService {
       });
 
       return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Auto-detect provider late cancellation (< 3 hours before scheduled time)
+   */
+  static async detectProviderLateCancellation(appointmentId) {
+    const appointment = await prisma.appointment.findUnique({
+      where: { appointment_id: appointmentId },
+      include: {
+        serviceProvider: {
+          select: {
+            provider_id: true,
+            provider_first_name: true,
+            provider_last_name: true
+          }
+        }
+      }
+    });
+
+    if (!appointment) return null;
+
+    // Check if cancelled by provider
+    if (appointment.appointment_status === 'cancelled' && appointment.cancellation_reason) {
+      // Calculate hours until scheduled time
+      const hoursDifference =
+        (new Date(appointment.scheduled_date) - new Date()) / (1000 * 60 * 60);
+
+      console.log(`📊 Provider cancellation check: ${hoursDifference.toFixed(1)} hours before scheduled time`);
+
+      // If cancelled less than 3 hours before scheduled time
+      if (hoursDifference < 3 && hoursDifference > 0) {
+        // Record late cancellation violation (15 points)
+        await this.recordViolation({
+          providerId: appointment.provider_id,
+          violationCode: 'PROVIDER_LATE_CANCEL',
+          appointmentId: appointment.appointment_id,
+          violationDetails: `Appointment cancelled ${hoursDifference.toFixed(1)} hours before scheduled time (< 3 hours)`,
+          detectedBy: 'system',
+        });
+
+        console.log(`⚠️ Provider ${appointment.provider_id} penalized: Late cancellation (${hoursDifference.toFixed(1)} hours before) - 15 points deducted`);
+        return true;
+      }
+      // If cancelled with 3+ hours notice, just record regular cancellation (5 points)
+      else if (hoursDifference >= 3) {
+        await this.recordViolation({
+          providerId: appointment.provider_id,
+          violationCode: 'PROVIDER_CANCEL_BOOKING',
+          appointmentId: appointment.appointment_id,
+          violationDetails: `Appointment cancelled ${hoursDifference.toFixed(1)} hours before scheduled time`,
+          detectedBy: 'system',
+        });
+
+        console.log(`ℹ️ Provider ${appointment.provider_id} cancelled with notice (${hoursDifference.toFixed(1)} hours) - 5 points deducted`);
+        return true;
+      }
     }
 
     return false;
