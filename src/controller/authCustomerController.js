@@ -4409,13 +4409,14 @@ export const finishAppointmentCustomer = async (req, res) => {
             });
         }
 
-        // Allow finishing appointments that are 'scheduled' or 'in-progress'
-        // This helps when providers show up even if they lost internet connection
-        const allowedStatuses = ['scheduled', 'in-progress'];
+        // Allow finishing appointments that are 'scheduled', 'confirmed' or 'in-progress'
+        // User requested customers be able to mark finished when the schedule is confirmed.
+        // Accept common variants to be resilient to status naming differences.
+        const allowedStatuses = ['scheduled', 'confirmed', 'in-progress', 'on-the-way', 'on the way', 'On the Way'];
         if (!allowedStatuses.includes(appointment.appointment_status)) {
             return res.status(400).json({
                 success: false,
-                message: `Cannot finish appointment with status '${appointment.appointment_status}'. Only 'scheduled' or 'in-progress' appointments can be finished.`,
+                message: `Cannot finish appointment with status '${appointment.appointment_status}'. Only 'scheduled', 'confirmed' or 'in-progress' appointments can be finished.`,
                 currentStatus: appointment.appointment_status
             });
         }

@@ -11,6 +11,12 @@ router.get('/check/:providerId', AvailabilityController.checkTimeRangeAvailabili
 // GET /api/availability/provider/:providerId/booked-slots - Get booked slots for provider (public for customers)
 router.get('/provider/:providerId/booked-slots', AvailabilityController.getProviderBookedSlots);
 
+// GET /api/availability/provider/:providerId/weekly-schedule - Get provider's weekly schedule (for rebooking)
+router.get('/provider/:providerId/weekly-schedule', AvailabilityController.getProviderWeeklySchedule);
+
+// GET /api/availability/provider/:providerId/day/:dayOfWeek - Get available time slots for specific day (for rebooking)
+router.get('/provider/:providerId/day/:dayOfWeek', AvailabilityController.getAvailableTimeSlotsForDay);
+
 // Apply authentication middleware to all routes below
 router.use(requireAuth('provider'));
 

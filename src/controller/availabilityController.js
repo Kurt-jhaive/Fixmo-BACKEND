@@ -1251,6 +1251,305 @@ class AvailabilityController {
             });
         }
     }
+
+    // Get provider's weekly schedule with availability status
+    // Perfect for rebooking - shows all time slots for the week with booking status
+    static async getProviderWeeklySchedule(req, res) {
+        try {
+            const { providerId } = req.params;
+            const { startDate } = req.query; // Optional: specific week start date (YYYY-MM-DD)
+
+            console.log(`Getting weekly schedule for provider ${providerId}`);
+
+            // Validate provider exists
+            const provider = await prisma.serviceProviderDetails.findUnique({
+                where: { provider_id: parseInt(providerId) },
+                select: { 
+                    provider_id: true,
+                    provider_first_name: true,
+                    provider_last_name: true
+                }
+            });
+
+            if (!provider) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Provider not found'
+                });
+            }
+
+            // Calculate week range
+            const weekStart = startDate ? new Date(startDate) : new Date();
+            weekStart.setHours(0, 0, 0, 0);
+            
+            // If no startDate provided, start from today
+            // If startDate provided, use that as week start
+            
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekEnd.getDate() + 7);
+
+            // Get all availability slots for the provider
+            const availabilitySlots = await prisma.availability.findMany({
+                where: {
+                    provider_id: parseInt(providerId),
+                    availability_isActive: true, // Only show active day slots
+                    slot_isActive: true // Only show active time slots
+                },
+                include: {
+                    appointments: {
+                        where: {
+                            scheduled_date: {
+                                gte: weekStart,
+                                lt: weekEnd
+                            },
+                            appointment_status: {
+                                in: ['Pending', 'Confirmed', 'In Progress'] // Exclude cancelled/completed
+                            }
+                        },
+                        select: {
+                            appointment_id: true,
+                            scheduled_date: true,
+                            appointment_status: true,
+                            customer_id: true
+                        }
+                    }
+                },
+                orderBy: [
+                    { dayOfWeek: 'asc' },
+                    { startTime: 'asc' }
+                ]
+            });
+
+            // Define day order for sorting
+            const dayOrder = {
+                'Monday': 1,
+                'Tuesday': 2,
+                'Wednesday': 3,
+                'Thursday': 4,
+                'Friday': 5,
+                'Saturday': 6,
+                'Sunday': 7
+            };
+
+            // Group slots by day of week
+            const weeklySchedule = {};
+            const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            
+            // Initialize all days
+            days.forEach(day => {
+                weeklySchedule[day] = {
+                    dayOfWeek: day,
+                    isAvailable: false,
+                    timeSlots: [],
+                    totalSlots: 0,
+                    availableSlots: 0,
+                    bookedSlots: 0
+                };
+            });
+
+            // Populate with actual availability data
+            availabilitySlots.forEach(slot => {
+                const day = slot.dayOfWeek;
+                const hasBooking = slot.appointments.length > 0;
+
+                const timeSlotData = {
+                    availability_id: slot.availability_id,
+                    startTime: slot.startTime,
+                    endTime: slot.endTime,
+                    isBooked: hasBooking,
+                    isAvailable: !hasBooking,
+                    bookingInfo: hasBooking ? {
+                        appointment_id: slot.appointments[0].appointment_id,
+                        scheduled_date: slot.appointments[0].scheduled_date,
+                        status: slot.appointments[0].appointment_status
+                    } : null
+                };
+
+                if (weeklySchedule[day]) {
+                    weeklySchedule[day].isAvailable = true;
+                    weeklySchedule[day].timeSlots.push(timeSlotData);
+                    weeklySchedule[day].totalSlots++;
+                    
+                    if (hasBooking) {
+                        weeklySchedule[day].bookedSlots++;
+                    } else {
+                        weeklySchedule[day].availableSlots++;
+                    }
+                }
+            });
+
+            // Convert to array and sort by day order
+            const scheduleArray = Object.values(weeklySchedule).sort((a, b) => {
+                return dayOrder[a.dayOfWeek] - dayOrder[b.dayOfWeek];
+            });
+
+            // Calculate overall statistics
+            const totalSlots = availabilitySlots.length;
+            const bookedSlots = availabilitySlots.filter(slot => slot.appointments.length > 0).length;
+            const availableSlots = totalSlots - bookedSlots;
+            const activeDays = scheduleArray.filter(day => day.isAvailable).length;
+
+            res.json({
+                success: true,
+                data: {
+                    provider: {
+                        provider_id: provider.provider_id,
+                        name: `${provider.provider_first_name} ${provider.provider_last_name}`
+                    },
+                    weekRange: {
+                        startDate: weekStart.toISOString().split('T')[0],
+                        endDate: weekEnd.toISOString().split('T')[0]
+                    },
+                    summary: {
+                        totalSlots,
+                        availableSlots,
+                        bookedSlots,
+                        activeDays,
+                        availabilityRate: totalSlots > 0 ? ((availableSlots / totalSlots) * 100).toFixed(1) : 0
+                    },
+                    schedule: scheduleArray
+                }
+            });
+
+        } catch (error) {
+            console.error('Error getting provider weekly schedule:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error getting provider weekly schedule',
+                error: error.message
+            });
+        }
+    }
+
+    // Get available time slots for a specific day (for rebooking)
+    static async getAvailableTimeSlotsForDay(req, res) {
+        try {
+            const { providerId, dayOfWeek } = req.params;
+            const { date } = req.query; // Optional: specific date (YYYY-MM-DD)
+
+            console.log(`Getting available slots for provider ${providerId} on ${dayOfWeek}`);
+
+            // Validate day of week
+            const validDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            if (!validDays.includes(dayOfWeek)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid day of week. Must be one of: ' + validDays.join(', ')
+                });
+            }
+
+            // Build date range for checking bookings
+            let dateStart, dateEnd;
+            if (date) {
+                dateStart = new Date(date);
+                dateStart.setHours(0, 0, 0, 0);
+                dateEnd = new Date(date);
+                dateEnd.setHours(23, 59, 59, 999);
+            } else {
+                // If no date specified, check next 4 weeks
+                dateStart = new Date();
+                dateStart.setHours(0, 0, 0, 0);
+                dateEnd = new Date(dateStart);
+                dateEnd.setDate(dateEnd.getDate() + 28);
+            }
+
+            // Get all time slots for this day
+            const timeSlots = await prisma.availability.findMany({
+                where: {
+                    provider_id: parseInt(providerId),
+                    dayOfWeek: dayOfWeek,
+                    availability_isActive: true,
+                    slot_isActive: true
+                },
+                include: {
+                    appointments: date ? {
+                        where: {
+                            scheduled_date: {
+                                gte: dateStart,
+                                lte: dateEnd
+                            },
+                            appointment_status: {
+                                in: ['Pending', 'Confirmed', 'In Progress']
+                            }
+                        }
+                    } : {
+                        where: {
+                            appointment_status: {
+                                in: ['Pending', 'Confirmed', 'In Progress']
+                            }
+                        }
+                    }
+                },
+                orderBy: {
+                    startTime: 'asc'
+                }
+            });
+
+            if (timeSlots.length === 0) {
+                return res.json({
+                    success: true,
+                    message: `Provider has no available time slots on ${dayOfWeek}`,
+                    data: {
+                        dayOfWeek,
+                        date: date || 'Not specified',
+                        timeSlots: [],
+                        summary: {
+                            total: 0,
+                            available: 0,
+                            booked: 0
+                        }
+                    }
+                });
+            }
+
+            // Format time slots with availability status
+            const formattedSlots = timeSlots.map(slot => {
+                const isBooked = slot.appointments.length > 0;
+                
+                return {
+                    availability_id: slot.availability_id,
+                    startTime: slot.startTime,
+                    endTime: slot.endTime,
+                    timeRange: `${slot.startTime} - ${slot.endTime}`,
+                    isAvailable: !isBooked,
+                    isBooked: isBooked,
+                    status: isBooked ? 'Booked' : 'Available',
+                    bookingInfo: isBooked ? {
+                        appointment_id: slot.appointments[0].appointment_id,
+                        scheduled_date: slot.appointments[0].scheduled_date,
+                        status: slot.appointments[0].appointment_status
+                    } : null
+                };
+            });
+
+            const availableSlots = formattedSlots.filter(s => s.isAvailable);
+            const bookedSlots = formattedSlots.filter(s => s.isBooked);
+
+            res.json({
+                success: true,
+                data: {
+                    dayOfWeek,
+                    date: date || 'Any date within next 4 weeks',
+                    timeSlots: formattedSlots,
+                    availableTimeSlots: availableSlots, // Filtered list for convenience
+                    summary: {
+                        total: formattedSlots.length,
+                        available: availableSlots.length,
+                        booked: bookedSlots.length,
+                        availabilityRate: ((availableSlots.length / formattedSlots.length) * 100).toFixed(1)
+                    }
+                }
+            });
+
+        } catch (error) {
+            console.error('Error getting available time slots:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Error getting available time slots',
+                error: error.message
+            });
+        }
+    }
 }
 
 export default AvailabilityController;
