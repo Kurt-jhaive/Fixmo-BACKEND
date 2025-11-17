@@ -4235,11 +4235,13 @@ export const reportProviderNoShow = async (req, res) => {
             });
         }
 
-        // Check if appointment is still in "scheduled" status
-        if (appointment.appointment_status !== 'scheduled') {
+        // Check if appointment is in a reportable status (scheduled, confirmed, or on the way)
+        // Accept common variants to be resilient to status naming differences
+        const reportableStatuses = ['scheduled', 'confirmed', 'on-the-way', 'on the way', 'On the Way'];
+        if (!reportableStatuses.includes(appointment.appointment_status)) {
             return res.status(400).json({
                 success: false,
-                message: `Cannot report no-show. Appointment must be in "scheduled" status. Current status: ${appointment.appointment_status}`
+                message: `Cannot report no-show. Appointment must be in "scheduled", "confirmed", or "on the way" status. Current status: ${appointment.appointment_status}`
             });
         }
 
