@@ -679,7 +679,7 @@ export const registerCustomer = async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create new user
+    // Create new user with auto-approval (customers are automatically approved upon registration)
     const newUser = await prisma.user.create({
       data: {
         first_name,
@@ -692,7 +692,12 @@ export const registerCustomer = async (req, res) => {
         profile_photo: profilePhotoUrl,
         valid_id: validIdUrl,
         user_location: user_location || null,
-        exact_location: exact_location || null
+        exact_location: exact_location || null,
+        is_activated: true,
+        verification_status: 'approved',
+        is_verified: true,
+        verification_submitted_at: new Date(),
+        verification_reviewed_at: new Date()
       }
     });
 
@@ -1464,6 +1469,11 @@ export const getServiceListingDetails = async (req, res) => {
         const serviceListing = await prisma.serviceListing.findUnique({
             where: { service_id: parseInt(service_id) },
             include: {
+                service_photos: {
+                    orderBy: {
+                        uploadedAt: 'desc'
+                    }
+                },
                 serviceProvider: {
                     include: {
                         provider_availability: {
