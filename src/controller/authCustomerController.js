@@ -679,7 +679,7 @@ export const registerCustomer = async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create new user
+    // Create new user with auto-approval (customers are automatically approved upon registration)
     const newUser = await prisma.user.create({
       data: {
         first_name,
@@ -692,7 +692,12 @@ export const registerCustomer = async (req, res) => {
         profile_photo: profilePhotoUrl,
         valid_id: validIdUrl,
         user_location: user_location || null,
-        exact_location: exact_location || null
+        exact_location: exact_location || null,
+        is_activated: true,
+        verification_status: 'approved',
+        is_verified: true,
+        verification_submitted_at: new Date(),
+        verification_reviewed_at: new Date()
       }
     });
 
@@ -1464,6 +1469,11 @@ export const getServiceListingDetails = async (req, res) => {
         const serviceListing = await prisma.serviceListing.findUnique({
             where: { service_id: parseInt(service_id) },
             include: {
+                service_photos: {
+                    orderBy: {
+                        uploadedAt: 'desc'
+                    }
+                },
                 serviceProvider: {
                     include: {
                         provider_availability: {
@@ -4235,11 +4245,13 @@ export const reportProviderNoShow = async (req, res) => {
             });
         }
 
-        // Check if appointment is still in "scheduled" status
-        if (appointment.appointment_status !== 'scheduled') {
+        // Check if appointment is in a reportable status (scheduled, confirmed, or on the way)
+        // Accept common variants to be resilient to status naming differences
+        const reportableStatuses = ['scheduled', 'confirmed', 'on-the-way', 'on the way', 'On the Way'];
+        if (!reportableStatuses.includes(appointment.appointment_status)) {
             return res.status(400).json({
                 success: false,
-                message: `Cannot report no-show. Appointment must be in "scheduled" status. Current status: ${appointment.appointment_status}`
+                message: `Cannot report no-show. Appointment must be in "scheduled", "confirmed", or "on the way" status. Current status: ${appointment.appointment_status}`
             });
         }
 
@@ -4409,13 +4421,14 @@ export const finishAppointmentCustomer = async (req, res) => {
             });
         }
 
-        // Allow finishing appointments that are 'scheduled' or 'in-progress'
-        // This helps when providers show up even if they lost internet connection
-        const allowedStatuses = ['scheduled', 'in-progress'];
+        // Allow finishing appointments that are 'scheduled', 'confirmed' or 'in-progress'
+        // User requested customers be able to mark finished when the schedule is confirmed.
+        // Accept common variants to be resilient to status naming differences.
+        const allowedStatuses = ['scheduled', 'confirmed', 'in-progress', 'on-the-way', 'on the way', 'On the Way'];
         if (!allowedStatuses.includes(appointment.appointment_status)) {
             return res.status(400).json({
                 success: false,
-                message: `Cannot finish appointment with status '${appointment.appointment_status}'. Only 'scheduled' or 'in-progress' appointments can be finished.`,
+                message: `Cannot finish appointment with status '${appointment.appointment_status}'. Only 'scheduled', 'confirmed' or 'in-progress' appointments can be finished.`,
                 currentStatus: appointment.appointment_status
             });
         }
