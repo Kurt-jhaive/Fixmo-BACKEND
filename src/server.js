@@ -21,6 +21,7 @@ import notificationRoutes from './route/notificationRoutes.js';
 import reportRoutes from './route/reportRoutes.js';
 import exportRoutes from './route/exportRoutes.js';
 import penaltyRoutes from './route/penaltyRoutes.js';
+import diditRoutes from './route/diditRoutes.js';
 import PenaltyService from './services/penaltyService.js';
 import { setWebSocketServer } from './controller/messageController.js';
 import { setWebSocketServer as setWarrantyJobWebSocket, initializeWarrantyExpiryJob } from './services/warrantyExpiryJob.js';
@@ -42,6 +43,14 @@ const __dirname = dirname(__filename);
 app.use(express.static(path.join(__dirname, 'public'))); // Serve static files from the 'public' directory
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads'))); // Serve uploaded files
 
+// Raw body parsing for Didit webhook (must be before express.json())
+app.use('/api/didit/webhook', express.json({
+  verify: (req, res, buf, encoding) => {
+    if (buf && buf.length) {
+      req.rawBody = buf.toString(encoding || 'utf8');
+    }
+  }
+}));
 
 // Middleware to parse JSON and URL-encoded data
 app.use(express.json());
@@ -201,6 +210,7 @@ app.use('/api/notifications', notificationRoutes); // Push notification manageme
 app.use('/api/reports', reportRoutes); // Report submission and management routes
 app.use('/api/admin/export', exportRoutes); // Admin export routes (CSV/PDF)
 app.use('/api/penalty', penaltyRoutes); // Penalty system routes
+app.use('/api/didit', diditRoutes); // Didit identity verification routes (customers only)
 app.use('/api/test', testRoutes); // Test routes for Cloudinary and other features
 
 // 404 handler for undefined routes (without wildcard)
@@ -219,6 +229,7 @@ app.use((req, res) => {
       '/api/ratings/*',
       '/api/messages/*',
       '/api/notifications/*',
+      '/api/didit/*',
       '/uploads/*'
     ]
   });
@@ -272,8 +283,9 @@ httpServer.listen(port, '0.0.0.0', () => {
   console.log(`📱 Ready for React Native connections`);
   console.log(`💬 WebSocket server initialized for real-time messaging`);
   console.log(`⏰ Warranty expiry cleanup job initialized`);
-  console.log(`� Certificate expiry checking job initialized`);
-  console.log(`�🚫 No-show detection: Manual reporting only (via customer reports)`);
+  console.log(`📋 Certificate expiry checking job initialized`);
+  console.log(`🚫 No-show detection: Manual reporting only (via customer reports)`);
+  console.log(`🆔 Didit KYC: ${process.env.DIDIT_WORKFLOW_ID ? 'Configured' : 'Not configured (set DIDIT_WORKFLOW_ID)'}`);
   console.log(`🗄️ Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
 });
 

@@ -421,3 +421,27 @@ model PenaltyAdjustment {
   @@index([adjustment_type])
   @@index([created_at])
 }
+
+// Didit KYC Verification Tracking - Prevents duplicate document usage
+model DiditVerification {
+  id                    Int      @id @default(autoincrement())
+  session_id            String   @unique // Didit session ID
+  email                 String   // Email used for verification
+  document_number       String?  // Extracted document number (ID number)
+  document_type         String?  // e.g., "Identity Card", "Passport"
+  first_name            String?  // Name from document
+  last_name             String?  // Name from document
+  date_of_birth         String?  // DOB from document
+  document_country      String?  // Country of document
+  status                String   @default("pending") // pending, approved, declined
+  user_id               Int?     // Linked user_id after registration
+  provider_id           Int?     // Linked provider_id after registration
+  verified_at           DateTime? // When verification was completed
+  created_at            DateTime @default(now())
+  
+  @@index([email])
+  @@index([document_number])
+  @@index([status])
+  @@index([user_id])
+  @@index([provider_id])
+}
